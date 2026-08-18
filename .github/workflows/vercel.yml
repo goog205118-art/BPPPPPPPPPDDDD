@@ -1,0 +1,38 @@
+name: Deploy to Vercel
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download source
+        uses: actions/checkout@v4
+
+      - name: Prepare Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install packages
+        run: npm ci
+
+      - name: Build Vercel deployment
+        run: npx vercel pull --yes --environment=production --token="${{ secrets.VERCEL_TOKEN }}" && npx vercel build --prod --token="${{ secrets.VERCEL_TOKEN }}"
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+      - name: Publish production deployment
+        run: npx vercel deploy --prebuilt --prod --token="${{ secrets.VERCEL_TOKEN }}"
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}

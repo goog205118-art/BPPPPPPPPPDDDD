@@ -1,0 +1,203 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>开发资源库</title>
+    <link rel="icon" href="data:," />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body class="access-locked">
+    <section class="access-gate hidden" id="accessGate" aria-labelledby="accessGateTitle">
+      <form class="access-card" id="accessForm">
+        <h1 id="accessGateTitle">开发资源库</h1>
+        <p>请输入访问密码</p>
+        <label for="accessPassword">访问密码</label>
+        <input id="accessPassword" type="password" autocomplete="current-password" required />
+        <button class="primary" type="submit">进入工作台</button>
+        <p class="access-status" id="accessStatus"></p>
+      </form>
+    </section>
+    <div class="app-shell">
+      <header class="topbar">
+        <h1>开发资源库</h1>
+        <div class="topbar-actions">
+          <button class="ghost" id="refreshBtn">刷新</button>
+          <button class="ghost" id="exportStateBtn">导出 JSON</button>
+          <label class="ghost file-btn">
+            导入 JSON
+            <input id="importStateInput" type="file" accept=".json,application/json" hidden />
+          </label>
+          <button class="ghost" id="settingsBtn">设置</button>
+        </div>
+      </header>
+
+      <nav class="tabs" id="tabs"></nav>
+
+      <section class="summary" id="summary"></section>
+
+      <section class="settings-page panel hidden" id="settingsPage">
+        <div class="settings-head">
+          <div>
+            <h2>AI 参数设置</h2>
+            <p class="panel-hint">为完整补全和待开发快录分别配置 AI 服务。支持 Gemini 和 OpenAI 兼容接口。</p>
+          </div>
+          <button type="button" id="aiSettingsReloadBtn" class="ghost">重新读取</button>
+        </div>
+        <form id="aiSettingsForm" class="settings-form">
+          <section class="ai-profile">
+            <div class="ai-profile-head">
+              <h3>达人库链接补全</h3>
+              <p>用于补充完整达人资料，Gemini 可尝试调用搜索能力。</p>
+            </div>
+            <div class="settings-fields">
+              <div class="field">
+                <label for="aiProtocol">接入协议</label>
+                <select id="aiProtocol" name="creator.protocol">
+                  <option value="gemini">Gemini</option>
+                  <option value="openai">OpenAI 兼容</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="aiKeySource">Key 来源</label>
+                <select id="aiKeySource" name="creator.keySource">
+                  <option value="local">本地设置</option>
+                  <option value="environment">环境变量</option>
+                </select>
+              </div>
+              <div class="field field-wide">
+                <label for="aiApiBaseUrl">API 地址</label>
+                <input id="aiApiBaseUrl" name="creator.apiBaseUrl" type="url" placeholder="Gemini 基础地址，或 OpenAI 兼容基础地址 / chat/completions 地址" />
+              </div>
+              <div class="field">
+                <label for="aiApiKey">API Key</label>
+                <input id="aiApiKey" name="creator.apiKey" type="password" autocomplete="new-password" placeholder="已保存时可留空不改" />
+              </div>
+              <div class="field">
+                <label for="aiModel">模型名</label>
+                <input id="aiModel" name="creator.model" type="text" placeholder="gemini-2.5-flash" />
+              </div>
+              <div class="field field-wide proxy-setting">
+                <label for="aiProxyUrl">自定义代理地址（留空自动识别）</label>
+                <input id="aiProxyUrl" name="creator.proxyUrl" type="url" placeholder="默认自动读取 Windows / FlClash；仅特殊网络时填写" />
+              </div>
+            </div>
+          </section>
+          <section class="ai-profile">
+            <div class="ai-profile-head">
+              <h3>待开发达人快速录入</h3>
+              <p>输入链接后自动整理必要字段。可单独接入更快、更经济的模型。</p>
+            </div>
+            <div class="settings-fields">
+              <div class="field">
+                <label for="leadAiProtocol">接入协议</label>
+                <select id="leadAiProtocol" name="lead.protocol">
+                  <option value="gemini">Gemini</option>
+                  <option value="openai">OpenAI 兼容</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="leadAiKeySource">Key 来源</label>
+                <select id="leadAiKeySource" name="lead.keySource">
+                  <option value="local">本地设置</option>
+                  <option value="environment">环境变量</option>
+                </select>
+              </div>
+              <div class="field field-wide">
+                <label for="leadAiApiBaseUrl">API 地址</label>
+                <input id="leadAiApiBaseUrl" name="lead.apiBaseUrl" type="url" placeholder="Gemini 基础地址，或 OpenAI 兼容基础地址 / chat/completions 地址" />
+              </div>
+              <div class="field">
+                <label for="leadAiApiKey">API Key</label>
+                <input id="leadAiApiKey" name="lead.apiKey" type="password" autocomplete="new-password" placeholder="已保存时可留空不改" />
+              </div>
+              <div class="field">
+                <label for="leadAiModel">模型名</label>
+                <input id="leadAiModel" name="lead.model" type="text" placeholder="填写快速模型名" />
+              </div>
+              <div class="field field-wide proxy-setting">
+                <label for="leadAiProxyUrl">自定义代理地址（留空自动识别）</label>
+                <input id="leadAiProxyUrl" name="lead.proxyUrl" type="url" placeholder="默认自动读取 Windows / FlClash；仅特殊网络时填写" />
+              </div>
+            </div>
+          </section>
+          <div class="settings-actions">
+            <button type="submit" class="primary">保存设置</button>
+            <button type="button" id="aiSettingsStatusBtn" class="ghost">检测网络</button>
+          </div>
+          <p class="settings-status" id="aiSettingsStatus"></p>
+        </form>
+      </section>
+
+      <section class="matching-page panel hidden" id="matchingPage">
+        <div class="matching-head">
+          <div>
+            <h2>本周资源匹配</h2>
+            <p class="panel-hint">按目标条件筛选并排序资源，保存本周待联系清单和执行结果。</p>
+          </div>
+          <p class="matching-status" id="matchingStatus"></p>
+        </div>
+        <div class="matching-grid">
+          <section class="matching-task">
+            <h3 id="matchFormTitle">新建本周匹配</h3>
+            <form id="matchForm" class="form"></form>
+            <div class="form-actions">
+              <button type="submit" form="matchForm" class="primary">保存并生成推荐</button>
+              <button type="button" id="resetMatchBtn" class="ghost">新建任务</button>
+            </div>
+          </section>
+          <section class="matching-results" id="matchingResults"></section>
+        </div>
+        <section class="matching-history" id="matchingHistory"></section>
+      </section>
+
+      <main class="workspace">
+        <aside class="panel">
+          <h2 id="formTitle">新增记录</h2>
+          <p class="panel-hint" id="formHint"></p>
+          <form id="recordForm" class="form"></form>
+          <div class="form-actions">
+            <button type="submit" form="recordForm" class="primary">保存</button>
+            <button type="button" id="resetFormBtn" class="ghost">清空</button>
+          </div>
+          <section class="assistant">
+            <h3>智能建议</h3>
+            <p id="assistantText">保存后会根据规则自动补充标签和分级建议，后续可切换为 AI 接口。</p>
+            <div class="assistant-actions">
+              <button type="button" id="applyAssistantBtn" class="ghost">应用建议</button>
+            </div>
+          </section>
+        </aside>
+
+        <section class="panel list-panel">
+          <div class="list-toolbar">
+            <div class="search-group">
+              <input id="searchInput" type="search" placeholder="搜索名称、标签、国家、备注..." />
+              <select id="filterA"></select>
+              <select id="filterB"></select>
+            </div>
+            <div class="toolbar-actions">
+              <label class="ghost file-btn">
+                导入表格
+                <input id="importTableInput" type="file" accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden />
+              </label>
+              <button id="exportCsvBtn" class="ghost">导出 CSV</button>
+            </div>
+          </div>
+          <p class="import-status" id="importStatus"></p>
+          <section class="import-preview hidden" id="importPreview"></section>
+          <section class="import-history" id="importHistory"></section>
+          <section class="duplicate-panel" id="duplicatePanel"></section>
+          <div class="table-wrap">
+            <table>
+              <thead id="tableHead"></thead>
+              <tbody id="tableBody"></tbody>
+            </table>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <script type="module" src="./app.js"></script>
+  </body>
+</html>
