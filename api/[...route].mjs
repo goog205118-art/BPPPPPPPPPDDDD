@@ -1,6 +1,6 @@
-const { timingSafeEqual } = require("crypto");
-const { list, put } = require("@vercel/blob");
-const ExcelJS = require("exceljs");
+import { timingSafeEqual } from "node:crypto";
+import { list, put } from "@vercel/blob";
+import ExcelJS from "exceljs";
 
 const STATE_BLOB = "resource-workbench/state.json";
 const SETTINGS_BLOB = "resource-workbench/private-ai-settings.json";
@@ -600,7 +600,7 @@ async function parseExcel(contentBase64) {
   return rows;
 }
 
-module.exports = async (req, res) => {
+export default async function handler(req, res) {
   if (!requireAccess(req, res)) return;
   const pathname = new URL(req.url || "/", "http://localhost").pathname;
 
@@ -653,9 +653,9 @@ module.exports = async (req, res) => {
   } catch (error) {
     json(res, 400, { ok: false, error: formatError(error) });
   }
-};
+}
 
-module.exports.config = {
+export const config = {
   api: {
     bodyParser: false,
   },

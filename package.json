@@ -10,7 +10,7 @@
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
-    "check": "node --check server.js && node --check \"api/[...route].js\" && node --check app/app.js"
+    "check": "node --check server.js && node --check \"api/[...route].mjs\" && node --check app/app.js"
   },
   "dependencies": {
     "@vercel/blob": "^2.8.0",
