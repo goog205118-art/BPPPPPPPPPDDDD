@@ -1,11 +1,11 @@
 import { timingSafeEqual } from "node:crypto";
-import { list, put } from "@vercel/blob";
-import ExcelJS from "exceljs";
 
 const STATE_BLOB = "resource-workbench/state.json";
 const SETTINGS_BLOB = "resource-workbench/private-ai-settings.json";
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 const AI_REQUEST_TIMEOUT_MS = Number(process.env.AI_REQUEST_TIMEOUT_MS || 60000);
+let blobClientPromise;
+let excelJsPromise;
 
 const defaultState = {
   meta: { version: 1, updatedAt: new Date().toISOString() },
@@ -114,7 +114,10 @@ function normalizeBusinessState(rawState) {
 }
 
 function json(res, statusCode, payload) {
-  res.status(statusCode).setHeader("Content-Type", "application/json; charset=utf-8").send(JSON.stringify(payload, null, 2));
+  if (res.writableEnded) return;
+  res.statusCode = statusCode;
+  res.setHeader("Content-Type", "application/json; charset=utf-8");
+  res.end(JSON.stringify(payload, null, 2));
 }
 
 function constantTimeMatches(expected, supplied) {
@@ -142,8 +145,20 @@ function requireBlobToken() {
   }
 }
 
+async function getBlobClient() {
+  if (!blobClientPromise) blobClientPromise = import("@vercel/blob");
+  return blobClientPromise;
+}
+
+async function getExcelJs() {
+  if (!excelJsPromise) excelJsPromise = import("exceljs");
+  const module = await excelJsPromise;
+  return module.default || module;
+}
+
 async function findBlob(pathname) {
   requireBlobToken();
+  const { list } = await getBlobClient();
   const result = await list({ prefix: pathname, limit: 100 });
   return result.blobs.find((item) => item.pathname === pathname) || null;
 }
@@ -162,6 +177,7 @@ async function readBlobJson(pathname, fallback) {
 
 async function writeBlobJson(pathname, data) {
   requireBlobToken();
+  const { put } = await getBlobClient();
   await put(pathname, JSON.stringify(data, null, 2), {
     access: "private",
     addRandomSuffix: false,
@@ -548,7 +564,7 @@ function readBody(req) {
         req.destroy();
         return;
       }
-      chunks.push(chunk);
+      chunks.push(Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk));
     });
     req.on("end", () => resolve(Buffer.concat(chunks).toString("utf8")));
     req.on("error", reject);
@@ -574,6 +590,7 @@ function excelCellText(cell) {
 }
 
 async function parseExcel(contentBase64) {
+  const ExcelJS = await getExcelJs();
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(Buffer.from(contentBase64, "base64"));
   const rows = [];
@@ -651,6 +668,7 @@ export default async function handler(req, res) {
 
     json(res, 404, { ok: false, error: "接口不存在。" });
   } catch (error) {
+    console.error("Resource Workbench API error:", error);
     json(res, 400, { ok: false, error: formatError(error) });
   }
 }
