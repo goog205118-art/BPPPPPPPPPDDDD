@@ -12,6 +12,7 @@ const defaultState = {
   creators: [],
   resources: [],
   leads: [],
+  products: [],
   cooperations: [],
   matches: [],
   importHistory: [],
@@ -30,6 +31,7 @@ const defaultAiSettings = {
   profiles: {
     creator: { ...defaultAiProfile },
     lead: { ...defaultAiProfile },
+    outreach: { ...defaultAiProfile },
   },
 };
 
@@ -77,6 +79,7 @@ function normalizeBusinessState(rawState) {
   const creators = Array.isArray(state.creators) ? state.creators.map((row) => ({ ...row, country: normalizeCountry(row.country) })) : [];
   const resources = Array.isArray(state.resources) ? state.resources.map((row) => ({ ...row, country: normalizeCountry(row.country) })) : [];
   const leads = Array.isArray(state.leads) ? state.leads.map((row) => ({ ...row, country: normalizeCountry(row.country) })) : [];
+  const products = Array.isArray(state.products) ? state.products.map((row) => ({ ...row, country: normalizeCountry(row.country) })) : [];
   const creatorByName = new Map(creators.map((row) => [String(row.name || "").trim(), row]));
   const resourceByName = new Map(resources.map((row) => [String(row.name || "").trim(), row]));
   const cooperations = Array.isArray(state.cooperations)
@@ -107,6 +110,7 @@ function normalizeBusinessState(rawState) {
     creators,
     resources,
     leads,
+    products,
     cooperations,
     matches,
     importHistory: Array.isArray(state.importHistory) ? state.importHistory : [],
@@ -238,6 +242,7 @@ function normalizeAiSettings(raw = {}, existing = {}) {
     profiles: {
       creator: normalizeAiProfile(rawProfiles.creator || legacyRaw, existingProfiles.creator || legacyExisting),
       lead: normalizeAiProfile(rawProfiles.lead || {}, existingProfiles.lead || existingProfiles.creator || legacyExisting),
+      outreach: normalizeAiProfile(rawProfiles.outreach || {}, existingProfiles.outreach || existingProfiles.lead || existingProfiles.creator || legacyExisting),
     },
   };
 }
@@ -249,7 +254,7 @@ async function loadAiSettings() {
 async function saveAiSettings(input) {
   const existing = await loadAiSettings();
   const next = normalizeAiSettings(input, existing);
-  for (const key of ["creator", "lead"]) {
+  for (const key of ["creator", "lead", "outreach"]) {
     const profile = next.profiles[key];
     const previous = existing.profiles[key] || {};
     if (!profile.apiKey || profile.apiKey === "********") profile.apiKey = previous.apiKey || "";
@@ -260,7 +265,11 @@ async function saveAiSettings(input) {
 
 function environmentKeyFor(profileKey) {
   return (
-    (profileKey === "lead" ? process.env.RESOURCE_WORKBENCH_LEAD_AI_KEY || process.env.LEAD_AI_API_KEY : process.env.RESOURCE_WORKBENCH_CREATOR_AI_KEY || process.env.CREATOR_AI_API_KEY) ||
+    (profileKey === "lead"
+      ? process.env.RESOURCE_WORKBENCH_LEAD_AI_KEY || process.env.LEAD_AI_API_KEY
+      : profileKey === "outreach"
+        ? process.env.RESOURCE_WORKBENCH_OUTREACH_AI_KEY || process.env.OUTREACH_AI_API_KEY
+        : process.env.RESOURCE_WORKBENCH_CREATOR_AI_KEY || process.env.CREATOR_AI_API_KEY) ||
     process.env.GEMINI_API_KEY ||
     process.env.GOOGLE_API_KEY ||
     process.env.OPENAI_API_KEY ||
@@ -269,7 +278,7 @@ function environmentKeyFor(profileKey) {
 }
 
 function resolveAiSettings(saved, purpose = "creator") {
-  const profileKey = purpose === "lead" ? "lead" : "creator";
+  const profileKey = ["creator", "lead", "outreach"].includes(purpose) ? purpose : "creator";
   const profile = saved.profiles[profileKey] || saved.profiles.creator || defaultAiProfile;
   const environmentKey = environmentKeyFor(profileKey);
   return {
@@ -298,6 +307,7 @@ async function publicAiSettings() {
     profiles: {
       creator: publicAiProfile(resolveAiSettings(saved, "creator"), saved.profiles.creator || {}),
       lead: publicAiProfile(resolveAiSettings(saved, "lead"), saved.profiles.lead || {}),
+      outreach: publicAiProfile(resolveAiSettings(saved, "outreach"), saved.profiles.outreach || {}),
     },
   };
 }
@@ -314,7 +324,7 @@ async function publicAiStatus() {
       network: { mode: "cloud", source: "Vercel 云端直连", automatic: true },
     };
   };
-  return { creator: build("creator"), lead: build("lead") };
+  return { creator: build("creator"), lead: build("lead"), outreach: build("outreach") };
 }
 
 function withQueryParam(targetUrl, key, value) {
@@ -680,6 +690,211 @@ async function enrichCreatorWithAi(sourceUrl, current, purpose = "creator") {
   return mergeEnrichmentResults(primary, sanitizeCreatorEnrich(parseGeminiJson(recoveryResponse.body), sourceUrl, purpose));
 }
 
+function outreachLeadPayload(lead) {
+  return {
+    id: String(lead?.id || "").trim(),
+    name: String(lead?.name || "").trim(),
+    social_url: String(lead?.social_url || "").trim(),
+    platform: String(lead?.platform || "").trim(),
+    country: String(lead?.country || "").trim(),
+    niche: String(lead?.niche || "").trim(),
+    followers: lead?.followers ?? "",
+    avg_views: lead?.avg_views ?? "",
+    engagement: lead?.engagement ?? "",
+    email: String(lead?.email || "").trim(),
+    notes: String(lead?.notes || "").trim(),
+  };
+}
+
+function outreachProductPayload(product) {
+  return {
+    id: String(product?.id || "").trim(),
+    name: String(product?.name || "").trim(),
+    brand: String(product?.brand || "").trim(),
+    country: String(product?.country || "").trim(),
+    category: String(product?.category || "").trim(),
+    store: String(product?.store || "").trim(),
+    product_url: String(product?.product_url || "").trim(),
+    description: String(product?.description || "").trim(),
+    tags: String(product?.tags || "").trim(),
+  };
+}
+
+function buildOutreachPrompt(leads, products, rules) {
+  return `你是跨境品牌的达人合作开发专家。请只基于输入中给出的达人资料、产品资料和本次规则，为每位达人写一封自然、不模板化的英文开发邮件。
+
+达人资料：
+${JSON.stringify(leads.map(outreachLeadPayload), null, 2)}
+
+本次可推荐产品：
+${JSON.stringify(products.map(outreachProductPayload), null, 2)}
+
+本次规则：
+${JSON.stringify(rules || {}, null, 2)}
+
+请只返回有效 JSON，不要 Markdown，不要说明文字：
+{
+  "drafts": [
+    {
+      "lead_id": "",
+      "subject": "",
+      "body": "",
+      "recommended_cooperation": "",
+      "reason": ""
+    }
+  ],
+  "warnings": []
+}
+
+硬性规则：
+1. 每位输入达人必须只生成一份草稿，lead_id 必须与输入完全一致。正文使用英文；不要写假签名、虚构公司地址、具体报价或未经提供的折扣。
+2. 只能使用输入中提供的信息。不得声称看过某条视频、知道某个具体痛点、确认达人所在地、使用过竞品，除非输入资料明确写出。资料不足时，使用轻量且诚实的开场，例如欣赏其内容领域，而不是杜撰观看细节。
+3. 只能提及本次提供的产品；若产品卖点为空，不要发明材料、功能、兼容型号或性能。产品名称和链接仅在规则允许时使用。
+4. 合作方式要综合 followers、avg_views、engagement 判断：长尾或数据较小优先产品置换或置换 + CPS；中量级可建议置换 + CPS / 小预算可谈；头部或高播放可建议付费合作或先询价；数据不足时建议先询问合作偏好。必须尊重本次用户勾选的合作方式；不要承诺价格。
+5. 若规则中不提及合作方式，则不要在正文写明合作模式，但仍填写 recommended_cooperation 供内部参考。若不附产品链接，则正文不要出现 URL。
+6. 邮件控制在 110-180 英文词，语气遵循用户选择；不同达人使用不同的开场和产品匹配角度，避免完全相同的话术。
+7. email 字段只是寄送地址提示，不可写入邮件正文，也不可声称其来源。`;
+}
+
+function sanitizeOutreachDrafts(raw, leads) {
+  const allowedIds = new Set(leads.map((lead) => String(lead.id || "").trim()).filter(Boolean));
+  const draftsById = new Map();
+  for (const draft of Array.isArray(raw?.drafts) ? raw.drafts : []) {
+    const leadId = String(draft?.lead_id || "").trim();
+    if (!allowedIds.has(leadId) || draftsById.has(leadId)) continue;
+    const subject = String(draft?.subject || "").trim().slice(0, 220);
+    const body = String(draft?.body || "").trim().slice(0, 5000);
+    if (!subject || !body) continue;
+    draftsById.set(leadId, {
+      lead_id: leadId,
+      subject,
+      body,
+      recommended_cooperation: String(draft?.recommended_cooperation || "请人工确认合作方式").trim().slice(0, 180),
+      reason: String(draft?.reason || "").trim().slice(0, 360),
+    });
+  }
+  return {
+    ok: true,
+    drafts: leads.map((lead) => draftsById.get(String(lead.id || "").trim())).filter(Boolean),
+    warnings: Array.isArray(raw?.warnings) ? raw.warnings.map((item) => String(item).trim()).filter(Boolean).slice(0, 8) : [],
+  };
+}
+
+async function generateOutreachWithAi(leads, products, rules) {
+  if (!Array.isArray(leads) || !leads.length) throw new Error("请至少选择一位待开发达人。");
+  if (!Array.isArray(products) || !products.length) throw new Error("请至少选择一个产品。");
+  const saved = await loadAiSettings();
+  const settings = resolveAiSettings(saved, "outreach");
+  if (!settings.apiKey) throw new Error("未配置开发邮件 AI API Key。请先在设置页填写“达人开发邮件”参数。");
+  const prompt = buildOutreachPrompt(leads, products, rules);
+
+  if (settings.protocol === "openai") {
+    const response = await postJson(
+      buildOpenAiEndpoint(settings),
+      {
+        model: settings.model,
+        messages: [
+          { role: "system", content: "You write concise creator outreach emails. Return valid JSON only." },
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.72,
+        response_format: { type: "json_object" },
+      },
+      { Authorization: `Bearer ${settings.apiKey}` },
+    );
+    if (response.statusCode >= 400) throw new Error(response.body?.error?.message || response.body?.raw || `OpenAI 兼容接口请求失败：HTTP ${response.statusCode}`);
+    return sanitizeOutreachDrafts(parseOpenAiJson(response.body), leads);
+  }
+
+  const response = await postJson(buildGeminiEndpoint(settings), {
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
+    generationConfig: { temperature: 0.72, responseMimeType: "application/json" },
+  });
+  if (response.statusCode >= 400) throw new Error(response.body?.error?.message || response.body?.raw || `Gemini API 请求失败：HTTP ${response.statusCode}`);
+  return sanitizeOutreachDrafts(parseGeminiJson(response.body), leads);
+}
+
+function isSafePublicUrl(value) {
+  let parsed;
+  try {
+    parsed = new URL(String(value || "").trim());
+  } catch {
+    return false;
+  }
+  if (!["http:", "https:"].includes(parsed.protocol) || parsed.username || parsed.password) return false;
+  const host = parsed.hostname.toLowerCase();
+  if (host === "localhost" || host.endsWith(".localhost") || host === "::1") return false;
+  if (/^(127\.|0\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(host)) return false;
+  if (/^(fc|fd|fe8|fe9|fea|feb)/i.test(host)) return false;
+  return true;
+}
+
+function decodeHtml(value) {
+  return String(value || "")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
+}
+
+function extractHtmlMeta(html, attribute, key) {
+  const escapedKey = String(key).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const pattern = new RegExp(`<meta[^>]*${attribute}\\s*=\\s*["']${escapedKey}["'][^>]*content\\s*=\\s*["']([^"']+)["'][^>]*>|<meta[^>]*content\\s*=\\s*["']([^"']+)["'][^>]*${attribute}\\s*=\\s*["']${escapedKey}["'][^>]*>`, "i");
+  const match = String(html || "").match(pattern);
+  return decodeHtml(match?.[1] || match?.[2] || "").trim();
+}
+
+async function fetchProductPage(targetUrl) {
+  let currentUrl = targetUrl;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 10000);
+  try {
+    for (let hop = 0; hop < 5; hop += 1) {
+      if (!isSafePublicUrl(currentUrl)) throw new Error(hop ? "跳转后的产品链接不安全，无法读取。" : "产品链接必须是可公开访问的 http(s) 地址，且不能是本机或内网地址。");
+      const response = await fetch(currentUrl, {
+        redirect: "manual",
+        signal: controller.signal,
+        headers: {
+          "User-Agent": "Mozilla/5.0 ResourceWorkbench/1.0",
+          Accept: "text/html,application/xhtml+xml",
+        },
+      });
+      if (response.status >= 300 && response.status < 400) {
+        const location = response.headers.get("location");
+        if (!location) throw new Error("产品页面跳转地址缺失，无法读取。");
+        currentUrl = new URL(location, currentUrl).toString();
+        continue;
+      }
+      if (!response.ok) throw new Error(`产品页面无法读取（HTTP ${response.status}）。`);
+      const contentType = String(response.headers.get("content-type") || "").toLowerCase();
+      if (contentType && !/text\/html|application\/xhtml\+xml/.test(contentType)) throw new Error("该链接未返回可读取的产品网页。");
+      const html = (await response.text()).slice(0, 2 * 1024 * 1024);
+      return { html, finalUrl: currentUrl };
+    }
+    throw new Error("产品页面跳转次数过多，无法读取。");
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+async function previewProductFromUrl(productUrl) {
+  const { html, finalUrl } = await fetchProductPage(productUrl);
+  const title =
+    extractHtmlMeta(html, "property", "og:title") ||
+    extractHtmlMeta(html, "name", "twitter:title") ||
+    decodeHtml((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || "").replace(/\s+/g, " ").trim();
+  const image = extractHtmlMeta(html, "property", "og:image") || extractHtmlMeta(html, "name", "twitter:image");
+  const description = extractHtmlMeta(html, "property", "og:description") || extractHtmlMeta(html, "name", "description");
+  let imageUrl = "";
+  try {
+    imageUrl = image ? new URL(image, finalUrl).toString() : "";
+  } catch {
+    imageUrl = "";
+  }
+  return { ok: true, name: title.slice(0, 300), image_url: imageUrl, description: description.slice(0, 700) };
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     const chunks = [];
@@ -783,6 +998,18 @@ export default async function handler(req, res) {
       const sourceUrl = String(body.url || "").trim();
       if (!sourceUrl) throw new Error("缺少达人主页链接");
       json(res, 200, await enrichCreatorWithAi(sourceUrl, body.current || {}, body.purpose === "lead" ? "lead" : "creator"));
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/ai/outreach-generate") {
+      const body = JSON.parse((await readBody(req)) || "{}");
+      json(res, 200, await generateOutreachWithAi(body.leads || [], body.products || [], body.rules || {}));
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/products/preview") {
+      const body = JSON.parse((await readBody(req)) || "{}");
+      json(res, 200, await previewProductFromUrl(String(body.url || "").trim()));
       return;
     }
 

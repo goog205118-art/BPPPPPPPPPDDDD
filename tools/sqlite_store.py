@@ -74,6 +74,21 @@ SCHEMA = {
         "createdAt": "TEXT",
         "updatedAt": "TEXT",
     },
+    "products": {
+        "id": "TEXT PRIMARY KEY",
+        "brand": "TEXT",
+        "country": "TEXT",
+        "category": "TEXT",
+        "store": "TEXT",
+        "name": "TEXT",
+        "product_url": "TEXT",
+        "image_url": "TEXT",
+        "description": "TEXT",
+        "tags": "TEXT",
+        "notes": "TEXT",
+        "createdAt": "TEXT",
+        "updatedAt": "TEXT",
+    },
     "cooperations": {
         "id": "TEXT PRIMARY KEY",
         "creator_id": "TEXT",
@@ -177,6 +192,7 @@ def rows_to_state(conn):
         "creators": [],
         "resources": [],
         "leads": [],
+        "products": [],
         "cooperations": [],
         "matches": [],
         "importHistory": [],
@@ -261,7 +277,7 @@ def save_state(conn, state):
 
 
 def seed_from_json_if_needed(conn, state_json_path):
-    if any(table_count(conn, table) for table in ("creators", "resources", "leads", "cooperations", "matches")):
+    if any(table_count(conn, table) for table in ("creators", "resources", "leads", "products", "cooperations", "matches")):
         return
 
     if state_json_path.exists():

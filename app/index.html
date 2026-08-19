@@ -40,7 +40,7 @@
         <div class="settings-head">
           <div>
             <h2>AI 参数设置</h2>
-            <p class="panel-hint">为完整补全和待开发快录分别配置 AI 服务。支持 Gemini 和 OpenAI 兼容接口。</p>
+            <p class="panel-hint">为完整补全、待开发快录和开发邮件分别配置 AI 服务。支持 Gemini 和 OpenAI 兼容接口。</p>
           </div>
           <button type="button" id="aiSettingsReloadBtn" class="ghost">重新读取</button>
         </div>
@@ -121,6 +121,44 @@
               </div>
             </div>
           </section>
+          <section class="ai-profile">
+            <div class="ai-profile-head">
+              <h3>达人开发邮件</h3>
+              <p>用于按所选达人、产品和合作口径生成开发邮件；可单独接入更擅长写作的模型。</p>
+            </div>
+            <div class="settings-fields">
+              <div class="field">
+                <label for="outreachAiProtocol">接入协议</label>
+                <select id="outreachAiProtocol" name="outreach.protocol">
+                  <option value="gemini">Gemini</option>
+                  <option value="openai">OpenAI 兼容</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="outreachAiKeySource">Key 来源</label>
+                <select id="outreachAiKeySource" name="outreach.keySource">
+                  <option value="local">本地设置</option>
+                  <option value="environment">环境变量</option>
+                </select>
+              </div>
+              <div class="field field-wide">
+                <label for="outreachAiApiBaseUrl">API 地址</label>
+                <input id="outreachAiApiBaseUrl" name="outreach.apiBaseUrl" type="url" placeholder="Gemini 基础地址，或 OpenAI 兼容基础地址 / chat/completions 地址" />
+              </div>
+              <div class="field">
+                <label for="outreachAiApiKey">API Key</label>
+                <input id="outreachAiApiKey" name="outreach.apiKey" type="password" autocomplete="new-password" placeholder="已保存时可留空不改" />
+              </div>
+              <div class="field">
+                <label for="outreachAiModel">模型名</label>
+                <input id="outreachAiModel" name="outreach.model" type="text" placeholder="填写邮件写作模型名" />
+              </div>
+              <div class="field field-wide proxy-setting">
+                <label for="outreachAiProxyUrl">自定义代理地址（留空自动识别）</label>
+                <input id="outreachAiProxyUrl" name="outreach.proxyUrl" type="url" placeholder="默认自动读取 Windows / FlClash；仅特殊网络时填写" />
+              </div>
+            </div>
+          </section>
           <div class="settings-actions">
             <button type="submit" class="primary">保存设置</button>
             <button type="button" id="aiSettingsStatusBtn" class="ghost">检测网络</button>
@@ -178,6 +216,8 @@
         <section class="matching-history" id="matchingHistory"></section>
       </section>
 
+      <section class="product-page panel hidden" id="productPage"></section>
+
       <main class="workspace">
         <section class="panel list-panel">
           <div class="list-toolbar">
@@ -191,6 +231,7 @@
               </div>
             </div>
             <div class="toolbar-actions">
+              <button id="outreachBtn" class="ghost hidden" type="button">AI 开发邮件</button>
               <button id="newRecordBtn" class="primary">新增记录</button>
               <label class="ghost file-btn">
                 导入表格
@@ -236,6 +277,21 @@
             <button type="button" id="applyAssistantBtn" class="ghost">应用建议</button>
           </div>
         </section>
+      </article>
+    </section>
+
+    <section class="outreach-modal hidden" id="outreachModal" aria-hidden="true">
+      <div class="outreach-backdrop" id="outreachBackdrop"></div>
+      <article class="outreach-dialog" role="dialog" aria-modal="true" aria-labelledby="outreachTitle">
+        <header class="editor-head">
+          <div>
+            <h2 id="outreachTitle">AI 开发邮件</h2>
+            <p class="panel-hint" id="outreachHint"></p>
+          </div>
+          <button type="button" class="close-editor" id="closeOutreachBtn" aria-label="关闭邮件窗口" title="关闭">×</button>
+        </header>
+        <form id="outreachForm" class="outreach-form"></form>
+        <section class="outreach-result hidden" id="outreachResult"></section>
       </article>
     </section>
 

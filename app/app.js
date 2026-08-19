@@ -5,6 +5,8 @@ const API_IMPORT_EXCEL = "/api/import-excel";
 const API_CREATOR_ENRICH = "/api/ai/creator-enrich";
 const API_AI_SETTINGS = "/api/ai/settings";
 const API_AI_STATUS = "/api/ai/status";
+const API_OUTREACH_GENERATE = "/api/ai/outreach-generate";
+const API_PRODUCT_PREVIEW = "/api/products/preview";
 const STORAGE_ACCESS_PASSWORD = "resource-workbench-access-password";
 const SETTINGS_TAB = { key: "settings", title: "设置" };
 const MATCHING_TAB = { key: "matches", title: "本周资源匹配" };
@@ -22,6 +24,7 @@ const defaultAiSettings = {
   profiles: {
     creator: { ...defaultAiProfile },
     lead: { ...defaultAiProfile },
+    outreach: { ...defaultAiProfile },
   },
 };
 
@@ -212,6 +215,45 @@ const entityConfig = {
       notes: ["备注", "说明", "notes"],
     },
   },
+  products: {
+    title: "产品库",
+    formTitle: "新增产品",
+    hint: "按国家、类目和店铺沉淀可用于达人开发的产品。填写产品链接后可自动读取公开标题和主图，也可人工调整。",
+    prefix: "PD",
+    columns: [
+      ["name", "产品名称"],
+      ["brand", "品牌"],
+      ["country", "国家/地区"],
+      ["category", "产品类目"],
+      ["store", "店铺"],
+      ["product_url", "产品链接"],
+    ],
+    filters: [],
+    fields: [
+      { key: "brand", label: "所属品牌", type: "brand", placeholder: "选择或输入品牌" },
+      { key: "country", label: "国家和地区", type: "text", placeholder: "例如：美国" },
+      { key: "category", label: "产品类目", type: "text", placeholder: "例如：运动相机配件" },
+      { key: "store", label: "店铺", type: "text", placeholder: "例如：Amazon US / 品牌独立站" },
+      { key: "name", label: "产品名称", type: "text", required: true, placeholder: "产品公开名称" },
+      { key: "product_url", label: "产品链接", type: "text", required: true, placeholder: "官网 / Amazon 商品链接" },
+      { key: "image_url", label: "产品主图链接", type: "text", placeholder: "自动读取失败时可人工粘贴图片链接" },
+      { key: "description", label: "产品卖点和适配场景", type: "textarea", placeholder: "AI 写邮件时会作为参考，不填写则只使用公开产品名称和链接" },
+      { key: "tags", label: "产品标签", type: "text", placeholder: "用 | 分隔，例如：骑行|POV|礼品" },
+      { key: "notes", label: "内部备注", type: "textarea" },
+    ],
+    aliases: {
+      brand: ["所属品牌", "品牌", "brand", "brand name"],
+      country: ["国家和地区", "国家", "地区", "country"],
+      category: ["产品类目", "类目", "品类", "category"],
+      store: ["店铺", "站点", "store", "shop"],
+      name: ["产品名称", "名称", "product", "product name", "name"],
+      product_url: ["产品链接", "商品链接", "产品地址", "url", "product_url"],
+      image_url: ["产品主图链接", "图片链接", "image", "image_url"],
+      description: ["产品卖点和适配场景", "产品描述", "卖点", "description"],
+      tags: ["产品标签", "标签", "tags"],
+      notes: ["内部备注", "备注", "notes"],
+    },
+  },
   cooperations: {
     title: "合作记录",
     formTitle: "新增合作",
@@ -287,6 +329,13 @@ const configurableOptionFields = {
     { key: "niche", label: "内容垂类" },
     { key: "platform", label: "平台" },
   ],
+  products: [
+    { key: "brand", label: "品牌" },
+    { key: "country", label: "国家地区" },
+    { key: "category", label: "产品类目" },
+    { key: "store", label: "店铺" },
+    { key: "tags", label: "产品标签" },
+  ],
   cooperations: [
     { key: "product", label: "合作产品" },
     { key: "model", label: "合作方式" },
@@ -327,6 +376,13 @@ const filterDefinitions = {
     { key: "status", label: "开发状态" },
     { key: "email", label: "邮箱", mode: "email" },
   ],
+  products: [
+    { key: "brand", label: "品牌" },
+    { key: "country", label: "国家地区" },
+    { key: "category", label: "产品类目" },
+    { key: "store", label: "店铺" },
+    { key: "tags", label: "产品标签" },
+  ],
   cooperations: [
     { key: "model", label: "合作方式" },
     { key: "product", label: "合作产品" },
@@ -338,6 +394,7 @@ const defaultFilterPreferences = {
   creators: ["brand", "country"],
   resources: ["brand", "country"],
   leads: ["brand", "platform", "email"],
+  products: ["brand", "country", "category", "store"],
   cooperations: ["model", "result"],
 };
 
@@ -346,6 +403,7 @@ const emptyState = {
   creators: [],
   resources: [],
   leads: [],
+  products: [],
   cooperations: [],
   matches: [],
   importHistory: [],
@@ -365,6 +423,9 @@ const state = {
   filterMenu: null,
   optionSettingsType: "creators",
   aiSettings: clone(defaultAiSettings),
+  selectedLeadIds: new Set(),
+  productFilters: { query: "", brand: "", country: "", category: "", store: "" },
+  outreach: { open: false, leadIds: [], result: null },
 };
 
 const elements = {
@@ -377,6 +438,7 @@ const elements = {
   workspace: document.querySelector(".workspace"),
   settingsPage: document.getElementById("settingsPage"),
   matchingPage: document.getElementById("matchingPage"),
+  productPage: document.getElementById("productPage"),
   matchForm: document.getElementById("matchForm"),
   matchFormTitle: document.getElementById("matchFormTitle"),
   matchingResults: document.getElementById("matchingResults"),
@@ -396,6 +458,12 @@ const elements = {
   leadAiKeySource: document.getElementById("leadAiKeySource"),
   leadAiModel: document.getElementById("leadAiModel"),
   leadAiProxyUrl: document.getElementById("leadAiProxyUrl"),
+  outreachAiApiBaseUrl: document.getElementById("outreachAiApiBaseUrl"),
+  outreachAiProtocol: document.getElementById("outreachAiProtocol"),
+  outreachAiApiKey: document.getElementById("outreachAiApiKey"),
+  outreachAiKeySource: document.getElementById("outreachAiKeySource"),
+  outreachAiModel: document.getElementById("outreachAiModel"),
+  outreachAiProxyUrl: document.getElementById("outreachAiProxyUrl"),
   aiSettingsStatus: document.getElementById("aiSettingsStatus"),
   aiSettingsStatusBtn: document.getElementById("aiSettingsStatusBtn"),
   aiSettingsReloadBtn: document.getElementById("aiSettingsReloadBtn"),
@@ -433,8 +501,16 @@ const elements = {
   duplicatePanel: document.getElementById("duplicatePanel"),
   exportCsvBtn: document.getElementById("exportCsvBtn"),
   settingsBtn: document.getElementById("settingsBtn"),
+  outreachBtn: document.getElementById("outreachBtn"),
   newRecordBtn: document.getElementById("newRecordBtn"),
   resetFormBtn: document.getElementById("resetFormBtn"),
+  outreachModal: document.getElementById("outreachModal"),
+  outreachBackdrop: document.getElementById("outreachBackdrop"),
+  closeOutreachBtn: document.getElementById("closeOutreachBtn"),
+  outreachTitle: document.getElementById("outreachTitle"),
+  outreachHint: document.getElementById("outreachHint"),
+  outreachForm: document.getElementById("outreachForm"),
+  outreachResult: document.getElementById("outreachResult"),
 };
 
 const formSections = {
@@ -449,6 +525,7 @@ const formSections = {
 const formWideFields = {
   creators: new Set(["social_url", "email", "email_source", "audience", "content_types", "tags", "notes"]),
   leads: new Set(["social_url", "email", "email_source", "notes"]),
+  products: new Set(["product_url", "image_url", "description", "tags", "notes"]),
 };
 
 const formFocusFields = {
@@ -704,6 +781,7 @@ function ensureStateShape(nextState) {
   shaped.creators = Array.isArray(nextState?.creators) ? nextState.creators.map((row) => ({ ...row, country: normalizeCountry(row.country) })) : [];
   shaped.resources = Array.isArray(nextState?.resources) ? nextState.resources.map((row) => ({ ...row, country: normalizeCountry(row.country) })) : [];
   shaped.leads = Array.isArray(nextState?.leads) ? nextState.leads.map((row) => ({ ...row, country: normalizeCountry(row.country) })) : [];
+  shaped.products = Array.isArray(nextState?.products) ? nextState.products.map((row) => ({ ...row, country: normalizeCountry(row.country) })) : [];
   shaped.cooperations = Array.isArray(nextState?.cooperations)
     ? nextState.cooperations.map((row) => resolveCooperationLinks({ ...row }, shaped.creators, shaped.resources))
     : [];
@@ -769,6 +847,7 @@ async function loadAiSettings() {
       profiles: {
         creator: { ...clone(defaultAiProfile), ...(payload.profiles?.creator || legacyProfile) },
         lead: { ...clone(defaultAiProfile), ...(payload.profiles?.lead || payload.profiles?.creator || legacyProfile) },
+        outreach: { ...clone(defaultAiProfile), ...(payload.profiles?.outreach || payload.profiles?.lead || payload.profiles?.creator || legacyProfile) },
       },
     };
   } catch (error) {
@@ -791,6 +870,7 @@ function readAiSettingsForm() {
     profiles: {
       creator: profile("creator"),
       lead: profile("lead"),
+      outreach: profile("outreach"),
     },
   };
 }
@@ -827,8 +907,16 @@ function renderAiSettings() {
     model: elements.leadAiModel,
     proxyUrl: elements.leadAiProxyUrl,
   });
+  const outreach = bindProfile("outreach", {
+    protocol: elements.outreachAiProtocol,
+    apiBaseUrl: elements.outreachAiApiBaseUrl,
+    keySource: elements.outreachAiKeySource,
+    apiKey: elements.outreachAiApiKey,
+    model: elements.outreachAiModel,
+    proxyUrl: elements.outreachAiProxyUrl,
+  });
   const describe = (settings, label) => `${label}${settings.hasApiKey ? "已配置" : "未配置"}${settings.model ? `（${settings.model}）` : ""}`;
-  elements.aiSettingsStatus.textContent = `${describe(creator, "完整补全")}; ${describe(lead, "快速录入")}。`;
+  elements.aiSettingsStatus.textContent = `${describe(creator, "完整补全")}; ${describe(lead, "快速录入")}; ${describe(outreach, "开发邮件")}。`;
 }
 
 async function saveAiSettings(event) {
@@ -850,12 +938,13 @@ async function saveAiSettings(event) {
     profiles: {
       creator: { ...clone(defaultAiProfile), ...(payload.settings?.profiles?.creator || payload.settings || {}) },
       lead: { ...clone(defaultAiProfile), ...(payload.settings?.profiles?.lead || payload.settings?.profiles?.creator || payload.settings || {}) },
+      outreach: { ...clone(defaultAiProfile), ...(payload.settings?.profiles?.outreach || payload.settings?.profiles?.lead || payload.settings?.profiles?.creator || payload.settings || {}) },
     },
   };
   renderAiSettings();
   const profiles = state.aiSettings.profiles;
   const saved = (profile) => (profile?.hasApiKey ? "已配置" : "未配置");
-  elements.aiSettingsStatus.textContent = `设置已保存：完整补全 ${saved(profiles.creator)}；快速录入 ${saved(profiles.lead)}。API Key 为安全起见不会回显。`;
+  elements.aiSettingsStatus.textContent = `设置已保存：完整补全 ${saved(profiles.creator)}；快速录入 ${saved(profiles.lead)}；开发邮件 ${saved(profiles.outreach)}。API Key 为安全起见不会回显。`;
 }
 
 async function checkAiStatus() {
@@ -871,7 +960,7 @@ async function checkAiStatus() {
       const networkText = network.mode === "cloud" ? "网络：Vercel 云端直连" : network.mode === "proxy" ? `代理：${network.source || "已连接"}` : "网络：直连";
       return `${label}${profile.configured ? "已配置" : "未配置"}${profile.model ? `（${profile.model}）` : ""}，${networkText}`;
     };
-    elements.aiSettingsStatus.textContent = `${describe("creator", "完整补全")}; ${describe("lead", "快速录入")}。`;
+    elements.aiSettingsStatus.textContent = `${describe("creator", "完整补全")}; ${describe("lead", "快速录入")}; ${describe("outreach", "开发邮件")}。`;
   } catch (error) {
     elements.aiSettingsStatus.textContent = error.message || "检查失败";
   }
@@ -1142,6 +1231,10 @@ function renderForm() {
         return [...section, `<div class="${fieldClass}"><label for="${field.key}">${field.label}${mark}</label><div class="field-with-action"><input id="${field.key}" name="${field.key}" type="${field.type}" step="${field.step || "1"}" value="${escapeHtml(value)}" ${required} ${placeholder} /><button type="button" id="creatorAiBtn" class="ghost">${buttonText}</button></div><p class="field-status" id="creatorAiStatus"></p><p class="field-status identity-status" id="identityStatus"></p></div>`];
       }
 
+      if (state.activeTab === "products" && field.key === "product_url") {
+        return [...section, `<div class="${fieldClass}"><label for="${field.key}">${field.label}${mark}</label><div class="field-with-action"><input id="${field.key}" name="${field.key}" type="${field.type}" step="${field.step || "1"}" value="${escapeHtml(value)}" ${required} ${placeholder} /><button type="button" id="productPreviewBtn" class="ghost">读取信息</button></div><p class="field-status" id="productPreviewStatus"></p></div>`];
+      }
+
       const identityStatus = ["creators", "leads"].includes(state.activeTab) && field.key === "email" ? `<p class="field-status identity-status" id="identityEmailStatus"></p>` : "";
       return [...section, `<div class="${fieldClass}"><label for="${field.key}">${field.label}${mark}</label><input id="${field.key}" name="${field.key}" type="${field.type}" step="${field.step || "1"}" value="${escapeHtml(value)}" ${required} ${placeholder} />${identityStatus}</div>`];
     })
@@ -1149,6 +1242,8 @@ function renderForm() {
 
   const creatorAiBtn = document.getElementById("creatorAiBtn");
   if (creatorAiBtn) creatorAiBtn.addEventListener("click", handleCreatorAiEnrich);
+  const productPreviewBtn = document.getElementById("productPreviewBtn");
+  if (productPreviewBtn) productPreviewBtn.addEventListener("click", handleProductPreview);
   const creatorReference = elements.form.elements.creator_id;
   if (creatorReference) {
     creatorReference.addEventListener("change", () => syncCooperationName("creator"));
@@ -1349,10 +1444,17 @@ function safeExternalUrl(value) {
 
 function renderTable(visibleRows) {
   const item = config();
-  elements.tableHead.innerHTML = `<tr>${item.columns.map(([, label]) => `<th>${label}</th>`).join("")}<th>操作</th></tr>`;
+  const isLeadTable = state.activeTab === "leads";
+  const selectedIds = state.selectedLeadIds;
+  const allVisibleSelected = visibleRows.length > 0 && visibleRows.every((row) => selectedIds.has(row.id));
+  elements.tableHead.innerHTML = `<tr>${
+    isLeadTable
+      ? `<th class="lead-select-cell"><input type="checkbox" data-select-all-leads aria-label="选择当前筛选结果" title="选择当前筛选结果" ${allVisibleSelected ? "checked" : ""} /></th>`
+      : ""
+  }${item.columns.map(([, label]) => `<th>${label}</th>`).join("")}<th>操作</th></tr>`;
 
   if (!visibleRows.length) {
-    elements.tableBody.innerHTML = `<tr><td colspan="${item.columns.length + 1}" class="muted">暂无记录，先新增或导入表格。</td></tr>`;
+    elements.tableBody.innerHTML = `<tr><td colspan="${item.columns.length + 1 + (isLeadTable ? 1 : 0)}" class="muted">暂无记录，先新增或导入表格。</td></tr>`;
     return;
   }
 
@@ -1378,9 +1480,13 @@ function renderTable(visibleRows) {
           : "";
       const emailAction =
         state.activeTab === "leads" && text(row.email)
-          ? `<a class="ghost mail-link" href="mailto:${encodeURIComponent(text(row.email))}" title="使用默认邮件软件联系此达人">写邮件</a>`
+          ? `<a class="ghost mail-link" href="mailto:${encodeURIComponent(text(row.email))}" title="使用默认邮件软件联系此达人">邮件客户端</a>`
           : "";
-      return `<tr data-open-editor="${escapeHtml(row.id)}" title="双击任意资料内容可编辑">${cells}<td><div class="row-actions">${emailAction}${transferAction}<button class="ghost" data-delete="${row.id}">删除</button></div></td></tr>`;
+      const outreachAction = state.activeTab === "leads" ? `<button class="ghost" data-outreach-lead="${row.id}">AI 邮件</button>` : "";
+      const selectCell = isLeadTable
+        ? `<td class="lead-select-cell"><input type="checkbox" data-select-lead="${escapeHtml(row.id)}" aria-label="选择 ${escapeHtml(text(row.name) || "该达人")}" ${selectedIds.has(row.id) ? "checked" : ""} /></td>`
+        : "";
+      return `<tr data-open-editor="${escapeHtml(row.id)}" title="双击任意资料内容可编辑">${selectCell}${cells}<td><div class="row-actions">${emailAction}${outreachAction}${transferAction}<button class="ghost" data-delete="${row.id}">删除</button></div></td></tr>`;
     })
     .join("");
 
@@ -1395,9 +1501,30 @@ function renderTable(visibleRows) {
     button.addEventListener("click", () => transferLeadToCreator(button.dataset.transferLead));
   });
 
+  elements.tableHead.querySelector("[data-select-all-leads]")?.addEventListener("change", (event) => {
+    for (const row of visibleRows) {
+      if (event.target.checked) state.selectedLeadIds.add(row.id);
+      else state.selectedLeadIds.delete(row.id);
+    }
+    renderTable(visibleRows);
+  });
+
+  elements.tableBody.querySelectorAll("[data-select-lead]").forEach((input) => {
+    input.addEventListener("change", () => {
+      if (input.checked) state.selectedLeadIds.add(input.dataset.selectLead);
+      else state.selectedLeadIds.delete(input.dataset.selectLead);
+      renderTable(visibleRows);
+    });
+  });
+
+  elements.tableBody.querySelectorAll("[data-outreach-lead]").forEach((button) => {
+    button.addEventListener("click", () => openOutreachModal([button.dataset.outreachLead]));
+  });
+
   elements.tableBody.querySelectorAll("[data-delete]").forEach((button) => {
     button.addEventListener("click", async () => {
       state.data[state.activeTab] = rows().filter((row) => row.id !== button.dataset.delete);
+      state.selectedLeadIds.delete(button.dataset.delete);
       if (state.editingId === button.dataset.delete) state.editingId = null;
       await persist();
       render();
@@ -1410,6 +1537,7 @@ function setEntityUiVisible(isVisible) {
   elements.workspace.classList.toggle("hidden", !isVisible);
   elements.settingsPage.classList.toggle("hidden", isVisible);
   elements.matchingPage.classList.toggle("hidden", isVisible);
+  elements.productPage.classList.add("hidden");
 }
 
 function renderOptionSettings() {
@@ -1769,9 +1897,343 @@ async function handleMatchSubmit(event) {
   renderMatchingPage();
 }
 
+function productFilterOptions(fieldKey) {
+  return getOptionValues("products", fieldKey);
+}
+
+function filteredProducts() {
+  const filters = state.productFilters;
+  const query = text(filters.query).toLowerCase();
+  return rows("products").filter((product) => {
+    const haystack = Object.values(product).map((value) => text(value).toLowerCase()).join(" ");
+    if (query && !haystack.includes(query)) return false;
+    return ["brand", "country", "category", "store"].every((key) => !text(filters[key]) || text(product[key]) === text(filters[key]));
+  });
+}
+
+function productImageMarkup(product) {
+  const imageUrl = safeExternalUrl(product.image_url);
+  if (imageUrl) {
+    return `<img class="product-image" src="${escapeHtml(imageUrl)}" alt="${escapeHtml(product.name || "产品主图")}" loading="lazy" onerror="this.hidden=true;this.nextElementSibling.hidden=false" /><div class="product-image-empty" hidden>${escapeHtml((product.name || "产").slice(0, 1))}</div>`;
+  }
+  return `<div class="product-image-empty">${escapeHtml((product.name || "产").slice(0, 1))}</div>`;
+}
+
+function renderProductPage() {
+  elements.summary.classList.add("hidden");
+  elements.workspace.classList.add("hidden");
+  elements.settingsPage.classList.add("hidden");
+  elements.matchingPage.classList.add("hidden");
+  elements.productPage.classList.remove("hidden");
+
+  const products = filteredProducts();
+  const selectOptions = (key, label) => `
+    <label class="product-filter">
+      <span>${label}</span>
+      <select data-product-filter="${key}">
+        <option value="">全部</option>
+        ${productFilterOptions(key).map((value) => `<option value="${escapeHtml(value)}" ${text(state.productFilters[key]) === value ? "selected" : ""}>${escapeHtml(value)}</option>`).join("")}
+      </select>
+    </label>`;
+  const grouped = new Map();
+  for (const product of products) {
+    const groupKey = [text(product.country) || "未分国家", text(product.category) || "未分类", text(product.store) || "未分店铺"].join(" / ");
+    if (!grouped.has(groupKey)) grouped.set(groupKey, []);
+    grouped.get(groupKey).push(product);
+  }
+
+  elements.productPage.innerHTML = `
+    <header class="product-library-head">
+      <div>
+        <h2>产品库</h2>
+        <p class="panel-hint">按国家、类目与店铺沉淀产品。邮件生成时只会引用本次选择的产品资料。</p>
+      </div>
+      <button type="button" class="primary" data-new-product>新增产品</button>
+    </header>
+    <div class="product-filters">
+      <label class="product-filter product-search">
+        <span>搜索</span>
+        <input type="search" data-product-filter="query" value="${escapeHtml(state.productFilters.query)}" placeholder="搜索产品名、卖点、标签..." />
+      </label>
+      ${selectOptions("brand", "品牌")}
+      ${selectOptions("country", "国家地区")}
+      ${selectOptions("category", "产品类目")}
+      ${selectOptions("store", "店铺")}
+    </div>
+    <p class="product-count">共 ${products.length} 个产品${products.length !== rows("products").length ? `，已按条件筛选` : ""}</p>
+    ${
+      products.length
+        ? [...grouped.entries()]
+            .map(
+              ([group, items]) => `
+                <section class="product-group">
+                  <h3>${escapeHtml(group)} <span>${items.length}</span></h3>
+                  <div class="product-grid">
+                    ${items
+                      .map(
+                        (product) => `
+                          <article class="product-card" data-open-product="${escapeHtml(product.id)}" title="双击编辑产品">
+                            <div class="product-image-wrap">${productImageMarkup(product)}</div>
+                            <div class="product-card-meta">
+                              <strong>${escapeHtml(product.name || "未命名产品")}</strong>
+                              <span>${escapeHtml([product.brand, product.tags].filter(Boolean).join(" · ") || "尚未填写标签")}</span>
+                              ${product.description ? `<p>${escapeHtml(product.description)}</p>` : ""}
+                              <div class="product-card-actions">
+                                ${safeExternalUrl(product.product_url) ? `<a class="ghost" href="${escapeHtml(safeExternalUrl(product.product_url))}" target="_blank" rel="noopener noreferrer">打开链接</a>` : ""}
+                                <button type="button" class="ghost" data-edit-product="${escapeHtml(product.id)}">编辑</button>
+                                <button type="button" class="ghost" data-delete-product="${escapeHtml(product.id)}">删除</button>
+                              </div>
+                            </div>
+                          </article>`,
+                      )
+                      .join("")}
+                  </div>
+                </section>`,
+            )
+            .join("")
+        : `<section class="product-empty"><strong>还没有匹配的产品</strong><p>先新增产品链接，或调整上方筛选条件。</p><button type="button" class="primary" data-new-product>新增产品</button></section>`
+    }
+  `;
+
+  elements.productPage.querySelectorAll("[data-product-filter]").forEach((control) => {
+    const eventName = control.tagName === "INPUT" ? "input" : "change";
+    control.addEventListener(eventName, () => {
+      state.productFilters[control.dataset.productFilter] = control.value;
+      renderProductPage();
+    });
+  });
+  elements.productPage.querySelectorAll("[data-new-product]").forEach((button) => button.addEventListener("click", () => openEditor()));
+  elements.productPage.querySelectorAll("[data-open-product]").forEach((card) => {
+    card.addEventListener("dblclick", (event) => {
+      if (event.target.closest("a, button")) return;
+      openEditor(card.dataset.openProduct);
+    });
+  });
+  elements.productPage.querySelectorAll("[data-edit-product]").forEach((button) => button.addEventListener("click", () => openEditor(button.dataset.editProduct)));
+  elements.productPage.querySelectorAll("[data-delete-product]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      state.data.products = rows("products").filter((product) => product.id !== button.dataset.deleteProduct);
+      await persist();
+      renderProductPage();
+    });
+  });
+}
+
+async function handleProductPreview() {
+  const productUrl = text(elements.form.elements.product_url?.value);
+  const status = document.getElementById("productPreviewStatus");
+  if (!safeExternalUrl(productUrl)) {
+    if (status) status.textContent = "请输入有效的 http(s) 产品链接。";
+    elements.form.elements.product_url?.focus();
+    return;
+  }
+  const button = document.getElementById("productPreviewBtn");
+  if (button) button.disabled = true;
+  if (status) status.textContent = "正在读取公开产品信息...";
+  try {
+    const response = await apiFetch(API_PRODUCT_PREVIEW, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ url: productUrl }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok === false) throw new Error(payload.error || "读取产品信息失败");
+    const filled = [];
+    for (const key of ["name", "image_url", "description"]) {
+      const input = elements.form.elements[key];
+      if (input && !text(input.value) && text(payload[key])) {
+        input.value = payload[key];
+        filled.push(key === "name" ? "产品名称" : key === "image_url" ? "主图" : "简介");
+      }
+    }
+    if (status) status.textContent = filled.length ? `已读取并填入${filled.join("、")}，可继续人工调整。` : "已读取公开页面；现有手填内容未被覆盖。";
+  } catch (error) {
+    if (status) status.textContent = `${error.message || "读取失败"}，可直接手工填写产品名称和主图。`;
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+function selectedLeadsForOutreach(ids = []) {
+  const accepted = new Set(ids);
+  return rows("leads").filter((lead) => accepted.has(lead.id));
+}
+
+function openOutreachModal(leadIds = [...state.selectedLeadIds]) {
+  const leads = selectedLeadsForOutreach(leadIds);
+  if (!leads.length) {
+    elements.importStatus.textContent = "请先勾选至少一位待开发达人。";
+    return;
+  }
+  state.outreach = { open: true, leadIds: leads.map((lead) => lead.id), result: null };
+  renderOutreachModal();
+}
+
+function closeOutreachModal() {
+  state.outreach = { open: false, leadIds: [], result: null };
+  elements.outreachModal.classList.add("hidden");
+  elements.outreachModal.setAttribute("aria-hidden", "true");
+}
+
+function renderOutreachModal() {
+  const leads = selectedLeadsForOutreach(state.outreach.leadIds);
+  if (!state.outreach.open || !leads.length) {
+    closeOutreachModal();
+    return;
+  }
+  const products = rows("products");
+  elements.outreachModal.classList.remove("hidden");
+  elements.outreachModal.setAttribute("aria-hidden", "false");
+  elements.outreachHint.textContent = `已选择 ${leads.length} 位达人：${leads.map((lead) => lead.name || lead.social_url).join("、")}`;
+  elements.outreachForm.innerHTML = `
+    <section class="outreach-section">
+      <h3>选择产品 <span>至少 1 个</span></h3>
+      ${
+        products.length
+          ? `<div class="outreach-product-list">${products
+              .map(
+                (product) => `
+                  <label class="outreach-product-option">
+                    <input type="checkbox" name="productIds" value="${escapeHtml(product.id)}" />
+                    <span class="outreach-product-thumb">${productImageMarkup(product)}</span>
+                    <span><strong>${escapeHtml(product.name || "未命名产品")}</strong><small>${escapeHtml([product.country, product.category, product.store].filter(Boolean).join(" · ") || "未分组产品")}</small></span>
+                  </label>`,
+              )
+              .join("")}</div>`
+          : `<p class="outreach-empty">产品库为空。请先在“产品库”中新增可推广产品。</p>`
+      }
+    </section>
+    <section class="outreach-section">
+      <h3>邮件口径</h3>
+      <div class="outreach-rule-grid">
+        <label class="field"><span>语言</span><select name="language"><option value="English">英文</option><option value="creator">按达人公开语言判断</option></select></label>
+        <label class="field"><span>语气</span><select name="tone"><option value="自然友好">自然友好</option><option value="专业简洁">专业简洁</option><option value="创作者同行">创作者同行</option></select></label>
+      </div>
+      <fieldset class="outreach-checklist">
+        <legend>合作方式</legend>
+        <label><input type="checkbox" name="cooperation" value="让 AI 根据量级建议" checked /> 让 AI 根据量级建议</label>
+        <label><input type="checkbox" name="cooperation" value="产品置换" /> 产品置换</label>
+        <label><input type="checkbox" name="cooperation" value="CPS / 佣金" /> CPS / 佣金</label>
+        <label><input type="checkbox" name="cooperation" value="付费合作" /> 付费合作</label>
+        <label><input type="checkbox" name="cooperation" value="长期合作" /> 长期合作</label>
+      </fieldset>
+      <fieldset class="outreach-checklist">
+        <legend>内容细节</legend>
+        <label><input type="checkbox" name="mentionCooperation" checked /> 邮件中提及合作方式</label>
+        <label><input type="checkbox" name="includeProductLinks" checked /> 附上产品链接</label>
+        <label><input type="checkbox" name="mentionProductBenefits" checked /> 提及产品卖点</label>
+      </fieldset>
+      <label class="field field-wide"><span>补充规则</span><textarea name="customRules" placeholder="例如：本次不提及付费合作；不要推荐某类产品；必须保持简短。"></textarea></label>
+    </section>
+    <div class="form-actions outreach-actions">
+      <button type="submit" class="primary" ${products.length ? "" : "disabled"}>生成开发邮件</button>
+      <button type="button" class="ghost" data-close-outreach>取消</button>
+      <p class="outreach-status" id="outreachStatus"></p>
+    </div>
+  `;
+  renderOutreachResults();
+  elements.outreachForm.querySelector("[data-close-outreach]")?.addEventListener("click", closeOutreachModal);
+}
+
+function renderOutreachResults() {
+  const output = state.outreach.result;
+  if (!output?.drafts?.length) {
+    elements.outreachResult.classList.add("hidden");
+    elements.outreachResult.innerHTML = "";
+    return;
+  }
+  const leadMap = new Map(selectedLeadsForOutreach(state.outreach.leadIds).map((lead) => [lead.id, lead]));
+  elements.outreachResult.innerHTML = `
+    ${output.warnings?.length ? `<p class="outreach-warning">${escapeHtml(output.warnings.join("；"))}</p>` : ""}
+    <h3>邮件草稿</h3>
+    ${output.drafts
+      .map((draft, index) => {
+        const lead = leadMap.get(draft.lead_id) || {};
+        return `
+          <article class="outreach-draft" data-outreach-draft="${index}">
+            <header><div><strong>${escapeHtml(lead.name || lead.social_url || "达人")}</strong><span>${escapeHtml(draft.recommended_cooperation || "请人工确认合作方式")}${draft.reason ? ` · ${escapeHtml(draft.reason)}` : ""}</span></div>${lead.email ? `<a class="ghost mail-link" data-send-outreach="${index}" href="#">用默认邮件软件打开</a>` : `<span class="outreach-no-email">暂无可验证邮箱</span>`}</header>
+            <label>主题<input data-outreach-subject="${index}" value="${escapeHtml(draft.subject)}" /></label>
+            <label>正文<textarea data-outreach-body="${index}">${escapeHtml(draft.body)}</textarea></label>
+            <div class="outreach-draft-actions"><button type="button" class="ghost" data-copy-outreach="${index}">复制邮件</button></div>
+          </article>`;
+      })
+      .join("")}
+  `;
+  elements.outreachResult.classList.remove("hidden");
+}
+
+async function submitOutreach(event) {
+  event.preventDefault();
+  const formData = new FormData(elements.outreachForm);
+  const productIds = formData.getAll("productIds").map(text).filter(Boolean);
+  const status = document.getElementById("outreachStatus");
+  if (!productIds.length) {
+    if (status) status.textContent = "请至少选择一个产品。";
+    return;
+  }
+  const selectedProducts = rows("products").filter((product) => productIds.includes(product.id));
+  if (!selectedProducts.length) {
+    if (status) status.textContent = "所选产品已不存在，请重新选择。";
+    return;
+  }
+  const button = elements.outreachForm.querySelector('button[type="submit"]');
+  if (button) button.disabled = true;
+  if (status) status.textContent = "AI 正在根据达人资料和产品资料分别构思邮件...";
+  try {
+    const response = await apiFetch(API_OUTREACH_GENERATE, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        leads: selectedLeadsForOutreach(state.outreach.leadIds),
+        products: selectedProducts,
+        rules: {
+          language: text(formData.get("language")),
+          tone: text(formData.get("tone")),
+          cooperation: formData.getAll("cooperation").map(text).filter(Boolean),
+          mentionCooperation: formData.get("mentionCooperation") === "on",
+          includeProductLinks: formData.get("includeProductLinks") === "on",
+          mentionProductBenefits: formData.get("mentionProductBenefits") === "on",
+          customRules: text(formData.get("customRules")),
+        },
+      }),
+    });
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok === false) throw new Error(payload.error || "邮件生成失败");
+    state.outreach.result = payload;
+    if (status) status.textContent = `已生成 ${payload.drafts?.length || 0} 封邮件草稿。`;
+    renderOutreachResults();
+  } catch (error) {
+    if (status) status.textContent = error.message || "邮件生成失败，请检查设置页中的开发邮件 AI 参数。";
+  } finally {
+    if (button) button.disabled = false;
+  }
+}
+
+async function copyOutreachDraft(index) {
+  const subject = text(elements.outreachResult.querySelector(`[data-outreach-subject="${index}"]`)?.value);
+  const body = text(elements.outreachResult.querySelector(`[data-outreach-body="${index}"]`)?.value);
+  const payload = `Subject: ${subject}\n\n${body}`;
+  try {
+    await navigator.clipboard.writeText(payload);
+  } catch {
+    window.prompt("复制以下邮件内容：", payload);
+  }
+}
+
+function launchOutreachMail(index) {
+  const draft = state.outreach.result?.drafts?.[Number(index)];
+  const lead = selectedLeadsForOutreach(state.outreach.leadIds).find((item) => item.id === draft?.lead_id);
+  if (!lead?.email) return;
+  const subject = text(elements.outreachResult.querySelector(`[data-outreach-subject="${index}"]`)?.value || draft.subject);
+  const body = text(elements.outreachResult.querySelector(`[data-outreach-body="${index}"]`)?.value || draft.body);
+  window.location.href = `mailto:${encodeURIComponent(lead.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+}
+
 function renderEntityPage() {
   setEntityUiVisible(true);
   elements.newRecordBtn.textContent = `新增${config().title.replace("库", "")}`;
+  elements.outreachBtn.classList.toggle("hidden", state.activeTab !== "leads");
+  if (state.activeTab === "leads") elements.outreachBtn.textContent = `AI 开发邮件${state.selectedLeadIds.size ? `（${state.selectedLeadIds.size}）` : ""}`;
   renderFilters();
   const visibleRows = filterRows(rows());
   renderSummary(visibleRows);
@@ -1785,15 +2247,24 @@ function renderEntityPage() {
 function render() {
   renderTabs();
   if (state.activeTab === SETTINGS_TAB.key) {
+    elements.outreachBtn.classList.add("hidden");
     resetEditorState();
     renderEditor();
     renderSettingsPage();
     return;
   }
   if (state.activeTab === MATCHING_TAB.key) {
+    elements.outreachBtn.classList.add("hidden");
     resetEditorState();
     renderEditor();
     renderMatchingPage();
+    return;
+  }
+  if (state.activeTab === "products") {
+    elements.outreachBtn.classList.add("hidden");
+    resetEditorState();
+    renderEditor();
+    renderProductPage();
     return;
   }
   renderEntityPage();
@@ -2758,11 +3229,30 @@ function bindEvents() {
   };
   bindKeySource(elements.aiKeySource, elements.aiApiKey);
   bindKeySource(elements.leadAiKeySource, elements.leadAiApiKey);
+  bindKeySource(elements.outreachAiKeySource, elements.outreachAiApiKey);
   elements.resetFormBtn.addEventListener("click", resetForm);
   elements.newRecordBtn.addEventListener("click", () => openEditor());
+  elements.outreachBtn.addEventListener("click", () => openOutreachModal());
   elements.editorBackdrop.addEventListener("click", handleEditorBackdropClick);
   elements.closeEditorBtn.addEventListener("click", handleEditorCloseClick);
   document.addEventListener("keydown", handleEditorEscape);
+  elements.outreachBackdrop.addEventListener("click", (event) => {
+    if (event.target === elements.outreachBackdrop) closeOutreachModal();
+  });
+  elements.closeOutreachBtn.addEventListener("click", closeOutreachModal);
+  elements.outreachForm.addEventListener("submit", submitOutreach);
+  elements.outreachResult.addEventListener("click", (event) => {
+    const copyButton = event.target.closest("[data-copy-outreach]");
+    if (copyButton) {
+      copyOutreachDraft(copyButton.dataset.copyOutreach);
+      return;
+    }
+    const mailLink = event.target.closest("[data-send-outreach]");
+    if (mailLink) {
+      event.preventDefault();
+      launchOutreachMail(mailLink.dataset.sendOutreach);
+    }
+  });
   elements.resetMatchBtn.addEventListener("click", () => {
     state.matchingEditingId = null;
     elements.matchingStatus.textContent = "";

@@ -37,6 +37,7 @@ const defaultAiSettings = {
   profiles: {
     creator: { ...defaultAiProfile },
     lead: { ...defaultAiProfile },
+    outreach: { ...defaultAiProfile },
   },
 };
 
@@ -48,6 +49,7 @@ const defaultState = {
   creators: [],
   resources: [],
   leads: [],
+  products: [],
   cooperations: [],
   matches: [],
   importHistory: [],
@@ -97,6 +99,7 @@ function normalizeBusinessState(rawState) {
   const creators = Array.isArray(state.creators) ? state.creators.map((row) => ({ ...row, country: normalizeCountry(row.country) })) : [];
   const resources = Array.isArray(state.resources) ? state.resources.map((row) => ({ ...row, country: normalizeCountry(row.country) })) : [];
   const leads = Array.isArray(state.leads) ? state.leads.map((row) => ({ ...row, country: normalizeCountry(row.country) })) : [];
+  const products = Array.isArray(state.products) ? state.products.map((row) => ({ ...row, country: normalizeCountry(row.country) })) : [];
   const creatorByName = new Map(creators.map((row) => [String(row.name || "").trim(), row]));
   const resourceByName = new Map(resources.map((row) => [String(row.name || "").trim(), row]));
   const cooperations = Array.isArray(state.cooperations)
@@ -120,7 +123,7 @@ function normalizeBusinessState(rawState) {
       }))
     : [];
 
-  return { ...state, creators, resources, leads, cooperations, matches };
+  return { ...defaultState, ...state, creators, resources, leads, products, cooperations, matches, importHistory: Array.isArray(state.importHistory) ? state.importHistory : [] };
 }
 
 let pythonCommand;
@@ -324,6 +327,7 @@ function normalizeAiSettings(raw = {}, existing = {}) {
     profiles: {
       creator: normalizeAiProfile(rawProfiles.creator || legacyRaw, existingProfiles.creator || legacyExisting),
       lead: normalizeAiProfile(rawProfiles.lead || {}, existingProfiles.lead || existingProfiles.creator || legacyExisting),
+      outreach: normalizeAiProfile(rawProfiles.outreach || {}, existingProfiles.outreach || existingProfiles.lead || existingProfiles.creator || legacyExisting),
     },
   };
 }
@@ -346,7 +350,7 @@ function saveAiSettings(input) {
   ensureDataFile();
   const existing = loadAiSettings();
   const next = normalizeAiSettings(input, existing);
-  for (const key of ["creator", "lead"]) {
+  for (const key of ["creator", "lead", "outreach"]) {
     const profile = next.profiles[key];
     const previous = existing.profiles[key] || {};
     if (!profile.apiKey || profile.apiKey === "********") {
@@ -362,10 +366,16 @@ function saveAiSettings(input) {
 
 function resolveAiSettings(purpose = "creator") {
   const saved = loadAiSettings();
-  const profileKey = purpose === "lead" ? "lead" : "creator";
+  const profileKey = ["creator", "lead", "outreach"].includes(purpose) ? purpose : "creator";
   const profile = saved.profiles[profileKey] || saved.profiles.creator || defaultAiProfile;
+  const purposeKey =
+    profileKey === "lead"
+      ? process.env.RESOURCE_WORKBENCH_LEAD_AI_KEY || process.env.LEAD_AI_API_KEY
+      : profileKey === "outreach"
+        ? process.env.RESOURCE_WORKBENCH_OUTREACH_AI_KEY || process.env.OUTREACH_AI_API_KEY
+        : process.env.RESOURCE_WORKBENCH_CREATOR_AI_KEY || process.env.CREATOR_AI_API_KEY;
   const environmentKey =
-    (profileKey === "lead" ? process.env.RESOURCE_WORKBENCH_LEAD_AI_KEY || process.env.LEAD_AI_API_KEY : process.env.RESOURCE_WORKBENCH_CREATOR_AI_KEY || process.env.CREATOR_AI_API_KEY) ||
+    purposeKey ||
     process.env.GEMINI_API_KEY ||
     process.env.GOOGLE_API_KEY ||
     process.env.OPENAI_API_KEY ||
@@ -493,6 +503,7 @@ async function publicAiStatus() {
   return {
     creator: await statusFor("creator"),
     lead: await statusFor("lead"),
+    outreach: await statusFor("outreach"),
   };
 }
 
@@ -502,6 +513,7 @@ function publicAiSettings() {
     profiles: {
       creator: publicAiProfile(resolveAiSettings("creator"), saved.profiles.creator || {}),
       lead: publicAiProfile(resolveAiSettings("lead"), saved.profiles.lead || {}),
+      outreach: publicAiProfile(resolveAiSettings("outreach"), saved.profiles.outreach || {}),
     },
   };
 }
@@ -1084,6 +1096,215 @@ async function enrichCreatorWithAi(sourceUrl, current, purpose = "creator") {
   return mergeEnrichmentResults(primary, sanitizeCreatorEnrich(parseGeminiJson(recoveryResponse.body), sourceUrl, purpose));
 }
 
+function outreachLeadPayload(lead) {
+  return {
+    id: String(lead?.id || "").trim(),
+    name: String(lead?.name || "").trim(),
+    social_url: String(lead?.social_url || "").trim(),
+    platform: String(lead?.platform || "").trim(),
+    country: String(lead?.country || "").trim(),
+    niche: String(lead?.niche || "").trim(),
+    followers: lead?.followers ?? "",
+    avg_views: lead?.avg_views ?? "",
+    engagement: lead?.engagement ?? "",
+    email: String(lead?.email || "").trim(),
+    notes: String(lead?.notes || "").trim(),
+  };
+}
+
+function outreachProductPayload(product) {
+  return {
+    id: String(product?.id || "").trim(),
+    name: String(product?.name || "").trim(),
+    brand: String(product?.brand || "").trim(),
+    country: String(product?.country || "").trim(),
+    category: String(product?.category || "").trim(),
+    store: String(product?.store || "").trim(),
+    product_url: String(product?.product_url || "").trim(),
+    description: String(product?.description || "").trim(),
+    tags: String(product?.tags || "").trim(),
+  };
+}
+
+function buildOutreachPrompt(leads, products, rules) {
+  return `你是跨境品牌的达人合作开发专家。请只基于输入中给出的达人资料、产品资料和本次规则，为每位达人写一封自然、不模板化的英文开发邮件。
+
+达人资料：
+${JSON.stringify(leads.map(outreachLeadPayload), null, 2)}
+
+本次可推荐产品：
+${JSON.stringify(products.map(outreachProductPayload), null, 2)}
+
+本次规则：
+${JSON.stringify(rules || {}, null, 2)}
+
+请只返回有效 JSON，不要 Markdown，不要说明文字：
+{
+  "drafts": [
+    {
+      "lead_id": "",
+      "subject": "",
+      "body": "",
+      "recommended_cooperation": "",
+      "reason": ""
+    }
+  ],
+  "warnings": []
+}
+
+硬性规则：
+1. 每位输入达人必须只生成一份草稿，lead_id 必须与输入完全一致。正文使用英文；不要写假签名、虚构公司地址、具体报价或未经提供的折扣。
+2. 只能使用输入中提供的信息。不得声称看过某条视频、知道某个具体痛点、确认达人所在地、使用过竞品，除非输入资料明确写出。资料不足时，使用轻量且诚实的开场，例如欣赏其内容领域，而不是杜撰观看细节。
+3. 只能提及本次提供的产品；若产品卖点为空，不要发明材料、功能、兼容型号或性能。产品名称和链接仅在规则允许时使用。
+4. 合作方式要综合 followers、avg_views、engagement 判断：长尾或数据较小优先产品置换或置换 + CPS；中量级可建议置换 + CPS / 小预算可谈；头部或高播放可建议付费合作或先询价；数据不足时建议先询问合作偏好。必须尊重本次用户勾选的合作方式；不要承诺价格。
+5. 若规则中不提及合作方式，则不要在正文写明合作模式，但仍填写 recommended_cooperation 供内部参考。若不附产品链接，则正文不要出现 URL。
+6. 邮件控制在 110-180 英文词，语气遵循用户选择；不同达人使用不同的开场和产品匹配角度，避免完全相同的话术。
+7. email 字段只是寄送地址提示，不可写入邮件正文，也不可声称其来源。`;
+}
+
+function sanitizeOutreachDrafts(raw, leads) {
+  const allowedIds = new Set(leads.map((lead) => String(lead.id || "").trim()).filter(Boolean));
+  const draftsById = new Map();
+  for (const draft of Array.isArray(raw?.drafts) ? raw.drafts : []) {
+    const leadId = String(draft?.lead_id || "").trim();
+    if (!allowedIds.has(leadId) || draftsById.has(leadId)) continue;
+    const subject = String(draft?.subject || "").trim().slice(0, 220);
+    const body = String(draft?.body || "").trim().slice(0, 5000);
+    if (!subject || !body) continue;
+    draftsById.set(leadId, {
+      lead_id: leadId,
+      subject,
+      body,
+      recommended_cooperation: String(draft?.recommended_cooperation || "请人工确认合作方式").trim().slice(0, 180),
+      reason: String(draft?.reason || "").trim().slice(0, 360),
+    });
+  }
+  return {
+    ok: true,
+    drafts: leads.map((lead) => draftsById.get(String(lead.id || "").trim())).filter(Boolean),
+    warnings: Array.isArray(raw?.warnings) ? raw.warnings.map((item) => String(item).trim()).filter(Boolean).slice(0, 8) : [],
+  };
+}
+
+async function generateOutreachWithAi(leads, products, rules) {
+  if (!Array.isArray(leads) || !leads.length) throw new Error("请至少选择一位待开发达人。");
+  if (!Array.isArray(products) || !products.length) throw new Error("请至少选择一个产品。");
+  const settings = resolveAiSettings("outreach");
+  if (!settings.apiKey) throw new Error("未配置开发邮件 AI API Key。请先在设置页填写“达人开发邮件”参数。");
+  const prompt = buildOutreachPrompt(leads, products, rules);
+  const network = await resolveAiNetwork(settings);
+  const post = (endpoint, payload, headers = {}) => (network.proxyUrl ? postJsonViaProxy(endpoint, payload, network.proxyUrl, headers) : postJson(endpoint, payload, headers));
+
+  if (settings.protocol === "openai") {
+    const response = await post(
+      buildOpenAiEndpoint(settings),
+      {
+        model: settings.model,
+        messages: [
+          { role: "system", content: "You write concise creator outreach emails. Return valid JSON only." },
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.72,
+        response_format: { type: "json_object" },
+      },
+      { Authorization: `Bearer ${settings.apiKey}` },
+    );
+    if (response.statusCode >= 400) throw new Error(response.body?.error?.message || response.body?.raw || `OpenAI 兼容接口请求失败：HTTP ${response.statusCode}`);
+    return sanitizeOutreachDrafts(parseOpenAiJson(response.body), leads);
+  }
+
+  const response = await post(buildGeminiEndpoint(settings), {
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
+    generationConfig: { temperature: 0.72, responseMimeType: "application/json" },
+  });
+  if (response.statusCode >= 400) throw new Error(response.body?.error?.message || response.body?.raw || `Gemini API 请求失败：HTTP ${response.statusCode}`);
+  return sanitizeOutreachDrafts(parseGeminiJson(response.body), leads);
+}
+
+function isSafePublicUrl(value) {
+  let parsed;
+  try {
+    parsed = new URL(String(value || "").trim());
+  } catch {
+    return false;
+  }
+  if (!["http:", "https:"].includes(parsed.protocol)) return false;
+  const host = parsed.hostname.toLowerCase();
+  if (host === "localhost" || host.endsWith(".localhost") || host === "::1") return false;
+  if (/^(127\.|0\.|10\.|192\.168\.|169\.254\.|172\.(1[6-9]|2\d|3[0-1])\.)/.test(host)) return false;
+  return true;
+}
+
+function decodeHtml(value) {
+  return String(value || "")
+    .replace(/&amp;/gi, "&")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#39;|&apos;/gi, "'")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">");
+}
+
+function extractHtmlMeta(html, attribute, key) {
+  const pattern = new RegExp(`<meta[^>]*${attribute}\\s*=\\s*["']${key}["'][^>]*content\\s*=\\s*["']([^"']+)["'][^>]*>|<meta[^>]*content\\s*=\\s*["']([^"']+)["'][^>]*${attribute}\\s*=\\s*["']${key}["'][^>]*>`, "i");
+  const match = String(html || "").match(pattern);
+  return decodeHtml(match?.[1] || match?.[2] || "").trim();
+}
+
+function getPagePreview(targetUrl) {
+  return new Promise((resolve, reject) => {
+    const parsed = new URL(targetUrl);
+    const transport = parsed.protocol === "https:" ? https : require("http");
+    const request = transport.get(
+      {
+        protocol: parsed.protocol,
+        hostname: parsed.hostname,
+        port: parsed.port || undefined,
+        path: `${parsed.pathname}${parsed.search}`,
+        headers: { "User-Agent": "Mozilla/5.0 ResourceWorkbench/1.0", Accept: "text/html,application/xhtml+xml" },
+      },
+      (response) => {
+        if (response.statusCode >= 300 && response.statusCode < 400 && response.headers.location) {
+          const redirected = new URL(response.headers.location, targetUrl).toString();
+          response.resume();
+          if (!isSafePublicUrl(redirected)) return reject(new Error("跳转后的产品链接不安全，无法读取。"));
+          return resolve(getPagePreview(redirected));
+        }
+        if ((response.statusCode || 0) >= 400) {
+          response.resume();
+          return reject(new Error(`产品页面无法读取（HTTP ${response.statusCode}）。`));
+        }
+        let html = "";
+        response.setEncoding("utf8");
+        response.on("data", (chunk) => {
+          html += chunk;
+          if (html.length > 2 * 1024 * 1024) request.destroy(new Error("产品页面内容过大。"));
+        });
+        response.on("end", () => resolve({ html, finalUrl: targetUrl }));
+      },
+    );
+    request.setTimeout(10000, () => request.destroy(new Error("读取产品页面超时。")));
+    request.on("error", reject);
+  });
+}
+
+async function previewProductFromUrl(productUrl) {
+  if (!isSafePublicUrl(productUrl)) throw new Error("产品链接必须是可公开访问的 http(s) 地址，且不能是本机或内网地址。");
+  const { html, finalUrl } = await getPagePreview(productUrl);
+  const title =
+    extractHtmlMeta(html, "property", "og:title") ||
+    extractHtmlMeta(html, "name", "twitter:title") ||
+    decodeHtml((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || "").replace(/\s+/g, " ").trim();
+  const image = extractHtmlMeta(html, "property", "og:image") || extractHtmlMeta(html, "name", "twitter:image");
+  const description = extractHtmlMeta(html, "property", "og:description") || extractHtmlMeta(html, "name", "description");
+  let imageUrl = "";
+  try {
+    imageUrl = image ? new URL(image, finalUrl).toString() : "";
+  } catch {
+    imageUrl = "";
+  }
+  return { ok: true, name: title.slice(0, 300), image_url: imageUrl, description: description.slice(0, 700) };
+}
+
 function handleApi(req, res, pathname) {
   if (req.method === "GET" && pathname === "/api/ai/settings") {
     jsonResponse(res, 200, {
@@ -1132,6 +1353,31 @@ function handleApi(req, res, pathname) {
     return true;
   }
 
+  if (req.method === "POST" && pathname === "/api/ai/outreach-generate") {
+    readBody(req)
+      .then(async (body) => {
+        const parsed = JSON.parse(body || "{}");
+        const payload = await generateOutreachWithAi(parsed.leads || [], parsed.products || [], parsed.rules || {});
+        jsonResponse(res, 200, payload);
+      })
+      .catch((error) => {
+        jsonResponse(res, 400, { ok: false, error: formatError(error) });
+      });
+    return true;
+  }
+
+  if (req.method === "POST" && pathname === "/api/products/preview") {
+    readBody(req)
+      .then(async (body) => {
+        const parsed = JSON.parse(body || "{}");
+        jsonResponse(res, 200, await previewProductFromUrl(String(parsed.url || "").trim()));
+      })
+      .catch((error) => {
+        jsonResponse(res, 400, { ok: false, error: error.message || "读取产品信息失败" });
+      });
+    return true;
+  }
+
   if (req.method === "GET" && pathname === "/api/state") {
     const state = loadState();
     send(res, 200, JSON.stringify(state, null, 2));
@@ -1153,6 +1399,7 @@ function handleApi(req, res, pathname) {
             creators: state.creators.length,
             resources: state.resources.length,
             leads: Array.isArray(state.leads) ? state.leads.length : 0,
+            products: Array.isArray(state.products) ? state.products.length : 0,
             cooperations: state.cooperations.length,
             matches: Array.isArray(state.matches) ? state.matches.length : 0,
             importHistory: Array.isArray(state.importHistory) ? state.importHistory.length : 0,
