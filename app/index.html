@@ -152,31 +152,16 @@
       </section>
 
       <main class="workspace">
-        <aside class="panel">
-          <h2 id="formTitle">新增记录</h2>
-          <p class="panel-hint" id="formHint"></p>
-          <form id="recordForm" class="form"></form>
-          <div class="form-actions">
-            <button type="submit" form="recordForm" class="primary">保存</button>
-            <button type="button" id="resetFormBtn" class="ghost">清空</button>
-          </div>
-          <section class="assistant">
-            <h3>智能建议</h3>
-            <p id="assistantText">保存后会根据规则自动补充标签和分级建议，后续可切换为 AI 接口。</p>
-            <div class="assistant-actions">
-              <button type="button" id="applyAssistantBtn" class="ghost">应用建议</button>
-            </div>
-          </section>
-        </aside>
-
         <section class="panel list-panel">
           <div class="list-toolbar">
             <div class="search-group">
               <input id="searchInput" type="search" placeholder="搜索名称、标签、国家、备注..." />
               <select id="filterA"></select>
               <select id="filterB"></select>
+              <select id="filterC" class="hidden"></select>
             </div>
             <div class="toolbar-actions">
+              <button id="newRecordBtn" class="primary">新增记录</button>
               <label class="ghost file-btn">
                 导入表格
                 <input id="importTableInput" type="file" accept=".csv,.xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" hidden />
@@ -197,6 +182,32 @@
         </section>
       </main>
     </div>
+
+    <section class="editor-modal hidden" id="editorModal" aria-hidden="true">
+      <div class="editor-backdrop" id="editorBackdrop"></div>
+      <article class="editor-dialog" role="dialog" aria-modal="true" aria-labelledby="formTitle">
+        <header class="editor-head">
+          <div>
+            <h2 id="formTitle">编辑记录</h2>
+            <p class="panel-hint" id="formHint"></p>
+          </div>
+          <button type="button" class="close-editor" id="closeEditorBtn" aria-label="关闭编辑窗口" title="关闭并自动保存">×</button>
+        </header>
+        <form id="recordForm" class="form editor-form"></form>
+        <div class="form-actions editor-actions">
+          <button type="submit" form="recordForm" class="primary">保存并关闭</button>
+          <button type="button" id="resetFormBtn" class="ghost">重新填写</button>
+          <p class="editor-status" id="editorStatus"></p>
+        </div>
+        <section class="assistant">
+          <h3>智能建议</h3>
+          <p id="assistantText">保存后会根据规则自动补充标签和分级建议，后续可切换为 AI 接口。</p>
+          <div class="assistant-actions">
+            <button type="button" id="applyAssistantBtn" class="ghost">应用建议</button>
+          </div>
+        </section>
+      </article>
+    </section>
 
     <script type="module" src="./app.js"></script>
   </body>

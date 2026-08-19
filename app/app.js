@@ -37,6 +37,7 @@ const entityConfig = {
       ["name", "达人名称"],
       ["brand", "品牌"],
       ["platform", "平台"],
+      ["social_url", "社媒地址"],
       ["email", "达人邮箱"],
       ["country", "国家/地区"],
       ["niche", "内容垂类"],
@@ -178,6 +179,7 @@ const entityConfig = {
     filters: [
       { key: "brand", label: "品牌", options: ["全部"], dynamic: true },
       { key: "platform", label: "平台", options: ["全部"], dynamic: true },
+      { key: "email", label: "邮箱", options: ["全部", "有邮箱", "无邮箱"], mode: "email" },
     ],
     fields: [
       { key: "brand", label: "所属品牌", type: "brand", placeholder: "选择或输入品牌" },
@@ -277,10 +279,13 @@ const state = {
   data: clone(emptyState),
   activeTab: "creators",
   editingId: null,
+  editorDraft: null,
+  editorBaseline: "",
+  editorOpen: false,
   matchingEditingId: null,
   importDraft: null,
   duplicateIgnores: new Set(),
-  filters: { query: "", filterA: "全部", filterB: "全部" },
+  filters: { query: "", filterA: "全部", filterB: "全部", filterC: "全部" },
   aiSettings: clone(defaultAiSettings),
 };
 
@@ -319,11 +324,15 @@ const elements = {
   formTitle: document.getElementById("formTitle"),
   formHint: document.getElementById("formHint"),
   form: document.getElementById("recordForm"),
-  formActions: document.querySelector(".form-actions"),
+  editorModal: document.getElementById("editorModal"),
+  editorBackdrop: document.getElementById("editorBackdrop"),
+  closeEditorBtn: document.getElementById("closeEditorBtn"),
+  editorStatus: document.getElementById("editorStatus"),
   assistantPanel: document.querySelector(".assistant"),
   searchInput: document.getElementById("searchInput"),
   filterA: document.getElementById("filterA"),
   filterB: document.getElementById("filterB"),
+  filterC: document.getElementById("filterC"),
   tableHead: document.getElementById("tableHead"),
   tableBody: document.getElementById("tableBody"),
   assistantText: document.getElementById("assistantText"),
@@ -338,6 +347,7 @@ const elements = {
   duplicatePanel: document.getElementById("duplicatePanel"),
   exportCsvBtn: document.getElementById("exportCsvBtn"),
   settingsBtn: document.getElementById("settingsBtn"),
+  newRecordBtn: document.getElementById("newRecordBtn"),
   resetFormBtn: document.getElementById("resetFormBtn"),
 };
 
@@ -499,6 +509,30 @@ function config() {
 
 function rows(type = state.activeTab) {
   return state.data[type] || [];
+}
+
+function editableSnapshot(record, type = state.activeTab) {
+  const output = {};
+  for (const field of entityConfig[type].fields) {
+    output[field.key] = record?.[field.key] ?? "";
+  }
+  return JSON.stringify(output);
+}
+
+function openEditor(id = null) {
+  const existing = id ? rows().find((row) => row.id === id) : null;
+  state.editingId = existing?.id || null;
+  state.editorDraft = existing ? clone(existing) : defaultRecord(state.activeTab);
+  state.editorBaseline = editableSnapshot(state.editorDraft);
+  state.editorOpen = true;
+  renderEditor();
+}
+
+function resetEditorState() {
+  state.editingId = null;
+  state.editorDraft = null;
+  state.editorBaseline = "";
+  state.editorOpen = false;
 }
 
 function brandOptions() {
@@ -731,14 +765,17 @@ function getMetrics(type, dataRows) {
 }
 
 function filterRows(dataRows) {
-  const [filterA, filterB] = config().filters;
   const query = text(state.filters.query).toLowerCase();
 
   return dataRows.filter((row) => {
     const haystack = Object.values(row).map((value) => text(value).toLowerCase()).join(" ");
     if (query && !haystack.includes(query)) return false;
-    if (state.filters.filterA !== "全部" && text(row[filterA.key]) !== state.filters.filterA) return false;
-    if (state.filters.filterB !== "全部" && text(row[filterB.key]) !== state.filters.filterB) return false;
+    for (const [index, filter] of config().filters.entries()) {
+      const key = ["filterA", "filterB", "filterC"][index];
+      if (!key || state.filters[key] === "全部") continue;
+      const current = filter.mode === "email" ? (text(row.email) ? "有邮箱" : "无邮箱") : text(row[filter.key]);
+      if (current !== state.filters[key]) return false;
+    }
     return true;
   });
 }
@@ -752,10 +789,10 @@ function renderTabs() {
   elements.tabs.querySelectorAll("[data-tab]").forEach((button) => {
     button.addEventListener("click", () => {
       state.activeTab = button.dataset.tab;
-      state.editingId = null;
+      resetEditorState();
       state.matchingEditingId = null;
       state.importDraft = null;
-      state.filters = { query: "", filterA: "全部", filterB: "全部" };
+      state.filters = { query: "", filterA: "全部", filterB: "全部", filterC: "全部" };
       elements.searchInput.value = "";
       elements.importStatus.textContent = "";
       render();
@@ -770,27 +807,37 @@ function renderSummary(visibleRows) {
 }
 
 function renderFilters() {
-  const [filterA, filterB] = config().filters;
+  const selects = [elements.filterA, elements.filterB, elements.filterC];
+  const filterKeys = ["filterA", "filterB", "filterC"];
   const fill = (select, filter, value) => {
+    if (!filter) {
+      select.innerHTML = "";
+      select.classList.add("hidden");
+      return "全部";
+    }
     const actualOptions = filter.dynamic
       ? ["全部", ...[...new Set(rows().map((row) => text(row[filter.key])).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-CN"))]
       : filter.options;
     if (!actualOptions.includes(value)) value = "全部";
     select.innerHTML = actualOptions.map((option) => `<option value="${option}">${filter.label}：${option}</option>`).join("");
     select.value = value;
+    select.classList.remove("hidden");
     return value;
   };
 
-  state.filters.filterA = fill(elements.filterA, filterA, state.filters.filterA);
-  state.filters.filterB = fill(elements.filterB, filterB, state.filters.filterB);
+  selects.forEach((select, index) => {
+    const key = filterKeys[index];
+    state.filters[key] = fill(select, config().filters[index], state.filters[key]);
+  });
 }
 
 function renderForm() {
   const item = config();
-  const current = state.editingId ? rows().find((row) => row.id === state.editingId) : defaultRecord(state.activeTab);
+  const current = state.editorDraft || (state.editingId ? rows().find((row) => row.id === state.editingId) : defaultRecord(state.activeTab));
 
   elements.formTitle.textContent = state.editingId ? `编辑 ${item.title}` : item.formTitle;
   elements.formHint.textContent = item.hint;
+  elements.editorStatus.textContent = "点击窗口外会自动保存并关闭。";
 
   elements.form.innerHTML = item.fields
     .flatMap((field) => {
@@ -884,6 +931,21 @@ function renderForm() {
   elements.assistantPanel.classList.toggle("hidden", state.activeTab === "leads");
   renderIdentityCheck();
   renderAssistant();
+}
+
+function renderEditor() {
+  const visible = state.editorOpen && ![SETTINGS_TAB.key, MATCHING_TAB.key].includes(state.activeTab);
+  elements.editorModal.classList.toggle("hidden", !visible);
+  elements.editorModal.setAttribute("aria-hidden", String(!visible));
+  if (!visible) {
+    elements.form.innerHTML = "";
+    return;
+  }
+  renderForm();
+  window.setTimeout(() => {
+    const first = elements.form.querySelector("input, select, textarea");
+    first?.focus();
+  }, 0);
 }
 
 function renderAssistant() {
@@ -1030,6 +1092,15 @@ async function handleCreatorAiEnrich() {
   }
 }
 
+function safeExternalUrl(value) {
+  try {
+    const parsed = new URL(text(value));
+    return ["http:", "https:"].includes(parsed.protocol) ? parsed.href : "";
+  } catch {
+    return "";
+  }
+}
+
 function renderTable(visibleRows) {
   const item = config();
   elements.tableHead.innerHTML = `<tr>${item.columns.map(([, label]) => `<th>${label}</th>`).join("")}<th>操作</th></tr>`;
@@ -1048,6 +1119,9 @@ function renderTable(visibleRows) {
             return `<td>${tags || escapeHtml(row[key])}</td>`;
           }
           const cls = key === "grade" && row[key] === "A" ? "status-good" : key === "status" && row[key] === "已合作" ? "status-good" : "";
+          if (["social_url", "link"].includes(key) && safeExternalUrl(row[key])) {
+            return `<td class="${cls} link-cell"><a href="${escapeHtml(safeExternalUrl(row[key]))}" target="_blank" rel="noopener noreferrer" title="打开链接">${escapeHtml(row[key])}</a></td>`;
+          }
           return `<td class="${cls}">${escapeHtml(row[key])}</td>`;
         })
         .join("");
@@ -1056,14 +1130,18 @@ function renderTable(visibleRows) {
         state.activeTab === "leads" && row.status !== "已转达人库"
           ? `<button class="ghost" data-transfer-lead="${row.id}">转入达人库</button>`
           : "";
-      return `<tr>${cells}<td><div class="row-actions"><button class="ghost" data-edit="${row.id}">编辑</button>${transferAction}<button class="ghost" data-delete="${row.id}">删除</button></div></td></tr>`;
+      const emailAction =
+        state.activeTab === "leads" && text(row.email)
+          ? `<a class="ghost mail-link" href="mailto:${encodeURIComponent(text(row.email))}" title="使用默认邮件软件联系此达人">写邮件</a>`
+          : "";
+      return `<tr data-open-editor="${escapeHtml(row.id)}" title="双击任意资料内容可编辑">${cells}<td><div class="row-actions">${emailAction}${transferAction}<button class="ghost" data-delete="${row.id}">删除</button></div></td></tr>`;
     })
     .join("");
 
-  elements.tableBody.querySelectorAll("[data-edit]").forEach((button) => {
-    button.addEventListener("click", () => {
-      state.editingId = button.dataset.edit;
-      render();
+  elements.tableBody.querySelectorAll("[data-open-editor]").forEach((tableRow) => {
+    tableRow.addEventListener("dblclick", (event) => {
+      if (event.target.closest("a, button")) return;
+      openEditor(tableRow.dataset.openEditor);
     });
   });
 
@@ -1376,23 +1454,28 @@ async function handleMatchSubmit(event) {
 
 function renderEntityPage() {
   setEntityUiVisible(true);
+  elements.newRecordBtn.textContent = `新增${config().title.replace("库", "")}`;
   renderFilters();
   const visibleRows = filterRows(rows());
   renderSummary(visibleRows);
-  renderForm();
   renderImportPreview();
   renderImportHistory();
   renderDuplicatePanel();
   renderTable(visibleRows);
+  renderEditor();
 }
 
 function render() {
   renderTabs();
   if (state.activeTab === SETTINGS_TAB.key) {
+    resetEditorState();
+    renderEditor();
     renderSettingsPage();
     return;
   }
   if (state.activeTab === MATCHING_TAB.key) {
+    resetEditorState();
+    renderEditor();
     renderMatchingPage();
     return;
   }
@@ -1539,7 +1622,7 @@ function applyRecommendations(record, type, mode = "emptyOnly") {
 function readFormRecord(options = {}) {
   const shouldApply = options.applyRecommendations !== false;
   const formData = new FormData(elements.form);
-  const record = state.editingId ? clone(rows().find((row) => row.id === state.editingId)) : defaultRecord(state.activeTab);
+  const record = clone(state.editorDraft || (state.editingId ? rows().find((row) => row.id === state.editingId) : defaultRecord(state.activeTab)));
 
   for (const field of config().fields) {
     record[field.key] = fieldValue(field, formData.get(field.key));
@@ -1551,23 +1634,98 @@ function readFormRecord(options = {}) {
   return record;
 }
 
-async function handleSubmit(event) {
-  event.preventDefault();
+function hasMeaningfulRecordContent(record) {
+  return config().fields.some((field) => {
+    const value = record[field.key];
+    if (field.type === "number") return toNumber(value) !== 0;
+    if (field.type === "select") return false;
+    return Boolean(text(value));
+  });
+}
+
+function focusFirstMissingRequired(record) {
+  const required = config().fields.find((field) => field.required && !text(record[field.key]));
+  elements.form.elements[required?.key]?.focus();
+}
+
+async function commitEditor({ close = false, showError = false } = {}) {
+  if (!state.editorOpen) return true;
   const record = readFormRecord();
+  const changed = editableSnapshot(record) !== state.editorBaseline;
+
+  if (!changed) {
+    if (close) {
+      resetEditorState();
+      render();
+    }
+    return true;
+  }
+
+  if (!state.editingId && !hasMeaningfulRecordContent(record)) {
+    if (close) {
+      resetEditorState();
+      render();
+    }
+    return true;
+  }
+
+  const missingRequired = config().fields.find((field) => field.required && !text(record[field.key]));
+  if (missingRequired) {
+    elements.editorStatus.textContent = `请填写必填项：${missingRequired.label}。`;
+    focusFirstMissingRequired(record);
+    return false;
+  }
+
   const identityConflicts = findIdentityConflicts(record);
   if (identityConflicts.length) {
     renderIdentityCheck();
     const first = identityConflicts[0];
-    window.alert(`无法保存：${first.matched.join("、")}已存在于${entityConfig[first.type].title}「${text(first.row.name) || text(first.row.social_url)}」。请先编辑原记录，避免重复录入。`);
-    return;
+    const message = `无法保存：${first.matched.join("、")}已存在于${entityConfig[first.type].title}「${text(first.row.name) || text(first.row.social_url)}」。`;
+    elements.editorStatus.textContent = message;
+    if (showError) window.alert(message);
+    return false;
   }
+
   const list = rows();
   const index = list.findIndex((row) => row.id === record.id);
   if (index >= 0) list[index] = record;
   else list.unshift(record);
-  state.editingId = null;
   await persist();
-  render();
+  if (close) {
+    resetEditorState();
+    render();
+  } else {
+    state.editingId = record.id;
+    state.editorDraft = clone(record);
+    state.editorBaseline = editableSnapshot(record);
+    elements.editorStatus.textContent = "已自动保存。";
+  }
+  return true;
+}
+
+async function handleSubmit(event) {
+  event.preventDefault();
+  await commitEditor({ close: true, showError: true });
+}
+
+async function closeEditor() {
+  await commitEditor({ close: true });
+}
+
+async function handleEditorBackdropClick(event) {
+  if (event.target !== elements.editorBackdrop) return;
+  await closeEditor();
+}
+
+async function handleEditorEscape(event) {
+  if (event.key === "Escape" && state.editorOpen) {
+    event.preventDefault();
+    await closeEditor();
+  }
+}
+
+async function handleEditorCloseClick() {
+  await closeEditor();
 }
 
 async function transferLeadToCreator(leadId) {
@@ -1597,8 +1755,8 @@ async function transferLeadToCreator(leadId) {
   }
   state.data.creators.unshift(creator);
   state.activeTab = "creators";
-  state.editingId = creator.id;
-  state.filters = { query: "", filterA: "全部", filterB: "全部" };
+  resetEditorState();
+  state.filters = { query: "", filterA: "全部", filterB: "全部", filterC: "全部" };
   await persist();
   render();
 }
@@ -1943,8 +2101,7 @@ function renderDuplicatePanel() {
 
   elements.duplicatePanel.querySelectorAll("[data-view-duplicate]").forEach((button) => {
     button.addEventListener("click", () => {
-      state.editingId = button.dataset.viewDuplicate;
-      render();
+      openEditor(button.dataset.viewDuplicate);
     });
   });
 
@@ -2014,7 +2171,7 @@ async function rollbackImport(historyId) {
   state.data.matches = Array.isArray(snapshot?.matches) ? snapshot.matches : state.data.matches;
   state.data.meta = { version: 1, ...(snapshot?.meta || {}), updatedAt: new Date().toISOString() };
   state.data.importHistory = history.filter((entry) => entry.id !== historyId);
-  state.editingId = null;
+  resetEditorState();
   state.importDraft = null;
   elements.importStatus.textContent = `已回滚导入：${item.filename || "未命名文件"}。`;
   await persist();
@@ -2068,7 +2225,7 @@ async function mergeDuplicateGroup(ids) {
   state.data[state.activeTab] = list
     .map((row, index) => (index === keeperIndex ? merged : row))
     .filter((row) => !duplicateIds.has(row.id));
-  state.editingId = null;
+  resetEditorState();
   state.duplicateIgnores.delete(duplicateIgnoreKey(state.activeTab, ids));
   saveDuplicateIgnores();
   elements.importStatus.textContent = `已合并 ${duplicates.length + 1} 条疑似重复记录，保留 ${summarizeDuplicateRow(merged)}。`;
@@ -2252,13 +2409,15 @@ function exportCsv() {
 async function importJson(file) {
   const payload = JSON.parse(await file.text());
   state.data = ensureStateShape(payload);
-  state.editingId = null;
+  resetEditorState();
   await persist();
   render();
 }
 
 function resetForm() {
   state.editingId = null;
+  state.editorDraft = defaultRecord(state.activeTab);
+  state.editorBaseline = editableSnapshot(state.editorDraft);
   renderForm();
 }
 
@@ -2282,6 +2441,10 @@ function bindEvents() {
   bindKeySource(elements.aiKeySource, elements.aiApiKey);
   bindKeySource(elements.leadAiKeySource, elements.leadAiApiKey);
   elements.resetFormBtn.addEventListener("click", resetForm);
+  elements.newRecordBtn.addEventListener("click", () => openEditor());
+  elements.editorBackdrop.addEventListener("click", handleEditorBackdropClick);
+  elements.closeEditorBtn.addEventListener("click", handleEditorCloseClick);
+  document.addEventListener("keydown", handleEditorEscape);
   elements.resetMatchBtn.addEventListener("click", () => {
     state.matchingEditingId = null;
     elements.matchingStatus.textContent = "";
@@ -2310,11 +2473,17 @@ function bindEvents() {
     renderSummary(filterRows(rows()));
     renderTable(filterRows(rows()));
   });
+  elements.filterC.addEventListener("change", () => {
+    if (state.activeTab === SETTINGS_TAB.key || state.activeTab === MATCHING_TAB.key) return;
+    state.filters.filterC = elements.filterC.value;
+    renderSummary(filterRows(rows()));
+    renderTable(filterRows(rows()));
+  });
   elements.exportStateBtn.addEventListener("click", exportJson);
   elements.exportCsvBtn.addEventListener("click", exportCsv);
   elements.settingsBtn.addEventListener("click", () => {
     state.activeTab = SETTINGS_TAB.key;
-    state.editingId = null;
+    resetEditorState();
     state.matchingEditingId = null;
     render();
   });
