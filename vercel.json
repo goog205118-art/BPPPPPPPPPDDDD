@@ -1,4 +1,9 @@
 {
+  "functions": {
+    "api/[...route].mjs": {
+      "runtime": "nodejs20.x"
+    }
+  },
   "rewrites": [
     { "source": "/", "destination": "/app/index.html" },
     { "source": "/index.html", "destination": "/app/index.html" },

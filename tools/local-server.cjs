@@ -8,7 +8,7 @@ const url = require("url");
 const net = require("net");
 const { spawnSync } = require("child_process");
 
-const rootDir = __dirname;
+const rootDir = path.resolve(__dirname, "..");
 const appDir = path.join(rootDir, "app");
 const dataDir = path.join(rootDir, "data");
 const stateFile = path.join(dataDir, "state.json");

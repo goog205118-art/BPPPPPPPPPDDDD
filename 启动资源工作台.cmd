@@ -25,7 +25,7 @@ echo Open http://localhost:4173 in your browser after the service is ready.
 echo Keep this window open while using the workbench. Press Ctrl+C to stop it.
 echo.
 
-node server.js
+node tools\local-server.cjs
 
 if errorlevel 1 (
   echo.
