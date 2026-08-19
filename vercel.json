@@ -1,13 +1,35 @@
 {
-  "functions": {
-    "api/[...route].mjs": {
-      "runtime": "nodejs20.x"
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "builds": [
+    {
+      "src": "api/[...route].mjs",
+      "use": "@vercel/node"
+    },
+    {
+      "src": "app/**",
+      "use": "@vercel/static"
     }
-  },
-  "rewrites": [
-    { "source": "/", "destination": "/app/index.html" },
-    { "source": "/index.html", "destination": "/app/index.html" },
-    { "source": "/styles.css", "destination": "/app/styles.css" },
-    { "source": "/app.js", "destination": "/app/app.js" }
+  ],
+  "routes": [
+    {
+      "src": "/api/(.*)",
+      "dest": "/api/[...route].mjs"
+    },
+    {
+      "src": "/",
+      "dest": "/app/index.html"
+    },
+    {
+      "src": "/index.html",
+      "dest": "/app/index.html"
+    },
+    {
+      "src": "/styles.css",
+      "dest": "/app/styles.css"
+    },
+    {
+      "src": "/app.js",
+      "dest": "/app/app.js"
+    }
   ]
 }
