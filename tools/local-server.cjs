@@ -201,6 +201,7 @@ function saveState(nextState) {
   const payload = normalizeBusinessState({
     ...nextState,
     meta: {
+      ...(nextState?.meta || {}),
       version: 1,
       updatedAt: new Date().toISOString(),
     },

@@ -265,6 +265,82 @@ const entityConfig = {
   },
 };
 
+const configurableOptionFields = {
+  creators: [
+    { key: "brand", label: "品牌" },
+    { key: "country", label: "国家地区" },
+    { key: "niche", label: "内容垂类" },
+    { key: "platform", label: "平台" },
+    { key: "language", label: "语言" },
+    { key: "content_types", label: "内容类型" },
+  ],
+  resources: [
+    { key: "brand", label: "品牌" },
+    { key: "country", label: "国家地区" },
+    { key: "categories", label: "覆盖品类" },
+    { key: "type", label: "资源类型" },
+    { key: "users", label: "用户类型" },
+  ],
+  leads: [
+    { key: "brand", label: "品牌" },
+    { key: "country", label: "国家地区" },
+    { key: "niche", label: "内容垂类" },
+    { key: "platform", label: "平台" },
+  ],
+  cooperations: [
+    { key: "product", label: "合作产品" },
+    { key: "model", label: "合作方式" },
+    { key: "result", label: "复盘结论" },
+  ],
+};
+
+const filterDefinitions = {
+  creators: [
+    { key: "brand", label: "品牌" },
+    { key: "country", label: "国家地区" },
+    { key: "platform", label: "平台" },
+    { key: "niche", label: "内容垂类" },
+    { key: "status", label: "合作状态" },
+    { key: "competitor", label: "做过竞品" },
+    { key: "exchange", label: "接受置换" },
+    { key: "cps", label: "接受 CPS" },
+    { key: "longterm", label: "长期合作" },
+    { key: "ad_auth", label: "广告授权" },
+  ],
+  resources: [
+    { key: "brand", label: "品牌" },
+    { key: "country", label: "国家地区" },
+    { key: "type", label: "资源类型" },
+    { key: "categories", label: "覆盖品类" },
+    { key: "grade", label: "资源等级" },
+    { key: "fee", label: "是否收费" },
+    { key: "exclusivity", label: "要求独家" },
+    { key: "coupon", label: "接受优惠券" },
+    { key: "suitable_new", label: "适合新品" },
+    { key: "suitable_clearance", label: "适合清库存" },
+  ],
+  leads: [
+    { key: "brand", label: "品牌" },
+    { key: "country", label: "国家地区" },
+    { key: "platform", label: "平台" },
+    { key: "niche", label: "内容垂类" },
+    { key: "status", label: "开发状态" },
+    { key: "email", label: "邮箱", mode: "email" },
+  ],
+  cooperations: [
+    { key: "model", label: "合作方式" },
+    { key: "product", label: "合作产品" },
+    { key: "result", label: "复盘结论" },
+  ],
+};
+
+const defaultFilterPreferences = {
+  creators: ["brand", "country"],
+  resources: ["brand", "country"],
+  leads: ["brand", "platform", "email"],
+  cooperations: ["model", "result"],
+};
+
 const emptyState = {
   meta: { version: 1, updatedAt: new Date().toISOString() },
   creators: [],
@@ -285,7 +361,9 @@ const state = {
   matchingEditingId: null,
   importDraft: null,
   duplicateIgnores: new Set(),
-  filters: { query: "", filterA: "全部", filterB: "全部", filterC: "全部" },
+  filters: { query: "", activeKeys: [], values: {} },
+  filterMenu: null,
+  optionSettingsType: "creators",
   aiSettings: clone(defaultAiSettings),
 };
 
@@ -330,9 +408,17 @@ const elements = {
   editorStatus: document.getElementById("editorStatus"),
   assistantPanel: document.querySelector(".assistant"),
   searchInput: document.getElementById("searchInput"),
-  filterA: document.getElementById("filterA"),
-  filterB: document.getElementById("filterB"),
-  filterC: document.getElementById("filterC"),
+  filterUi: document.getElementById("filterUi"),
+  filterSetupBtn: document.getElementById("filterSetupBtn"),
+  activeFilters: document.getElementById("activeFilters"),
+  clearFiltersBtn: document.getElementById("clearFiltersBtn"),
+  filterPopover: document.getElementById("filterPopover"),
+  optionEntitySelect: document.getElementById("optionEntitySelect"),
+  optionFieldSelect: document.getElementById("optionFieldSelect"),
+  optionValueInput: document.getElementById("optionValueInput"),
+  addOptionBtn: document.getElementById("addOptionBtn"),
+  optionTags: document.getElementById("optionTags"),
+  optionSettingsStatus: document.getElementById("optionSettingsStatus"),
   tableHead: document.getElementById("tableHead"),
   tableBody: document.getElementById("tableBody"),
   assistantText: document.getElementById("assistantText"),
@@ -535,8 +621,60 @@ function resetEditorState() {
   state.editorOpen = false;
 }
 
-function brandOptions() {
-  return [...new Set([...rows("creators"), ...rows("resources")].map((row) => text(row.brand)).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-CN"));
+function optionSetKey(type, fieldKey) {
+  return `${type}.${fieldKey}`;
+}
+
+function getConfigurableFields(type = state.activeTab) {
+  return configurableOptionFields[type] || [];
+}
+
+function getConfigurableField(type, fieldKey) {
+  return getConfigurableFields(type).find((field) => field.key === fieldKey);
+}
+
+function isConfigurableField(type, fieldKey) {
+  return Boolean(getConfigurableField(type, fieldKey));
+}
+
+function getSavedOptionValues(type, fieldKey) {
+  return state.data.meta.optionSets?.[optionSetKey(type, fieldKey)] || [];
+}
+
+function getOptionValues(type, fieldKey) {
+  const configured = getSavedOptionValues(type, fieldKey);
+  const actual = rows(type).map((row) => text(row[fieldKey])).filter(Boolean);
+  return [...new Set([...configured, ...actual])]
+    .sort((a, b) => a.localeCompare(b, "zh-CN", { sensitivity: "base" }));
+}
+
+function getFilterDefinitions(type = state.activeTab) {
+  return filterDefinitions[type] || [];
+}
+
+function getFilterDefinition(filterKey, type = state.activeTab) {
+  return getFilterDefinitions(type).find((filter) => filter.key === filterKey);
+}
+
+function getFilterPreferences(type = state.activeTab) {
+  const allowed = new Set(getFilterDefinitions(type).map((filter) => filter.key));
+  const saved = state.data.meta.filterPreferences?.[type];
+  const preferences = Array.isArray(saved) ? saved : defaultFilterPreferences[type] || [];
+  return [...new Set(preferences.filter((key) => allowed.has(key)))];
+}
+
+function createFilters(type = state.activeTab) {
+  return { query: "", activeKeys: getFilterPreferences(type), values: {} };
+}
+
+function normalizeFilterPreferences(rawPreferences = {}) {
+  const output = {};
+  for (const type of Object.keys(entityConfig)) {
+    const allowed = new Set(getFilterDefinitions(type).map((filter) => filter.key));
+    const incoming = Array.isArray(rawPreferences[type]) ? rawPreferences[type] : defaultFilterPreferences[type] || [];
+    output[type] = [...new Set(incoming.filter((key) => allowed.has(key)))];
+  }
+  return output;
 }
 
 function defaultRecord(type) {
@@ -557,7 +695,12 @@ function defaultRecord(type) {
 
 function ensureStateShape(nextState) {
   const shaped = { ...clone(emptyState), ...(nextState || {}) };
-  shaped.meta = { version: 1, ...(nextState?.meta || {}) };
+  shaped.meta = {
+    version: 1,
+    ...(nextState?.meta || {}),
+    optionSets: { ...(nextState?.meta?.optionSets || {}) },
+    filterPreferences: normalizeFilterPreferences(nextState?.meta?.filterPreferences),
+  };
   shaped.creators = Array.isArray(nextState?.creators) ? nextState.creators.map((row) => ({ ...row, country: normalizeCountry(row.country) })) : [];
   shaped.resources = Array.isArray(nextState?.resources) ? nextState.resources.map((row) => ({ ...row, country: normalizeCountry(row.country) })) : [];
   shaped.leads = Array.isArray(nextState?.leads) ? nextState.leads.map((row) => ({ ...row, country: normalizeCountry(row.country) })) : [];
@@ -591,7 +734,13 @@ async function loadState() {
 }
 
 async function persist() {
-  state.data.meta = { version: 1, updatedAt: new Date().toISOString() };
+  state.data.meta = {
+    ...state.data.meta,
+    version: 1,
+    updatedAt: new Date().toISOString(),
+    optionSets: { ...(state.data.meta.optionSets || {}) },
+    filterPreferences: normalizeFilterPreferences(state.data.meta.filterPreferences),
+  };
   const payload = JSON.stringify(state.data, null, 2);
   localStorage.setItem(STORAGE_FALLBACK, payload);
   const response = await apiFetch(API_STATE, {
@@ -770,11 +919,14 @@ function filterRows(dataRows) {
   return dataRows.filter((row) => {
     const haystack = Object.values(row).map((value) => text(value).toLowerCase()).join(" ");
     if (query && !haystack.includes(query)) return false;
-    for (const [index, filter] of config().filters.entries()) {
-      const key = ["filterA", "filterB", "filterC"][index];
-      if (!key || state.filters[key] === "全部") continue;
+
+    for (const filterKey of state.filters.activeKeys) {
+      const selected = state.filters.values[filterKey] || [];
+      if (!selected.length) continue;
+      const filter = getFilterDefinition(filterKey);
+      if (!filter) continue;
       const current = filter.mode === "email" ? (text(row.email) ? "有邮箱" : "无邮箱") : text(row[filter.key]);
-      if (current !== state.filters[key]) return false;
+      if (!selected.includes(current)) return false;
     }
     return true;
   });
@@ -792,7 +944,8 @@ function renderTabs() {
       resetEditorState();
       state.matchingEditingId = null;
       state.importDraft = null;
-      state.filters = { query: "", filterA: "全部", filterB: "全部", filterC: "全部" };
+      state.filters = createFilters(state.activeTab);
+      state.filterMenu = null;
       elements.searchInput.value = "";
       elements.importStatus.textContent = "";
       render();
@@ -807,28 +960,105 @@ function renderSummary(visibleRows) {
 }
 
 function renderFilters() {
-  const selects = [elements.filterA, elements.filterB, elements.filterC];
-  const filterKeys = ["filterA", "filterB", "filterC"];
-  const fill = (select, filter, value) => {
-    if (!filter) {
-      select.innerHTML = "";
-      select.classList.add("hidden");
-      return "全部";
-    }
-    const actualOptions = filter.dynamic
-      ? ["全部", ...[...new Set(rows().map((row) => text(row[filter.key])).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-CN"))]
-      : filter.options;
-    if (!actualOptions.includes(value)) value = "全部";
-    select.innerHTML = actualOptions.map((option) => `<option value="${option}">${filter.label}：${option}</option>`).join("");
-    select.value = value;
-    select.classList.remove("hidden");
-    return value;
-  };
+  const activeKeys = new Set(getFilterPreferences());
+  state.filters.activeKeys = state.filters.activeKeys.filter((key) => activeKeys.has(key));
+  for (const key of activeKeys) {
+    if (!state.filters.activeKeys.includes(key)) state.filters.activeKeys.push(key);
+  }
+  for (const key of Object.keys(state.filters.values)) {
+    if (!activeKeys.has(key)) delete state.filters.values[key];
+  }
 
-  selects.forEach((select, index) => {
-    const key = filterKeys[index];
-    state.filters[key] = fill(select, config().filters[index], state.filters[key]);
-  });
+  const hasSelections = Object.values(state.filters.values).some((values) => values?.length);
+  elements.clearFiltersBtn.classList.toggle("hidden", !hasSelections);
+  elements.activeFilters.innerHTML = state.filters.activeKeys
+    .map((key) => {
+      const filter = getFilterDefinition(key);
+      if (!filter) return "";
+      const count = state.filters.values[key]?.length || 0;
+      const label = count ? `${filter.label}：${count}` : filter.label;
+      return `<button type="button" class="ghost active-filter ${state.filterMenu?.mode === "values" && state.filterMenu.key === key ? "active" : ""}" data-filter-control="${escapeHtml(key)}">${escapeHtml(label)}</button>`;
+    })
+    .join("");
+
+  elements.filterSetupBtn.classList.toggle("active", state.filterMenu?.mode === "setup");
+  renderFilterPopover();
+}
+
+function filterOptions(filter) {
+  if (filter.mode === "email") return ["有邮箱", "无邮箱"];
+  const field = config().fields.find((item) => item.key === filter.key);
+  const fixed = field?.type === "select" ? field.options : [];
+  const configured = isConfigurableField(state.activeTab, filter.key) ? getSavedOptionValues(state.activeTab, filter.key) : [];
+  const actual = rows().map((row) => text(row[filter.key])).filter(Boolean);
+  return [...new Set([...fixed, ...configured, ...actual])]
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b, "zh-CN", { sensitivity: "base" }));
+}
+
+function renderFilterPopover() {
+  const menu = state.filterMenu;
+  if (!menu) {
+    elements.filterPopover.innerHTML = "";
+    elements.filterPopover.classList.add("hidden");
+    return;
+  }
+
+  if (menu.mode === "setup") {
+    const selected = new Set(state.filters.activeKeys);
+    elements.filterPopover.innerHTML = `
+      <div class="filter-popover-head">
+        <strong>筛选内容</strong>
+      </div>
+      <div class="filter-option-list">
+        ${getFilterDefinitions()
+          .map(
+            (filter) => `
+              <label class="filter-option">
+                <input type="checkbox" data-filter-visibility="${escapeHtml(filter.key)}" ${selected.has(filter.key) ? "checked" : ""} />
+                <span>${escapeHtml(filter.label)}</span>
+              </label>`,
+          )
+          .join("")}
+      </div>`;
+  } else {
+    const filter = getFilterDefinition(menu.key);
+    if (!filter) {
+      state.filterMenu = null;
+      renderFilterPopover();
+      return;
+    }
+    const selected = new Set(state.filters.values[filter.key] || []);
+    const options = filterOptions(filter);
+    elements.filterPopover.innerHTML = `
+      <div class="filter-popover-head">
+        <strong>${escapeHtml(filter.label)}</strong>
+        <button type="button" class="filter-reset" data-filter-reset="${escapeHtml(filter.key)}">清空</button>
+      </div>
+      <div class="filter-option-list">
+        ${
+          options.length
+            ? options
+                .map(
+                  (value) => `
+                    <label class="filter-option">
+                      <input type="checkbox" data-filter-value="${escapeHtml(filter.key)}" value="${escapeHtml(value)}" ${selected.has(value) ? "checked" : ""} />
+                      <span>${escapeHtml(value)}</span>
+                    </label>`,
+                )
+                .join("")
+            : `<p class="filter-empty">暂无可筛选内容</p>`
+        }
+      </div>`;
+  }
+  elements.filterPopover.classList.remove("hidden");
+}
+
+function renderFilteredRows() {
+  const visibleRows = filterRows(rows());
+  renderFilters();
+  renderSummary(visibleRows);
+  renderTable(visibleRows);
 }
 
 function renderForm() {
@@ -855,12 +1085,6 @@ function renderForm() {
         return [...section, `<div class="${fieldClass}"><label for="${field.key}">${field.label}${mark}</label><textarea id="${field.key}" name="${field.key}" ${required} ${placeholder}>${escapeHtml(value)}</textarea></div>`];
       }
 
-      if (field.type === "select") {
-        return [...section, `<div class="${fieldClass}"><label for="${field.key}">${field.label}${mark}</label><select id="${field.key}" name="${field.key}" ${required}>${field.options
-          .map((option) => `<option value="${escapeHtml(option)}" ${text(value) === option ? "selected" : ""}>${escapeHtml(option)}</option>`)
-          .join("")}</select></div>`];
-      }
-
       if (field.type === "reference") {
         const sourceRows = rows(field.reference);
         const selectedValue = text(value);
@@ -872,12 +1096,19 @@ function renderForm() {
         ];
       }
 
-      if (field.type === "brand") {
-        const options = brandOptions().map((brand) => `<option value="${escapeHtml(brand)}"></option>`).join("");
+      if (isConfigurableField(state.activeTab, field.key)) {
+        const listId = `option-list-${state.activeTab}-${field.key}`;
+        const options = getOptionValues(state.activeTab, field.key).map((option) => `<option value="${escapeHtml(option)}"></option>`).join("");
         return [
           ...section,
-          `<div class="${fieldClass}"><label for="${field.key}">${field.label}${mark}</label><div class="field-with-action"><input id="${field.key}" name="${field.key}" type="text" list="brandOptions" value="${escapeHtml(value)}" ${required} ${placeholder} /><button type="button" id="addBrandBtn" class="ghost">新增品牌</button></div><datalist id="brandOptions">${options}</datalist></div>`,
+          `<div class="${fieldClass}"><label for="${field.key}">${field.label}${mark}</label><input id="${field.key}" name="${field.key}" type="text" list="${listId}" value="${escapeHtml(value)}" ${required} ${placeholder} /><datalist id="${listId}">${options}</datalist></div>`,
         ];
+      }
+
+      if (field.type === "select") {
+        return [...section, `<div class="${fieldClass}"><label for="${field.key}">${field.label}${mark}</label><select id="${field.key}" name="${field.key}" ${required}>${field.options
+          .map((option) => `<option value="${escapeHtml(option)}" ${text(value) === option ? "selected" : ""}>${escapeHtml(option)}</option>`)
+          .join("")}</select></div>`];
       }
 
       if (["creators", "leads"].includes(state.activeTab) && field.key === "social_url") {
@@ -892,18 +1123,6 @@ function renderForm() {
 
   const creatorAiBtn = document.getElementById("creatorAiBtn");
   if (creatorAiBtn) creatorAiBtn.addEventListener("click", handleCreatorAiEnrich);
-  const addBrandBtn = document.getElementById("addBrandBtn");
-  if (addBrandBtn) {
-    addBrandBtn.addEventListener("click", () => {
-      const brand = text(window.prompt("输入新品牌名称"));
-      if (!brand) return;
-      const control = elements.form.elements.brand;
-      if (control) {
-        control.value = brand;
-        renderAssistant();
-      }
-    });
-  }
   const creatorReference = elements.form.elements.creator_id;
   if (creatorReference) {
     creatorReference.addEventListener("change", () => syncCooperationName("creator"));
@@ -1166,10 +1385,81 @@ function setEntityUiVisible(isVisible) {
   elements.matchingPage.classList.toggle("hidden", isVisible);
 }
 
+function renderOptionSettings() {
+  const availableTypes = Object.keys(configurableOptionFields).filter((type) => getConfigurableFields(type).length);
+  if (!availableTypes.includes(state.optionSettingsType)) state.optionSettingsType = availableTypes[0] || "creators";
+  elements.optionEntitySelect.innerHTML = availableTypes
+    .map((type) => `<option value="${escapeHtml(type)}">${escapeHtml(entityConfig[type].title)}</option>`)
+    .join("");
+  elements.optionEntitySelect.value = state.optionSettingsType;
+
+  const fields = getConfigurableFields(state.optionSettingsType);
+  const currentField = fields.some((field) => field.key === elements.optionFieldSelect.value) ? elements.optionFieldSelect.value : fields[0]?.key || "";
+  elements.optionFieldSelect.innerHTML = fields.map((field) => `<option value="${escapeHtml(field.key)}">${escapeHtml(field.label)}</option>`).join("");
+  elements.optionFieldSelect.value = currentField;
+
+  const configured = getSavedOptionValues(state.optionSettingsType, currentField);
+  elements.optionTags.innerHTML = configured.length
+    ? configured
+        .map(
+          (value) => `
+            <span class="option-tag">
+              <span>${escapeHtml(value)}</span>
+              <button type="button" class="option-tag-remove" data-remove-option="${escapeHtml(currentField)}" data-option-value="${escapeHtml(value)}" aria-label="移除 ${escapeHtml(value)}" title="移除">×</button>
+            </span>`,
+        )
+        .join("")
+    : `<p class="option-empty">暂无自定义候选项</p>`;
+  elements.optionSettingsStatus.textContent = "";
+}
+
+async function addCustomOption() {
+  const type = state.optionSettingsType;
+  const fieldKey = elements.optionFieldSelect.value;
+  const field = getConfigurableField(type, fieldKey);
+  let value = text(elements.optionValueInput.value);
+  if (!field || !value) {
+    elements.optionSettingsStatus.textContent = "请输入要添加的选项。";
+    elements.optionValueInput.focus();
+    return;
+  }
+  if (fieldKey === "country") value = normalizeCountry(value);
+
+  const key = optionSetKey(type, fieldKey);
+  const existing = getSavedOptionValues(type, fieldKey);
+  if (existing.some((item) => normalizeHeader(item) === normalizeHeader(value))) {
+    elements.optionSettingsStatus.textContent = "该选项已存在。";
+    return;
+  }
+  state.data.meta.optionSets[key] = [...existing, value];
+  try {
+    await persist();
+    elements.optionValueInput.value = "";
+    renderOptionSettings();
+    elements.optionSettingsStatus.textContent = "已加入候选项。";
+  } catch (error) {
+    elements.optionSettingsStatus.textContent = error.message || "保存选项失败。";
+  }
+}
+
+async function removeCustomOption(fieldKey, value) {
+  const type = state.optionSettingsType;
+  const key = optionSetKey(type, fieldKey);
+  const next = getSavedOptionValues(type, fieldKey).filter((item) => item !== value);
+  state.data.meta.optionSets[key] = next;
+  try {
+    await persist();
+    renderOptionSettings();
+  } catch (error) {
+    elements.optionSettingsStatus.textContent = error.message || "移除选项失败。";
+  }
+}
+
 function renderSettingsPage() {
   setEntityUiVisible(false);
   elements.matchingPage.classList.add("hidden");
   renderAiSettings();
+  renderOptionSettings();
 }
 
 function setMatchingUiVisible(isVisible) {
@@ -1756,7 +2046,8 @@ async function transferLeadToCreator(leadId) {
   state.data.creators.unshift(creator);
   state.activeTab = "creators";
   resetEditorState();
-  state.filters = { query: "", filterA: "全部", filterB: "全部", filterC: "全部" };
+  state.filters = createFilters("creators");
+  state.filterMenu = null;
   await persist();
   render();
 }
@@ -2458,26 +2749,86 @@ function bindEvents() {
   elements.searchInput.addEventListener("input", () => {
     if (state.activeTab === SETTINGS_TAB.key || state.activeTab === MATCHING_TAB.key) return;
     state.filters.query = elements.searchInput.value;
-    renderSummary(filterRows(rows()));
-    renderTable(filterRows(rows()));
+    renderFilteredRows();
   });
-  elements.filterA.addEventListener("change", () => {
-    if (state.activeTab === SETTINGS_TAB.key || state.activeTab === MATCHING_TAB.key) return;
-    state.filters.filterA = elements.filterA.value;
-    renderSummary(filterRows(rows()));
-    renderTable(filterRows(rows()));
+  elements.filterSetupBtn.addEventListener("click", () => {
+    state.filterMenu = state.filterMenu?.mode === "setup" ? null : { mode: "setup" };
+    renderFilters();
   });
-  elements.filterB.addEventListener("change", () => {
-    if (state.activeTab === SETTINGS_TAB.key || state.activeTab === MATCHING_TAB.key) return;
-    state.filters.filterB = elements.filterB.value;
-    renderSummary(filterRows(rows()));
-    renderTable(filterRows(rows()));
+  elements.activeFilters.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-filter-control]");
+    if (!button) return;
+    event.stopPropagation();
+    const key = button.dataset.filterControl;
+    state.filterMenu = state.filterMenu?.mode === "values" && state.filterMenu.key === key ? null : { mode: "values", key };
+    renderFilters();
   });
-  elements.filterC.addEventListener("change", () => {
-    if (state.activeTab === SETTINGS_TAB.key || state.activeTab === MATCHING_TAB.key) return;
-    state.filters.filterC = elements.filterC.value;
-    renderSummary(filterRows(rows()));
-    renderTable(filterRows(rows()));
+  elements.filterPopover.addEventListener("change", async (event) => {
+    const visibility = event.target.closest("[data-filter-visibility]");
+    if (visibility) {
+      const key = visibility.dataset.filterVisibility;
+      const active = new Set(state.filters.activeKeys);
+      if (visibility.checked) active.add(key);
+      else {
+        active.delete(key);
+        delete state.filters.values[key];
+        if (state.filterMenu?.mode === "values" && state.filterMenu.key === key) state.filterMenu = { mode: "setup" };
+      }
+      state.filters.activeKeys = [...active];
+      state.data.meta.filterPreferences[state.activeTab] = [...active];
+      try {
+        await persist();
+      } catch (error) {
+        elements.importStatus.textContent = error.message || "筛选设置保存失败";
+      }
+      renderFilteredRows();
+      return;
+    }
+
+    const valueControl = event.target.closest("[data-filter-value]");
+    if (!valueControl) return;
+    const key = valueControl.dataset.filterValue;
+    const values = new Set(state.filters.values[key] || []);
+    if (valueControl.checked) values.add(valueControl.value);
+    else values.delete(valueControl.value);
+    state.filters.values[key] = [...values];
+    renderFilteredRows();
+  });
+  elements.filterPopover.addEventListener("click", (event) => {
+    event.stopPropagation();
+    const reset = event.target.closest("[data-filter-reset]");
+    if (!reset) return;
+    delete state.filters.values[reset.dataset.filterReset];
+    renderFilteredRows();
+  });
+  elements.clearFiltersBtn.addEventListener("click", () => {
+    state.filters.values = {};
+    renderFilteredRows();
+  });
+  document.addEventListener("click", (event) => {
+    if (!state.filterMenu || elements.filterUi.contains(event.target)) return;
+    state.filterMenu = null;
+    renderFilters();
+  });
+  elements.optionEntitySelect.addEventListener("change", () => {
+    state.optionSettingsType = elements.optionEntitySelect.value;
+    elements.optionValueInput.value = "";
+    renderOptionSettings();
+  });
+  elements.optionFieldSelect.addEventListener("change", () => {
+    elements.optionValueInput.value = "";
+    renderOptionSettings();
+  });
+  elements.addOptionBtn.addEventListener("click", addCustomOption);
+  elements.optionValueInput.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    event.preventDefault();
+    addCustomOption();
+  });
+  elements.optionTags.addEventListener("click", async (event) => {
+    const button = event.target.closest("[data-remove-option]");
+    if (!button) return;
+    await removeCustomOption(button.dataset.removeOption, button.dataset.optionValue);
   });
   elements.exportStateBtn.addEventListener("click", exportJson);
   elements.exportCsvBtn.addEventListener("click", exportCsv);

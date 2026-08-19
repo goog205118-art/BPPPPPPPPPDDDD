@@ -662,6 +662,90 @@ h1 {
   flex-wrap: wrap;
 }
 
+.option-settings {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  border: 1px solid #e4eaf3;
+  border-radius: 8px;
+  background: #fbfdff;
+  padding: 12px;
+}
+
+.option-settings-head h3 {
+  margin: 0 0 4px;
+  font-size: 0.95rem;
+}
+
+.option-settings-head p,
+.option-settings-status,
+.option-empty {
+  min-height: 0;
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.8rem;
+  line-height: 1.4;
+}
+
+.option-settings-controls {
+  display: grid;
+  grid-template-columns: minmax(130px, 0.7fr) minmax(150px, 0.8fr) minmax(220px, 1.35fr);
+  gap: 10px 12px;
+  align-items: end;
+}
+
+.option-value-action {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.option-value-action button {
+  min-height: 36px;
+}
+
+.option-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  min-height: 28px;
+}
+
+.option-tag {
+  display: inline-flex;
+  max-width: 100%;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid #cfdcf8;
+  border-radius: 999px;
+  background: #f0f5ff;
+  color: #274ba8;
+  padding: 0.22rem 0.28rem 0.22rem 0.54rem;
+  font-size: 0.8rem;
+}
+
+.option-tag > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.option-tag-remove {
+  width: 22px;
+  min-height: 22px;
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: #4561a8;
+  font-size: 1rem;
+  line-height: 1;
+}
+
+.option-tag-remove:hover {
+  background: #dce8ff;
+}
+
 .import-preview {
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -936,10 +1020,10 @@ h1 {
   gap: 8px;
   flex-wrap: wrap;
   min-width: 0;
+  align-items: center;
 }
 
-.search-group input,
-.search-group select {
+.search-group input {
   border: 1px solid var(--line);
   border-radius: 8px;
   min-height: 34px;
@@ -950,6 +1034,126 @@ h1 {
 .search-group input {
   min-width: 320px;
   flex: 1;
+}
+
+.filter-ui {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.filter-ui > .ghost,
+.active-filter {
+  min-height: 34px;
+  padding: 0.42rem 0.58rem;
+  font-size: 0.84rem;
+}
+
+.filter-ui .active {
+  border-color: #9ab3ff;
+  background: #eef3ff;
+  color: #244bb7;
+}
+
+.active-filters {
+  display: flex;
+  min-width: 0;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.active-filter {
+  max-width: 150px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.filter-clear {
+  color: var(--muted);
+}
+
+.filter-popover {
+  position: absolute;
+  z-index: 12;
+  top: calc(100% + 7px);
+  left: 0;
+  width: min(300px, calc(100vw - 44px));
+  max-height: min(390px, calc(100vh - 180px));
+  overflow: auto;
+  border: 1px solid #cbd7e8;
+  border-radius: 8px;
+  background: white;
+  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.15);
+  padding: 8px;
+}
+
+.filter-popover-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 2px 4px 8px;
+  border-bottom: 1px solid #edf1f7;
+  color: #334155;
+  font-size: 0.84rem;
+}
+
+.filter-reset {
+  min-height: 26px;
+  padding: 0.24rem 0.42rem;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #4863aa;
+  font-size: 0.78rem;
+}
+
+.filter-reset:hover {
+  background: #eff4ff;
+}
+
+.filter-option-list {
+  display: grid;
+  gap: 2px;
+  padding-top: 6px;
+}
+
+.filter-option {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 8px;
+  border-radius: 6px;
+  padding: 0.4rem;
+  color: #334155;
+  font-size: 0.84rem;
+  cursor: pointer;
+}
+
+.filter-option:hover {
+  background: #f4f7fc;
+}
+
+.filter-option input {
+  width: 15px;
+  height: 15px;
+  margin: 0;
+  accent-color: var(--brand);
+}
+
+.filter-option span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.filter-empty {
+  margin: 4px;
+  color: var(--muted);
+  font-size: 0.82rem;
 }
 
 .table-wrap {
@@ -1157,6 +1361,14 @@ tbody tr:hover {
 
   .search-group input {
     min-width: 100%;
+  }
+
+  .filter-ui {
+    width: 100%;
+  }
+
+  .option-settings-controls {
+    grid-template-columns: 1fr;
   }
 
   .form {

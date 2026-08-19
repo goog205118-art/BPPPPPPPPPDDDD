@@ -207,7 +207,7 @@ async function loadState() {
 async function saveState(nextState) {
   const state = normalizeBusinessState({
     ...nextState,
-    meta: { version: 1, updatedAt: new Date().toISOString() },
+    meta: { ...(nextState?.meta || {}), version: 1, updatedAt: new Date().toISOString() },
   });
   await writeBlobJson(STATE_BLOB, state);
   return state;

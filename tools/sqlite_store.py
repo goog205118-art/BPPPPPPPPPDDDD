@@ -189,8 +189,13 @@ def rows_to_state(conn):
                 state["meta"][row["key"]] = int(row["value"])
             except (TypeError, ValueError):
                 state["meta"][row["key"]] = row["value"]
-        else:
+        elif row["key"] == "updatedAt":
             state["meta"][row["key"]] = row["value"]
+        else:
+            try:
+                state["meta"][row["key"]] = json.loads(row["value"])
+            except (TypeError, ValueError):
+                state["meta"][row["key"]] = row["value"]
 
     for table in SCHEMA:
         rows = conn.execute(f"SELECT * FROM {table} ORDER BY updatedAt DESC, createdAt DESC").fetchall()
@@ -230,14 +235,18 @@ def save_state(conn, state):
             conn.execute(f"DELETE FROM {table}")
 
         conn.execute("DELETE FROM meta")
-        conn.execute(
-            "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
-            ("version", str(meta.get("version", 1))),
-        )
-        conn.execute(
-            "INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)",
-            ("updatedAt", meta.get("updatedAt") or current_time_iso()),
-        )
+        for key, value in {
+            **meta,
+            "version": meta.get("version", 1),
+            "updatedAt": meta.get("updatedAt") or current_time_iso(),
+        }.items():
+            if key == "version":
+                stored_value = str(value)
+            elif key == "updatedAt":
+                stored_value = str(value)
+            else:
+                stored_value = json.dumps(value, ensure_ascii=False)
+            conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (str(key), stored_value))
 
         for table, columns in SCHEMA.items():
             rows = payload.get(table) or []

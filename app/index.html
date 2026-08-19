@@ -127,6 +127,33 @@
           </div>
           <p class="settings-status" id="aiSettingsStatus"></p>
         </form>
+        <section class="option-settings" aria-labelledby="optionSettingsTitle">
+          <div class="option-settings-head">
+            <div>
+              <h3 id="optionSettingsTitle">录入选项</h3>
+              <p>维护常用品牌、国家地区、内容垂类等候选项；录入时仍可直接填写新内容。</p>
+            </div>
+          </div>
+          <div class="option-settings-controls">
+            <div class="field">
+              <label for="optionEntitySelect">资料类别</label>
+              <select id="optionEntitySelect"></select>
+            </div>
+            <div class="field">
+              <label for="optionFieldSelect">选项字段</label>
+              <select id="optionFieldSelect"></select>
+            </div>
+            <div class="field option-value-field">
+              <label for="optionValueInput">新增选项</label>
+              <div class="option-value-action">
+                <input id="optionValueInput" type="text" placeholder="输入后加入候选项" />
+                <button type="button" id="addOptionBtn" class="primary">添加</button>
+              </div>
+            </div>
+          </div>
+          <div class="option-tags" id="optionTags"></div>
+          <p class="option-settings-status" id="optionSettingsStatus"></p>
+        </section>
       </section>
 
       <section class="matching-page panel hidden" id="matchingPage">
@@ -156,9 +183,12 @@
           <div class="list-toolbar">
             <div class="search-group">
               <input id="searchInput" type="search" placeholder="搜索名称、标签、国家、备注..." />
-              <select id="filterA"></select>
-              <select id="filterB"></select>
-              <select id="filterC" class="hidden"></select>
+              <div class="filter-ui" id="filterUi">
+                <button type="button" id="filterSetupBtn" class="ghost">筛选设置</button>
+                <div class="active-filters" id="activeFilters"></div>
+                <button type="button" id="clearFiltersBtn" class="ghost filter-clear hidden">清除</button>
+                <section class="filter-popover hidden" id="filterPopover" aria-live="polite"></section>
+              </div>
             </div>
             <div class="toolbar-actions">
               <button id="newRecordBtn" class="primary">新增记录</button>
