@@ -34,12 +34,19 @@ const defaultAiProfile = {
   model: "gemini-2.5-flash",
   proxyUrl: "",
 };
+const aiProfileKeys = ["standard", "advanced", "special"];
+const aiFeatureKeys = ["creator", "lead", "product", "outreach"];
 const defaultAiSettings = {
   profiles: {
-    creator: { ...defaultAiProfile },
-    lead: { ...defaultAiProfile },
-    product: { ...defaultAiProfile },
-    outreach: { ...defaultAiProfile },
+    standard: { ...defaultAiProfile },
+    advanced: { ...defaultAiProfile },
+    special: { ...defaultAiProfile },
+  },
+  assignments: {
+    creator: "advanced",
+    lead: "standard",
+    product: "standard",
+    outreach: "special",
   },
 };
 
@@ -323,14 +330,35 @@ function normalizeAiProfile(raw = {}, existing = {}) {
 function normalizeAiSettings(raw = {}, existing = {}) {
   const rawProfiles = raw?.profiles && typeof raw.profiles === "object" ? raw.profiles : {};
   const existingProfiles = existing?.profiles && typeof existing.profiles === "object" ? existing.profiles : {};
-  const legacyRaw = rawProfiles.creator ? {} : raw;
-  const legacyExisting = existingProfiles.creator ? {} : existing;
+  const legacyRaw = Object.keys(rawProfiles).length ? {} : raw;
+  const legacyExisting = Object.keys(existingProfiles).length ? {} : existing;
+  const pickProfile = (profiles, candidates, fallback) => {
+    return candidates.map((key) => profiles[key]).find((profile) => profile && typeof profile === "object") || fallback;
+  };
+  const assignment = (key) => {
+    const selected = String(raw?.assignments?.[key] || existing?.assignments?.[key] || defaultAiSettings.assignments[key]).trim();
+    return aiProfileKeys.includes(selected) ? selected : defaultAiSettings.assignments[key];
+  };
   return {
     profiles: {
-      creator: normalizeAiProfile(rawProfiles.creator || legacyRaw, existingProfiles.creator || legacyExisting),
-      lead: normalizeAiProfile(rawProfiles.lead || {}, existingProfiles.lead || existingProfiles.creator || legacyExisting),
-      product: normalizeAiProfile(rawProfiles.product || {}, existingProfiles.product || existingProfiles.lead || existingProfiles.creator || legacyExisting),
-      outreach: normalizeAiProfile(rawProfiles.outreach || {}, existingProfiles.outreach || existingProfiles.lead || existingProfiles.creator || legacyExisting),
+      standard: normalizeAiProfile(
+        pickProfile(rawProfiles, ["standard", "lead", "product", "creator"], legacyRaw),
+        pickProfile(existingProfiles, ["standard", "lead", "product", "creator"], legacyExisting),
+      ),
+      advanced: normalizeAiProfile(
+        pickProfile(rawProfiles, ["advanced", "creator", "lead"], legacyRaw),
+        pickProfile(existingProfiles, ["advanced", "creator", "lead"], legacyExisting),
+      ),
+      special: normalizeAiProfile(
+        pickProfile(rawProfiles, ["special", "outreach", "lead", "creator"], legacyRaw),
+        pickProfile(existingProfiles, ["special", "outreach", "lead", "creator"], legacyExisting),
+      ),
+    },
+    assignments: {
+      creator: assignment("creator"),
+      lead: assignment("lead"),
+      product: assignment("product"),
+      outreach: assignment("outreach"),
     },
   };
 }
@@ -353,7 +381,7 @@ function saveAiSettings(input) {
   ensureDataFile();
   const existing = loadAiSettings();
   const next = normalizeAiSettings(input, existing);
-  for (const key of ["creator", "lead", "product", "outreach"]) {
+  for (const key of aiProfileKeys) {
     const profile = next.profiles[key];
     const previous = existing.profiles[key] || {};
     if (!profile.apiKey || profile.apiKey === "********") {
@@ -367,30 +395,54 @@ function saveAiSettings(input) {
   return next;
 }
 
-function resolveAiSettings(purpose = "creator") {
-  const saved = loadAiSettings();
-  const profileKey = ["creator", "lead", "product", "outreach"].includes(purpose) ? purpose : "creator";
-  const profile = saved.profiles[profileKey] || saved.profiles.creator || defaultAiProfile;
+function environmentKeyFor(profileKey, purpose = "") {
+  const sharedKey =
+    profileKey === "standard"
+      ? process.env.RESOURCE_WORKBENCH_STANDARD_AI_KEY || process.env.STANDARD_AI_API_KEY
+      : profileKey === "advanced"
+        ? process.env.RESOURCE_WORKBENCH_ADVANCED_AI_KEY || process.env.ADVANCED_AI_API_KEY
+        : process.env.RESOURCE_WORKBENCH_SPECIAL_AI_KEY || process.env.SPECIAL_AI_API_KEY;
   const purposeKey =
-    profileKey === "lead"
+    purpose === "lead"
       ? process.env.RESOURCE_WORKBENCH_LEAD_AI_KEY || process.env.LEAD_AI_API_KEY
-      : profileKey === "product"
+      : purpose === "product"
         ? process.env.RESOURCE_WORKBENCH_PRODUCT_AI_KEY || process.env.PRODUCT_AI_API_KEY
-      : profileKey === "outreach"
-        ? process.env.RESOURCE_WORKBENCH_OUTREACH_AI_KEY || process.env.OUTREACH_AI_API_KEY
-        : process.env.RESOURCE_WORKBENCH_CREATOR_AI_KEY || process.env.CREATOR_AI_API_KEY;
+        : purpose === "outreach"
+          ? process.env.RESOURCE_WORKBENCH_OUTREACH_AI_KEY || process.env.OUTREACH_AI_API_KEY
+          : purpose === "creator"
+            ? process.env.RESOURCE_WORKBENCH_CREATOR_AI_KEY || process.env.CREATOR_AI_API_KEY
+            : "";
   const environmentKey =
+    sharedKey ||
     purposeKey ||
     process.env.GEMINI_API_KEY ||
     process.env.GOOGLE_API_KEY ||
     process.env.OPENAI_API_KEY ||
     "";
+  return environmentKey;
+}
+
+function resolveAiProfile(saved, profileKey, purpose = "") {
+  const profile = saved.profiles[profileKey] || defaultAiProfile;
+  const environmentKey = environmentKeyFor(profileKey, purpose);
   return {
     ...profile,
     apiKey: profile.keySource === "environment" ? environmentKey : profile.apiKey || environmentKey,
     model: profile.model || process.env.GEMINI_MODEL || defaultAiProfile.model,
     proxyUrl: profile.proxyUrl,
   };
+}
+
+function resolveAiSettings(purpose = "creator") {
+  const saved = loadAiSettings();
+  const featureKey = aiFeatureKeys.includes(purpose) ? purpose : "creator";
+  const selectedProfile = saved.assignments?.[featureKey];
+  const profileKey = aiProfileKeys.includes(selectedProfile) ? selectedProfile : defaultAiSettings.assignments[featureKey];
+  return resolveAiProfile(saved, profileKey, featureKey);
+}
+
+function purposeForProfile(saved, profileKey) {
+  return aiFeatureKeys.find((key) => saved.assignments?.[key] === profileKey) || "";
 }
 
 function publicAiProfile(settings, saved) {
@@ -490,8 +542,9 @@ async function resolveAiNetwork(settings) {
 }
 
 async function publicAiStatus() {
-  const statusFor = async (purpose) => {
-    const settings = resolveAiSettings(purpose);
+  const saved = loadAiSettings();
+  const statusFor = async (profileKey) => {
+    const settings = resolveAiProfile(saved, profileKey, purposeForProfile(saved, profileKey));
     const network = await resolveAiNetwork(settings);
     return {
       configured: Boolean(settings.apiKey),
@@ -506,10 +559,9 @@ async function publicAiStatus() {
     };
   };
   return {
-    creator: await statusFor("creator"),
-    lead: await statusFor("lead"),
-    product: await statusFor("product"),
-    outreach: await statusFor("outreach"),
+    standard: await statusFor("standard"),
+    advanced: await statusFor("advanced"),
+    special: await statusFor("special"),
   };
 }
 
@@ -517,11 +569,11 @@ function publicAiSettings() {
   const saved = loadAiSettings();
   return {
     profiles: {
-      creator: publicAiProfile(resolveAiSettings("creator"), saved.profiles.creator || {}),
-      lead: publicAiProfile(resolveAiSettings("lead"), saved.profiles.lead || {}),
-      product: publicAiProfile(resolveAiSettings("product"), saved.profiles.product || {}),
-      outreach: publicAiProfile(resolveAiSettings("outreach"), saved.profiles.outreach || {}),
+      standard: publicAiProfile(resolveAiProfile(saved, "standard", purposeForProfile(saved, "standard")), saved.profiles.standard || {}),
+      advanced: publicAiProfile(resolveAiProfile(saved, "advanced", purposeForProfile(saved, "advanced")), saved.profiles.advanced || {}),
+      special: publicAiProfile(resolveAiProfile(saved, "special", purposeForProfile(saved, "special")), saved.profiles.special || {}),
     },
+    assignments: saved.assignments,
   };
 }
 

@@ -22,10 +22,15 @@ const defaultAiProfile = {
 };
 const defaultAiSettings = {
   profiles: {
-    creator: { ...defaultAiProfile },
-    lead: { ...defaultAiProfile },
-    product: { ...defaultAiProfile },
-    outreach: { ...defaultAiProfile },
+    standard: { ...defaultAiProfile },
+    advanced: { ...defaultAiProfile },
+    special: { ...defaultAiProfile },
+  },
+  assignments: {
+    creator: "advanced",
+    lead: "standard",
+    product: "standard",
+    outreach: "special",
   },
 };
 
@@ -447,30 +452,28 @@ const elements = {
   matchingStatus: document.getElementById("matchingStatus"),
   resetMatchBtn: document.getElementById("resetMatchBtn"),
   aiSettingsForm: document.getElementById("aiSettingsForm"),
-  aiApiBaseUrl: document.getElementById("aiApiBaseUrl"),
-  aiProtocol: document.getElementById("aiProtocol"),
-  aiApiKey: document.getElementById("aiApiKey"),
-  aiKeySource: document.getElementById("aiKeySource"),
-  aiModel: document.getElementById("aiModel"),
-  aiProxyUrl: document.getElementById("aiProxyUrl"),
-  leadAiApiBaseUrl: document.getElementById("leadAiApiBaseUrl"),
-  leadAiProtocol: document.getElementById("leadAiProtocol"),
-  leadAiApiKey: document.getElementById("leadAiApiKey"),
-  leadAiKeySource: document.getElementById("leadAiKeySource"),
-  leadAiModel: document.getElementById("leadAiModel"),
-  leadAiProxyUrl: document.getElementById("leadAiProxyUrl"),
-  productAiApiBaseUrl: document.getElementById("productAiApiBaseUrl"),
-  productAiProtocol: document.getElementById("productAiProtocol"),
-  productAiApiKey: document.getElementById("productAiApiKey"),
-  productAiKeySource: document.getElementById("productAiKeySource"),
-  productAiModel: document.getElementById("productAiModel"),
-  productAiProxyUrl: document.getElementById("productAiProxyUrl"),
-  outreachAiApiBaseUrl: document.getElementById("outreachAiApiBaseUrl"),
-  outreachAiProtocol: document.getElementById("outreachAiProtocol"),
-  outreachAiApiKey: document.getElementById("outreachAiApiKey"),
-  outreachAiKeySource: document.getElementById("outreachAiKeySource"),
-  outreachAiModel: document.getElementById("outreachAiModel"),
-  outreachAiProxyUrl: document.getElementById("outreachAiProxyUrl"),
+  standardAiApiBaseUrl: document.getElementById("standardAiApiBaseUrl"),
+  standardAiProtocol: document.getElementById("standardAiProtocol"),
+  standardAiApiKey: document.getElementById("standardAiApiKey"),
+  standardAiKeySource: document.getElementById("standardAiKeySource"),
+  standardAiModel: document.getElementById("standardAiModel"),
+  standardAiProxyUrl: document.getElementById("standardAiProxyUrl"),
+  advancedAiApiBaseUrl: document.getElementById("advancedAiApiBaseUrl"),
+  advancedAiProtocol: document.getElementById("advancedAiProtocol"),
+  advancedAiApiKey: document.getElementById("advancedAiApiKey"),
+  advancedAiKeySource: document.getElementById("advancedAiKeySource"),
+  advancedAiModel: document.getElementById("advancedAiModel"),
+  advancedAiProxyUrl: document.getElementById("advancedAiProxyUrl"),
+  specialAiApiBaseUrl: document.getElementById("specialAiApiBaseUrl"),
+  specialAiProtocol: document.getElementById("specialAiProtocol"),
+  specialAiApiKey: document.getElementById("specialAiApiKey"),
+  specialAiKeySource: document.getElementById("specialAiKeySource"),
+  specialAiModel: document.getElementById("specialAiModel"),
+  specialAiProxyUrl: document.getElementById("specialAiProxyUrl"),
+  creatorAiProfile: document.getElementById("creatorAiProfile"),
+  leadAiProfile: document.getElementById("leadAiProfile"),
+  productAiProfile: document.getElementById("productAiProfile"),
+  outreachAiProfile: document.getElementById("outreachAiProfile"),
   aiSettingsStatus: document.getElementById("aiSettingsStatus"),
   aiSettingsStatusBtn: document.getElementById("aiSettingsStatusBtn"),
   aiSettingsReloadBtn: document.getElementById("aiSettingsReloadBtn"),
@@ -847,21 +850,41 @@ async function loadAiSettings() {
       throw new Error(payload.error || "无法读取 AI 设置");
     }
     const payload = await response.json();
-    const legacyProfile = payload.profiles?.creator ? {} : payload;
-    state.aiSettings = {
-      ...clone(defaultAiSettings),
-      ...payload,
-      profiles: {
-        creator: { ...clone(defaultAiProfile), ...(payload.profiles?.creator || legacyProfile) },
-        lead: { ...clone(defaultAiProfile), ...(payload.profiles?.lead || payload.profiles?.creator || legacyProfile) },
-        product: { ...clone(defaultAiProfile), ...(payload.profiles?.product || payload.profiles?.lead || payload.profiles?.creator || legacyProfile) },
-        outreach: { ...clone(defaultAiProfile), ...(payload.profiles?.outreach || payload.profiles?.lead || payload.profiles?.creator || legacyProfile) },
-      },
-    };
+    state.aiSettings = normalizeAiSettingsPayload(payload);
   } catch (error) {
     if (isOnlineDeployment()) throw error;
     state.aiSettings = clone(defaultAiSettings);
   }
+}
+
+function normalizeAiSettingsPayload(payload = {}) {
+  const source = payload && typeof payload === "object" ? payload : {};
+  const profiles = source.profiles && typeof source.profiles === "object" ? source.profiles : {};
+  const directProfile = Object.keys(profiles).length ? {} : source;
+  const profile = (...candidates) => {
+    const found = candidates.find((candidate) => candidate && typeof candidate === "object") || {};
+    return { ...clone(defaultAiProfile), ...found };
+  };
+  const validAssignments = new Set(["standard", "advanced", "special"]);
+  const assignment = (key) => {
+    const selected = text(source.assignments?.[key]);
+    return validAssignments.has(selected) ? selected : defaultAiSettings.assignments[key];
+  };
+
+  return {
+    ...clone(defaultAiSettings),
+    profiles: {
+      standard: profile(profiles.standard, profiles.lead, profiles.product, profiles.creator, directProfile),
+      advanced: profile(profiles.advanced, profiles.creator, profiles.lead, directProfile),
+      special: profile(profiles.special, profiles.outreach, profiles.lead, profiles.creator, directProfile),
+    },
+    assignments: {
+      creator: assignment("creator"),
+      lead: assignment("lead"),
+      product: assignment("product"),
+      outreach: assignment("outreach"),
+    },
+  };
 }
 
 function readAiSettingsForm() {
@@ -876,10 +899,15 @@ function readAiSettingsForm() {
   });
   return {
     profiles: {
-      creator: profile("creator"),
-      lead: profile("lead"),
-      product: profile("product"),
-      outreach: profile("outreach"),
+      standard: profile("standard"),
+      advanced: profile("advanced"),
+      special: profile("special"),
+    },
+    assignments: {
+      creator: text(formData.get("assignments.creator")) || defaultAiSettings.assignments.creator,
+      lead: text(formData.get("assignments.lead")) || defaultAiSettings.assignments.lead,
+      product: text(formData.get("assignments.product")) || defaultAiSettings.assignments.product,
+      outreach: text(formData.get("assignments.outreach")) || defaultAiSettings.assignments.outreach,
     },
   };
 }
@@ -900,40 +928,37 @@ function renderAiSettings() {
     return settings;
   };
 
-  const creator = bindProfile("creator", {
-    protocol: elements.aiProtocol,
-    apiBaseUrl: elements.aiApiBaseUrl,
-    keySource: elements.aiKeySource,
-    apiKey: elements.aiApiKey,
-    model: elements.aiModel,
-    proxyUrl: elements.aiProxyUrl,
+  const standard = bindProfile("standard", {
+    protocol: elements.standardAiProtocol,
+    apiBaseUrl: elements.standardAiApiBaseUrl,
+    keySource: elements.standardAiKeySource,
+    apiKey: elements.standardAiApiKey,
+    model: elements.standardAiModel,
+    proxyUrl: elements.standardAiProxyUrl,
   });
-  const lead = bindProfile("lead", {
-    protocol: elements.leadAiProtocol,
-    apiBaseUrl: elements.leadAiApiBaseUrl,
-    keySource: elements.leadAiKeySource,
-    apiKey: elements.leadAiApiKey,
-    model: elements.leadAiModel,
-    proxyUrl: elements.leadAiProxyUrl,
+  const advanced = bindProfile("advanced", {
+    protocol: elements.advancedAiProtocol,
+    apiBaseUrl: elements.advancedAiApiBaseUrl,
+    keySource: elements.advancedAiKeySource,
+    apiKey: elements.advancedAiApiKey,
+    model: elements.advancedAiModel,
+    proxyUrl: elements.advancedAiProxyUrl,
   });
-  const product = bindProfile("product", {
-    protocol: elements.productAiProtocol,
-    apiBaseUrl: elements.productAiApiBaseUrl,
-    keySource: elements.productAiKeySource,
-    apiKey: elements.productAiApiKey,
-    model: elements.productAiModel,
-    proxyUrl: elements.productAiProxyUrl,
+  const special = bindProfile("special", {
+    protocol: elements.specialAiProtocol,
+    apiBaseUrl: elements.specialAiApiBaseUrl,
+    keySource: elements.specialAiKeySource,
+    apiKey: elements.specialAiApiKey,
+    model: elements.specialAiModel,
+    proxyUrl: elements.specialAiProxyUrl,
   });
-  const outreach = bindProfile("outreach", {
-    protocol: elements.outreachAiProtocol,
-    apiBaseUrl: elements.outreachAiApiBaseUrl,
-    keySource: elements.outreachAiKeySource,
-    apiKey: elements.outreachAiApiKey,
-    model: elements.outreachAiModel,
-    proxyUrl: elements.outreachAiProxyUrl,
-  });
+  const assignments = { ...defaultAiSettings.assignments, ...(state.aiSettings?.assignments || {}) };
+  elements.creatorAiProfile.value = assignments.creator;
+  elements.leadAiProfile.value = assignments.lead;
+  elements.productAiProfile.value = assignments.product;
+  elements.outreachAiProfile.value = assignments.outreach;
   const describe = (settings, label) => `${label}${settings.hasApiKey ? "已配置" : "未配置"}${settings.model ? `（${settings.model}）` : ""}`;
-  elements.aiSettingsStatus.textContent = `${describe(creator, "完整补全")}; ${describe(lead, "快速录入")}; ${describe(product, "产品补全")}; ${describe(outreach, "开发邮件")}。`;
+  elements.aiSettingsStatus.textContent = `${describe(standard, "普通 AI ")}；${describe(advanced, "高能力 AI ")}；${describe(special, "特殊 AI ")}。`;
 }
 
 async function saveAiSettings(event) {
@@ -949,20 +974,11 @@ async function saveAiSettings(event) {
     elements.aiSettingsStatus.textContent = payload.error || "AI 设置保存失败";
     return;
   }
-  state.aiSettings = {
-    ...clone(defaultAiSettings),
-    ...payload.settings,
-    profiles: {
-      creator: { ...clone(defaultAiProfile), ...(payload.settings?.profiles?.creator || payload.settings || {}) },
-      lead: { ...clone(defaultAiProfile), ...(payload.settings?.profiles?.lead || payload.settings?.profiles?.creator || payload.settings || {}) },
-      product: { ...clone(defaultAiProfile), ...(payload.settings?.profiles?.product || payload.settings?.profiles?.lead || payload.settings?.profiles?.creator || payload.settings || {}) },
-      outreach: { ...clone(defaultAiProfile), ...(payload.settings?.profiles?.outreach || payload.settings?.profiles?.lead || payload.settings?.profiles?.creator || payload.settings || {}) },
-    },
-  };
+  state.aiSettings = normalizeAiSettingsPayload(payload.settings);
   renderAiSettings();
   const profiles = state.aiSettings.profiles;
   const saved = (profile) => (profile?.hasApiKey ? "已配置" : "未配置");
-  elements.aiSettingsStatus.textContent = `设置已保存：完整补全 ${saved(profiles.creator)}；快速录入 ${saved(profiles.lead)}；产品补全 ${saved(profiles.product)}；开发邮件 ${saved(profiles.outreach)}。API Key 为安全起见不会回显。`;
+  elements.aiSettingsStatus.textContent = `设置已保存：普通 AI ${saved(profiles.standard)}；高能力 AI ${saved(profiles.advanced)}；特殊 AI ${saved(profiles.special)}。API Key 为安全起见不会回显。`;
 }
 
 async function checkAiStatus() {
@@ -978,7 +994,7 @@ async function checkAiStatus() {
       const networkText = network.mode === "cloud" ? "网络：Vercel 云端直连" : network.mode === "proxy" ? `代理：${network.source || "已连接"}` : "网络：直连";
       return `${label}${profile.configured ? "已配置" : "未配置"}${profile.model ? `（${profile.model}）` : ""}，${networkText}`;
     };
-    elements.aiSettingsStatus.textContent = `${describe("creator", "完整补全")}; ${describe("lead", "快速录入")}; ${describe("product", "产品补全")}; ${describe("outreach", "开发邮件")}。`;
+    elements.aiSettingsStatus.textContent = `${describe("standard", "普通 AI ")}；${describe("advanced", "高能力 AI ")}；${describe("special", "特殊 AI ")}。`;
   } catch (error) {
     elements.aiSettingsStatus.textContent = error.message || "检查失败";
   }
@@ -3260,10 +3276,9 @@ function bindEvents() {
       keyInput.placeholder = useEnvironment ? "由环境变量读取" : "已保存时可留空不改";
     });
   };
-  bindKeySource(elements.aiKeySource, elements.aiApiKey);
-  bindKeySource(elements.leadAiKeySource, elements.leadAiApiKey);
-  bindKeySource(elements.productAiKeySource, elements.productAiApiKey);
-  bindKeySource(elements.outreachAiKeySource, elements.outreachAiApiKey);
+  bindKeySource(elements.standardAiKeySource, elements.standardAiApiKey);
+  bindKeySource(elements.advancedAiKeySource, elements.advancedAiApiKey);
+  bindKeySource(elements.specialAiKeySource, elements.specialAiApiKey);
   elements.resetFormBtn.addEventListener("click", resetForm);
   elements.newRecordBtn.addEventListener("click", () => openEditor());
   elements.outreachBtn.addEventListener("click", () => openOutreachModal());

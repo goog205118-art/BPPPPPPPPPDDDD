@@ -26,13 +26,20 @@ const defaultAiProfile = {
   model: "gemini-2.5-flash",
   proxyUrl: "",
 };
+const aiProfileKeys = ["standard", "advanced", "special"];
+const aiFeatureKeys = ["creator", "lead", "product", "outreach"];
 
 const defaultAiSettings = {
   profiles: {
-    creator: { ...defaultAiProfile },
-    lead: { ...defaultAiProfile },
-    product: { ...defaultAiProfile },
-    outreach: { ...defaultAiProfile },
+    standard: { ...defaultAiProfile },
+    advanced: { ...defaultAiProfile },
+    special: { ...defaultAiProfile },
+  },
+  assignments: {
+    creator: "advanced",
+    lead: "standard",
+    product: "standard",
+    outreach: "special",
   },
 };
 
@@ -237,14 +244,35 @@ function normalizeAiProfile(raw = {}, existing = {}) {
 function normalizeAiSettings(raw = {}, existing = {}) {
   const rawProfiles = raw?.profiles && typeof raw.profiles === "object" ? raw.profiles : {};
   const existingProfiles = existing?.profiles && typeof existing.profiles === "object" ? existing.profiles : {};
-  const legacyRaw = rawProfiles.creator ? {} : raw;
-  const legacyExisting = existingProfiles.creator ? {} : existing;
+  const legacyRaw = Object.keys(rawProfiles).length ? {} : raw;
+  const legacyExisting = Object.keys(existingProfiles).length ? {} : existing;
+  const pickProfile = (profiles, candidates, fallback) => {
+    return candidates.map((key) => profiles[key]).find((profile) => profile && typeof profile === "object") || fallback;
+  };
+  const assignment = (key) => {
+    const selected = String(raw?.assignments?.[key] || existing?.assignments?.[key] || defaultAiSettings.assignments[key]).trim();
+    return aiProfileKeys.includes(selected) ? selected : defaultAiSettings.assignments[key];
+  };
   return {
     profiles: {
-      creator: normalizeAiProfile(rawProfiles.creator || legacyRaw, existingProfiles.creator || legacyExisting),
-      lead: normalizeAiProfile(rawProfiles.lead || {}, existingProfiles.lead || existingProfiles.creator || legacyExisting),
-      product: normalizeAiProfile(rawProfiles.product || {}, existingProfiles.product || existingProfiles.lead || existingProfiles.creator || legacyExisting),
-      outreach: normalizeAiProfile(rawProfiles.outreach || {}, existingProfiles.outreach || existingProfiles.lead || existingProfiles.creator || legacyExisting),
+      standard: normalizeAiProfile(
+        pickProfile(rawProfiles, ["standard", "lead", "product", "creator"], legacyRaw),
+        pickProfile(existingProfiles, ["standard", "lead", "product", "creator"], legacyExisting),
+      ),
+      advanced: normalizeAiProfile(
+        pickProfile(rawProfiles, ["advanced", "creator", "lead"], legacyRaw),
+        pickProfile(existingProfiles, ["advanced", "creator", "lead"], legacyExisting),
+      ),
+      special: normalizeAiProfile(
+        pickProfile(rawProfiles, ["special", "outreach", "lead", "creator"], legacyRaw),
+        pickProfile(existingProfiles, ["special", "outreach", "lead", "creator"], legacyExisting),
+      ),
+    },
+    assignments: {
+      creator: assignment("creator"),
+      lead: assignment("lead"),
+      product: assignment("product"),
+      outreach: assignment("outreach"),
     },
   };
 }
@@ -256,7 +284,7 @@ async function loadAiSettings() {
 async function saveAiSettings(input) {
   const existing = await loadAiSettings();
   const next = normalizeAiSettings(input, existing);
-  for (const key of ["creator", "lead", "product", "outreach"]) {
+  for (const key of aiProfileKeys) {
     const profile = next.profiles[key];
     const previous = existing.profiles[key] || {};
     if (!profile.apiKey || profile.apiKey === "********") profile.apiKey = previous.apiKey || "";
@@ -265,15 +293,26 @@ async function saveAiSettings(input) {
   return next;
 }
 
-function environmentKeyFor(profileKey) {
-  return (
-    (profileKey === "lead"
+function environmentKeyFor(profileKey, purpose = "") {
+  const sharedKey =
+    profileKey === "standard"
+      ? process.env.RESOURCE_WORKBENCH_STANDARD_AI_KEY || process.env.STANDARD_AI_API_KEY
+      : profileKey === "advanced"
+        ? process.env.RESOURCE_WORKBENCH_ADVANCED_AI_KEY || process.env.ADVANCED_AI_API_KEY
+        : process.env.RESOURCE_WORKBENCH_SPECIAL_AI_KEY || process.env.SPECIAL_AI_API_KEY;
+  const purposeKey =
+    purpose === "lead"
       ? process.env.RESOURCE_WORKBENCH_LEAD_AI_KEY || process.env.LEAD_AI_API_KEY
-      : profileKey === "product"
+      : purpose === "product"
         ? process.env.RESOURCE_WORKBENCH_PRODUCT_AI_KEY || process.env.PRODUCT_AI_API_KEY
-      : profileKey === "outreach"
-        ? process.env.RESOURCE_WORKBENCH_OUTREACH_AI_KEY || process.env.OUTREACH_AI_API_KEY
-        : process.env.RESOURCE_WORKBENCH_CREATOR_AI_KEY || process.env.CREATOR_AI_API_KEY) ||
+        : purpose === "outreach"
+          ? process.env.RESOURCE_WORKBENCH_OUTREACH_AI_KEY || process.env.OUTREACH_AI_API_KEY
+          : purpose === "creator"
+            ? process.env.RESOURCE_WORKBENCH_CREATOR_AI_KEY || process.env.CREATOR_AI_API_KEY
+            : "";
+  return (
+    sharedKey ||
+    purposeKey ||
     process.env.GEMINI_API_KEY ||
     process.env.GOOGLE_API_KEY ||
     process.env.OPENAI_API_KEY ||
@@ -282,14 +321,20 @@ function environmentKeyFor(profileKey) {
 }
 
 function resolveAiSettings(saved, purpose = "creator") {
-  const profileKey = ["creator", "lead", "product", "outreach"].includes(purpose) ? purpose : "creator";
-  const profile = saved.profiles[profileKey] || saved.profiles.creator || defaultAiProfile;
-  const environmentKey = environmentKeyFor(profileKey);
+  const featureKey = aiFeatureKeys.includes(purpose) ? purpose : "creator";
+  const selectedProfile = saved.assignments?.[featureKey];
+  const profileKey = aiProfileKeys.includes(selectedProfile) ? selectedProfile : defaultAiSettings.assignments[featureKey];
+  const profile = saved.profiles[profileKey] || defaultAiProfile;
+  const environmentKey = environmentKeyFor(profileKey, featureKey);
   return {
     ...profile,
     apiKey: profile.keySource === "environment" ? environmentKey : profile.apiKey || environmentKey,
     model: profile.model || process.env.GEMINI_MODEL || defaultAiProfile.model,
   };
+}
+
+function purposeForProfile(saved, profileKey) {
+  return aiFeatureKeys.find((key) => saved.assignments?.[key] === profileKey) || "";
 }
 
 function publicAiProfile(settings, saved) {
@@ -307,20 +352,33 @@ function publicAiProfile(settings, saved) {
 
 async function publicAiSettings() {
   const saved = await loadAiSettings();
+  const publicProfile = (profileKey) => {
+    const profile = saved.profiles[profileKey] || defaultAiProfile;
+    const environmentKey = environmentKeyFor(profileKey, purposeForProfile(saved, profileKey));
+    return publicAiProfile(
+      { ...profile, apiKey: profile.keySource === "environment" ? environmentKey : profile.apiKey || environmentKey },
+      profile,
+    );
+  };
   return {
     profiles: {
-      creator: publicAiProfile(resolveAiSettings(saved, "creator"), saved.profiles.creator || {}),
-      lead: publicAiProfile(resolveAiSettings(saved, "lead"), saved.profiles.lead || {}),
-      product: publicAiProfile(resolveAiSettings(saved, "product"), saved.profiles.product || {}),
-      outreach: publicAiProfile(resolveAiSettings(saved, "outreach"), saved.profiles.outreach || {}),
+      standard: publicProfile("standard"),
+      advanced: publicProfile("advanced"),
+      special: publicProfile("special"),
     },
+    assignments: saved.assignments,
   };
 }
 
 async function publicAiStatus() {
   const saved = await loadAiSettings();
-  const build = (purpose) => {
-    const settings = resolveAiSettings(saved, purpose);
+  const build = (profileKey) => {
+    const profile = saved.profiles[profileKey] || defaultAiProfile;
+    const environmentKey = environmentKeyFor(profileKey, purposeForProfile(saved, profileKey));
+    const settings = {
+      ...profile,
+      apiKey: profile.keySource === "environment" ? environmentKey : profile.apiKey || environmentKey,
+    };
     return {
       configured: Boolean(settings.apiKey),
       protocol: settings.protocol,
@@ -329,7 +387,7 @@ async function publicAiStatus() {
       network: { mode: "cloud", source: "Vercel 云端直连", automatic: true },
     };
   };
-  return { creator: build("creator"), lead: build("lead"), product: build("product"), outreach: build("outreach") };
+  return { standard: build("standard"), advanced: build("advanced"), special: build("special") };
 }
 
 function withQueryParam(targetUrl, key, value) {

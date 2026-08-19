@@ -40,160 +40,162 @@
         <div class="settings-head">
           <div>
             <h2>AI 参数设置</h2>
-            <p class="panel-hint">为完整补全、待开发快录、产品链接补全和开发邮件分别配置 AI 服务。支持 Gemini 和 OpenAI 兼容接口。</p>
+            <p class="panel-hint">配置三套可复用 AI，再为每项功能选择调用哪一套。支持 Gemini 和 OpenAI 兼容接口。</p>
           </div>
           <button type="button" id="aiSettingsReloadBtn" class="ghost">重新读取</button>
         </div>
         <form id="aiSettingsForm" class="settings-form">
           <section class="ai-profile">
             <div class="ai-profile-head">
-              <h3>达人库链接补全</h3>
-              <p>用于补充完整达人资料，Gemini 可尝试调用搜索能力。</p>
+              <h3>普通 AI</h3>
+              <p>适合快速录入、产品资料补全等高频任务。</p>
             </div>
             <div class="settings-fields">
               <div class="field">
-                <label for="aiProtocol">接入协议</label>
-                <select id="aiProtocol" name="creator.protocol">
+                <label for="standardAiProtocol">接入协议</label>
+                <select id="standardAiProtocol" name="standard.protocol">
                   <option value="gemini">Gemini</option>
                   <option value="openai">OpenAI 兼容</option>
                 </select>
               </div>
               <div class="field">
-                <label for="aiKeySource">Key 来源</label>
-                <select id="aiKeySource" name="creator.keySource">
+                <label for="standardAiKeySource">Key 来源</label>
+                <select id="standardAiKeySource" name="standard.keySource">
                   <option value="local">本地设置</option>
                   <option value="environment">环境变量</option>
                 </select>
               </div>
               <div class="field field-wide">
-                <label for="aiApiBaseUrl">API 地址</label>
-                <input id="aiApiBaseUrl" name="creator.apiBaseUrl" type="url" placeholder="Gemini 基础地址，或 OpenAI 兼容基础地址 / chat/completions 地址" />
+                <label for="standardAiApiBaseUrl">API 地址</label>
+                <input id="standardAiApiBaseUrl" name="standard.apiBaseUrl" type="url" placeholder="Gemini 基础地址，或 OpenAI 兼容基础地址 / chat/completions 地址" />
               </div>
               <div class="field">
-                <label for="aiApiKey">API Key</label>
-                <input id="aiApiKey" name="creator.apiKey" type="password" autocomplete="new-password" placeholder="已保存时可留空不改" />
+                <label for="standardAiApiKey">API Key</label>
+                <input id="standardAiApiKey" name="standard.apiKey" type="password" autocomplete="new-password" placeholder="已保存时可留空不改" />
               </div>
               <div class="field">
-                <label for="aiModel">模型名</label>
-                <input id="aiModel" name="creator.model" type="text" placeholder="gemini-2.5-flash" />
+                <label for="standardAiModel">模型名</label>
+                <input id="standardAiModel" name="standard.model" type="text" placeholder="填写快速模型名" />
               </div>
               <div class="field field-wide proxy-setting">
-                <label for="aiProxyUrl">自定义代理地址（留空自动识别）</label>
-                <input id="aiProxyUrl" name="creator.proxyUrl" type="url" placeholder="默认自动读取 Windows / FlClash；仅特殊网络时填写" />
+                <label for="standardAiProxyUrl">自定义代理地址（留空自动识别）</label>
+                <input id="standardAiProxyUrl" name="standard.proxyUrl" type="url" placeholder="默认自动读取 Windows / FlClash；仅特殊网络时填写" />
               </div>
             </div>
           </section>
           <section class="ai-profile">
             <div class="ai-profile-head">
-              <h3>待开发达人快速录入</h3>
-              <p>输入链接后自动整理必要字段；需要稳定检索邮箱和粉丝时，请选择 Gemini 协议。</p>
+              <h3>高能力 AI</h3>
+              <p>适合达人完整补全、需要更强推理或检索的任务。</p>
             </div>
             <div class="settings-fields">
               <div class="field">
-                <label for="leadAiProtocol">接入协议</label>
-                <select id="leadAiProtocol" name="lead.protocol">
+                <label for="advancedAiProtocol">接入协议</label>
+                <select id="advancedAiProtocol" name="advanced.protocol">
                   <option value="gemini">Gemini</option>
                   <option value="openai">OpenAI 兼容</option>
                 </select>
               </div>
               <div class="field">
-                <label for="leadAiKeySource">Key 来源</label>
-                <select id="leadAiKeySource" name="lead.keySource">
+                <label for="advancedAiKeySource">Key 来源</label>
+                <select id="advancedAiKeySource" name="advanced.keySource">
                   <option value="local">本地设置</option>
                   <option value="environment">环境变量</option>
                 </select>
               </div>
               <div class="field field-wide">
-                <label for="leadAiApiBaseUrl">API 地址</label>
-                <input id="leadAiApiBaseUrl" name="lead.apiBaseUrl" type="url" placeholder="Gemini 基础地址，或 OpenAI 兼容基础地址 / chat/completions 地址" />
+                <label for="advancedAiApiBaseUrl">API 地址</label>
+                <input id="advancedAiApiBaseUrl" name="advanced.apiBaseUrl" type="url" placeholder="Gemini 基础地址，或 OpenAI 兼容基础地址 / chat/completions 地址" />
               </div>
               <div class="field">
-                <label for="leadAiApiKey">API Key</label>
-                <input id="leadAiApiKey" name="lead.apiKey" type="password" autocomplete="new-password" placeholder="已保存时可留空不改" />
+                <label for="advancedAiApiKey">API Key</label>
+                <input id="advancedAiApiKey" name="advanced.apiKey" type="password" autocomplete="new-password" placeholder="已保存时可留空不改" />
               </div>
               <div class="field">
-                <label for="leadAiModel">模型名</label>
-                <input id="leadAiModel" name="lead.model" type="text" placeholder="填写快速模型名" />
+                <label for="advancedAiModel">模型名</label>
+                <input id="advancedAiModel" name="advanced.model" type="text" placeholder="填写高能力模型名" />
               </div>
               <div class="field field-wide proxy-setting">
-                <label for="leadAiProxyUrl">自定义代理地址（留空自动识别）</label>
-                <input id="leadAiProxyUrl" name="lead.proxyUrl" type="url" placeholder="默认自动读取 Windows / FlClash；仅特殊网络时填写" />
+                <label for="advancedAiProxyUrl">自定义代理地址（留空自动识别）</label>
+                <input id="advancedAiProxyUrl" name="advanced.proxyUrl" type="url" placeholder="默认自动读取 Windows / FlClash；仅特殊网络时填写" />
               </div>
             </div>
           </section>
           <section class="ai-profile">
             <div class="ai-profile-head">
-              <h3>产品链接 AI 补全</h3>
-              <p>网页读取失败或资料不全时自动接力，只补充空白字段；无法核验的名称、主图和卖点会保持为空。</p>
+              <h3>特殊 AI</h3>
+              <p>适合邮件写作或接入有特殊能力、特殊协议的模型。</p>
             </div>
             <div class="settings-fields">
               <div class="field">
-                <label for="productAiProtocol">接入协议</label>
-                <select id="productAiProtocol" name="product.protocol">
+                <label for="specialAiProtocol">接入协议</label>
+                <select id="specialAiProtocol" name="special.protocol">
                   <option value="gemini">Gemini</option>
                   <option value="openai">OpenAI 兼容</option>
                 </select>
               </div>
               <div class="field">
-                <label for="productAiKeySource">Key 来源</label>
-                <select id="productAiKeySource" name="product.keySource">
+                <label for="specialAiKeySource">Key 来源</label>
+                <select id="specialAiKeySource" name="special.keySource">
                   <option value="local">本地设置</option>
                   <option value="environment">环境变量</option>
                 </select>
               </div>
               <div class="field field-wide">
-                <label for="productAiApiBaseUrl">API 地址</label>
-                <input id="productAiApiBaseUrl" name="product.apiBaseUrl" type="url" placeholder="Gemini 基础地址，或 OpenAI 兼容基础地址 / chat/completions 地址" />
+                <label for="specialAiApiBaseUrl">API 地址</label>
+                <input id="specialAiApiBaseUrl" name="special.apiBaseUrl" type="url" placeholder="Gemini 基础地址，或 OpenAI 兼容基础地址 / chat/completions 地址" />
               </div>
               <div class="field">
-                <label for="productAiApiKey">API Key</label>
-                <input id="productAiApiKey" name="product.apiKey" type="password" autocomplete="new-password" placeholder="已保存时可留空不改" />
+                <label for="specialAiApiKey">API Key</label>
+                <input id="specialAiApiKey" name="special.apiKey" type="password" autocomplete="new-password" placeholder="已保存时可留空不改" />
               </div>
               <div class="field">
-                <label for="productAiModel">模型名</label>
-                <input id="productAiModel" name="product.model" type="text" placeholder="填写商品补全模型名" />
+                <label for="specialAiModel">模型名</label>
+                <input id="specialAiModel" name="special.model" type="text" placeholder="填写特殊模型名" />
               </div>
               <div class="field field-wide proxy-setting">
-                <label for="productAiProxyUrl">自定义代理地址（留空自动识别）</label>
-                <input id="productAiProxyUrl" name="product.proxyUrl" type="url" placeholder="默认自动读取 Windows / FlClash；仅特殊网络时填写" />
+                <label for="specialAiProxyUrl">自定义代理地址（留空自动识别）</label>
+                <input id="specialAiProxyUrl" name="special.proxyUrl" type="url" placeholder="默认自动读取 Windows / FlClash；仅特殊网络时填写" />
               </div>
             </div>
           </section>
-          <section class="ai-profile">
+          <section class="ai-assignment" aria-labelledby="aiAssignmentTitle">
             <div class="ai-profile-head">
-              <h3>达人开发邮件</h3>
-              <p>用于按所选达人、产品和合作口径生成开发邮件；可单独接入更擅长写作的模型。</p>
+              <h3 id="aiAssignmentTitle">功能调用分配</h3>
+              <p>按任务选择已配置的 AI；后续新增功能也只需在这里指定即可。</p>
             </div>
-            <div class="settings-fields">
+            <div class="assignment-fields">
               <div class="field">
-                <label for="outreachAiProtocol">接入协议</label>
-                <select id="outreachAiProtocol" name="outreach.protocol">
-                  <option value="gemini">Gemini</option>
-                  <option value="openai">OpenAI 兼容</option>
+                <label for="creatorAiProfile">达人库链接补全</label>
+                <select id="creatorAiProfile" name="assignments.creator">
+                  <option value="standard">普通 AI</option>
+                  <option value="advanced">高能力 AI</option>
+                  <option value="special">特殊 AI</option>
                 </select>
               </div>
               <div class="field">
-                <label for="outreachAiKeySource">Key 来源</label>
-                <select id="outreachAiKeySource" name="outreach.keySource">
-                  <option value="local">本地设置</option>
-                  <option value="environment">环境变量</option>
+                <label for="leadAiProfile">待开发达人快速录入</label>
+                <select id="leadAiProfile" name="assignments.lead">
+                  <option value="standard">普通 AI</option>
+                  <option value="advanced">高能力 AI</option>
+                  <option value="special">特殊 AI</option>
                 </select>
               </div>
-              <div class="field field-wide">
-                <label for="outreachAiApiBaseUrl">API 地址</label>
-                <input id="outreachAiApiBaseUrl" name="outreach.apiBaseUrl" type="url" placeholder="Gemini 基础地址，或 OpenAI 兼容基础地址 / chat/completions 地址" />
+              <div class="field">
+                <label for="productAiProfile">产品链接 AI 补全</label>
+                <select id="productAiProfile" name="assignments.product">
+                  <option value="standard">普通 AI</option>
+                  <option value="advanced">高能力 AI</option>
+                  <option value="special">特殊 AI</option>
+                </select>
               </div>
               <div class="field">
-                <label for="outreachAiApiKey">API Key</label>
-                <input id="outreachAiApiKey" name="outreach.apiKey" type="password" autocomplete="new-password" placeholder="已保存时可留空不改" />
-              </div>
-              <div class="field">
-                <label for="outreachAiModel">模型名</label>
-                <input id="outreachAiModel" name="outreach.model" type="text" placeholder="填写邮件写作模型名" />
-              </div>
-              <div class="field field-wide proxy-setting">
-                <label for="outreachAiProxyUrl">自定义代理地址（留空自动识别）</label>
-                <input id="outreachAiProxyUrl" name="outreach.proxyUrl" type="url" placeholder="默认自动读取 Windows / FlClash；仅特殊网络时填写" />
+                <label for="outreachAiProfile">达人开发邮件</label>
+                <select id="outreachAiProfile" name="assignments.outreach">
+                  <option value="standard">普通 AI</option>
+                  <option value="advanced">高能力 AI</option>
+                  <option value="special">特殊 AI</option>
+                </select>
               </div>
             </div>
           </section>
