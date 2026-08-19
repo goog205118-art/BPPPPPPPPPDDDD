@@ -702,7 +702,14 @@ function parseGeminiJson(payload) {
   const parts = payload?.candidates?.[0]?.content?.parts || [];
   const text = parts.map((part) => part.text || "").join("\n").trim();
   if (!text) throw new Error("Gemini 没有返回可解析内容");
-  return JSON.parse(stripJsonFences(text));
+  const parsed = JSON.parse(stripJsonFences(text));
+  const groundingSources = (payload?.candidates?.[0]?.groundingMetadata?.groundingChunks || [])
+    .map((chunk) => String(chunk?.web?.uri || "").trim())
+    .filter(Boolean);
+  return {
+    ...parsed,
+    sources: [...new Set([...(Array.isArray(parsed.sources) ? parsed.sources : []), ...groundingSources])],
+  };
 }
 
 function parseOpenAiJson(payload) {
@@ -833,11 +840,45 @@ function sanitizeCreatorEnrich(raw, sourceUrl, purpose = "creator") {
   };
 }
 
+function sourceResearchChecklist(sourceUrl) {
+  let parsed;
+  try {
+    parsed = new URL(sourceUrl);
+  } catch {
+    return `- 直接检索并打开该公开链接：${sourceUrl}`;
+  }
+
+  const host = parsed.hostname.toLowerCase();
+  const handle = parsed.pathname.match(/\/@([^/?#]+)/)?.[1];
+  const checklist = [`- 直接检索并打开该公开链接：${sourceUrl}`];
+
+  if (host.includes("youtube.com")) {
+    const channelBase = handle ? `https://www.youtube.com/@${handle}` : sourceUrl;
+    checklist.push(`- 检索频道 About / 简介页：${channelBase}/about`);
+    checklist.push(`- 检索频道主页的公开订阅数（Subscribers / 订阅者），不能用视频播放量代替粉丝量。`);
+    if (handle) {
+      checklist.push(`- 执行公开搜索：site:youtube.com/@${handle} ("business inquiries" OR contact OR email OR "for business")`);
+      checklist.push(`- 执行公开搜索：site:youtube.com/@${handle} ("@" OR gmail OR outlook OR "联系")`);
+    }
+    checklist.push(`- 检查最新 3 条公开视频描述中的商务联系信息；只有页面明确展示邮箱才可填写。`);
+  } else if (host.includes("instagram.com") || host.includes("tiktok.com")) {
+    checklist.push(`- 检查主页简介（bio）、公开链接页、官网 Contact 页面以及公开搜索摘要。`);
+    checklist.push(`- 检索主页公开粉丝数；不能以点赞、播放或互动数替代粉丝量。`);
+  } else {
+    checklist.push(`- 检查公开主页简介、个人资料页、官网联系页和公开搜索结果。`);
+  }
+
+  return checklist.join("\n");
+}
+
 function buildCreatorEnrichPrompt(sourceUrl, current) {
-  return `你是一个达人资源录入助手。请基于公开网页、主页可见信息和搜索结果，尽量从达人主页链接中提取可验证信息；不能确定的文本字段留空，不要猜测。
+  return `你是一个达人资源录入助手。请实际使用可用的网页搜索/网页读取能力，按下面“必做公开检索清单”逐项检索，不要只根据链接标题或一条搜索摘要作答。提取可验证信息；不能确定的字段留空，不要猜测。
 
 达人主页链接：${sourceUrl}
 当前表单已有信息：${JSON.stringify(current || {}, null, 2)}
+
+必做公开检索清单：
+${sourceResearchChecklist(sourceUrl)}
 
 只返回 JSON，不要返回解释文字。字段结构如下：
 {
@@ -851,9 +892,9 @@ function buildCreatorEnrichPrompt(sourceUrl, current) {
     "language": "",
     "platform": "",
     "niche": "",
-    "followers": 0,
-    "avg_views": 0,
-    "engagement": 0,
+    "followers": "",
+    "avg_views": "",
+    "engagement": "",
     "audience": "",
     "content_types": "",
     "tags": "",
@@ -865,20 +906,24 @@ function buildCreatorEnrichPrompt(sourceUrl, current) {
 }
 
 要求：
-1. 邮箱极严：只有当达人主页、about/profile 页面、公开视频简介、官网联系页或搜索结果摘要中明确出现完全相同邮箱时才填写；不能使用历史泄露数据、第三方代码示例、猜测邮箱、同名人物邮箱；查不到就必须留空。
+1. 先完成邮箱专项检索：依次检查主页 bio/简介、About/Profile 页面、官网 Contact 页面、最新 3 条公开内容描述和公开搜索摘要。只有页面中明确出现完全相同邮箱时才填写；不能使用历史泄露数据、第三方代码示例、猜测邮箱、同名人物邮箱；查不到就必须留空。
    如果填写 email，必须同时填写 email_source（该邮箱所在公开页面的完整 http(s) URL）和 email_evidence（说明邮箱出现在哪个公开位置，且 evidence 文本里必须包含这个完整邮箱）。不能只写“Google 搜索”“YouTube 简介”等笼统来源。没有明确来源证据就把 email、email_source、email_evidence 都留空。
-2. 粉丝量、近 30 条平均播放、互动率允许使用公开页面可见数字或搜索结果摘要做大致估算；可返回 81700、1.2M、81.7K、4.5% 等格式。估算时在 warnings 说明“数值为公开可见信息估算”。
-3. 受众国家和年龄只能填写国家/地区 + 年龄段，例如 "US 18-34"、"美国 25-44"；不能填写兴趣人群、内容受众标签或职业描述。没有国家和年龄就留空。
-4. country 必须积极从频道 About/简介、公开视频描述、官网联系页、公开搜索结果中的所在地、地址、语言或自我介绍识别。只有公开信息能支持时才填写国家/地区；例如识别到 Spain、España、Madrid、Barcelona 或西班牙所在地时，country 返回“西班牙”。没有足够公开依据时留空，不能把内容受众、语言或兴趣标签当作达人所在地。niche 填内容垂类；audience 不要和 niche/tags 混用。
-5. tags 和 content_types 使用 | 分隔。
-6. notes 必须使用简体中文，只写 1-2 句对人工复核有帮助、可从公开来源核验的事实摘要。不要写英文，不要写无法核验的联系人信息。`;
+2. 粉丝量是高优先级字段：必须单独核查主页/频道页公开显示的 followers、subscribers、粉丝或订阅者数字；可返回 81700、1.2M、81.7K 等格式。公开显示数字可直接填写；不要用视频播放量、点赞数或搜索结果中其他账号的数据替代。确实找不到时返回空字符串，不要返回 0。
+3. avg_views 指近 30 条内容的平均播放量，engagement 指公开可核验的互动率；无法可靠得到就返回空字符串，不要把缺失写成 0。仅使用公开可见数字或公开搜索结果摘要做大致估算时，在 warnings 标明“数值为公开可见信息估算”。
+4. 受众国家和年龄只能填写国家/地区 + 年龄段，例如 "US 18-34"、"美国 25-44"；不能填写兴趣人群、内容受众标签或职业描述。没有国家和年龄就留空。
+5. country 必须积极从频道 About/简介、公开视频描述、官网联系页、公开搜索结果中的所在地、地址、语言或自我介绍识别。只有公开信息能支持时才填写国家/地区；例如识别到 Spain、España、Madrid、Barcelona 或西班牙所在地时，country 返回“西班牙”。没有足够公开依据时留空，不能把内容受众、语言或兴趣标签当作达人所在地。niche 填内容垂类；audience 不要和 niche/tags 混用。
+6. tags 和 content_types 使用 | 分隔。
+7. sources 至少列出实际用于判断的公开 URL；notes 必须使用简体中文，只写 1-2 句对人工复核有帮助、可从公开来源核验的事实摘要。不要写英文，不要写无法核验的联系人信息。`;
 }
 
 function buildLeadEnrichPrompt(sourceUrl, current) {
-  return `你是一个快速达人线索整理助手。请基于达人公开主页、公开简介和公开搜索结果，只整理待开发阶段真正需要的核心信息；无法核验的字段必须留空，不能猜测。
+  return `你是一个快速达人线索整理助手。请实际使用可用的网页搜索/网页读取能力，按下面“必做公开检索清单”逐项检索，不要只根据链接标题或一条搜索摘要作答。只整理待开发阶段真正需要的核心信息；无法核验的字段必须留空，不能猜测。
 
 达人主页链接：${sourceUrl}
 当前已有信息：${JSON.stringify(current || {}, null, 2)}
+
+必做公开检索清单：
+${sourceResearchChecklist(sourceUrl)}
 
 只返回 JSON，不要返回解释文字。字段结构如下：
 {
@@ -888,9 +933,9 @@ function buildLeadEnrichPrompt(sourceUrl, current) {
     "platform": "",
     "country": "",
     "niche": "",
-    "followers": 0,
-    "avg_views": 0,
-    "engagement": 0,
+    "followers": "",
+    "avg_views": "",
+    "engagement": "",
     "email": "",
     "email_source": "",
     "email_evidence": "",
@@ -904,9 +949,54 @@ function buildLeadEnrichPrompt(sourceUrl, current) {
 规则：
 1. 只提取以上字段。不要补充受众、语言、合作报价、标签、内容形式或任何推测性信息。
 2. country 必须依据公开的所在地、地址、频道 About/简介、公开搜索结果或自我介绍识别；例如 Spain、España、Madrid、Barcelona 返回“西班牙”。无法确认时留空。
-3. followers、avg_views、engagement 仅在公开可见或公开搜索结果有依据时填写；avg_views 指近 30 条内容的平均播放量，无法得到就留空。估算数字时在 warnings 标明“数值为公开可见信息估算”。
-4. 邮箱极严：仅当公开主页、About/简介、官网联系页、公开视频简介或公开搜索结果摘要明确出现同一邮箱时填写。填写 email 时，email_source 必须是该邮箱所在公开页面完整 http(s) URL，email_evidence 必须包含该完整邮箱；否则 email、email_source、email_evidence 全部留空。
-5. notes 必须为简体中文，只写 1 句可复核的事实摘要，不包含猜测的联系方式。`;
+3. 粉丝量是高优先级字段：必须单独核查主页/频道页公开显示的 followers、subscribers、粉丝或订阅者数字。公开显示数字可直接填写；不要用播放量、点赞数或其他账号数据替代。确实找不到时返回空字符串，不要返回 0。
+4. avg_views 指近 30 条内容的平均播放量，engagement 指公开可核验的互动率；无法可靠得到就返回空字符串，不要把缺失写成 0。估算数字时在 warnings 标明“数值为公开可见信息估算”。
+5. 邮箱必须专项检索：依次检查主页 bio/简介、About/Profile 页面、官网 Contact 页面、最新 3 条公开内容描述和公开搜索摘要。仅当上述公开页面明确出现同一邮箱时填写。填写 email 时，email_source 必须是该邮箱所在公开页面完整 http(s) URL，email_evidence 必须包含该完整邮箱；否则 email、email_source、email_evidence 全部留空。
+6. sources 至少列出实际用于判断的公开 URL；notes 必须为简体中文，只写 1 句可复核的事实摘要，不包含猜测的联系方式。`;
+}
+
+function buildMissingFieldFollowupPrompt(sourceUrl, current, purpose, missingFields) {
+  const fields =
+    purpose === "lead"
+      ? ["name", "social_url", "platform", "country", "niche", "followers", "avg_views", "engagement", "email", "email_source", "email_evidence", "notes"]
+      : ["name", "social_url", "country", "language", "platform", "niche", "followers", "avg_views", "engagement", "email", "email_source", "email_evidence", "audience", "content_types", "tags", "notes"];
+  const blankUpdates = Object.fromEntries(fields.map((field) => [field, ""]));
+
+  return `你正在为达人资料做第二次专项补查。必须使用网页搜索能力，且只补查以下仍缺失的字段：${missingFields.join("、")}。
+
+达人主页链接：${sourceUrl}
+第一次整理后已有信息：${JSON.stringify(current || {}, null, 2)}
+
+必须执行以下公开检索：
+${sourceResearchChecklist(sourceUrl)}
+
+只返回 JSON：
+{
+  "updates": ${JSON.stringify(blankUpdates)},
+  "confidence": "low|medium|high",
+  "sources": [],
+  "warnings": []
+}
+
+规则：
+1. followers 必须来自该账号/频道公开显示的粉丝或订阅者数；找不到就为空，绝不能返回 0 或用播放量代替。
+2. email 必须在公开页面原文中出现；填写时 email_source 为出现邮箱的完整 URL，email_evidence 必须包含该邮箱；否则三个邮箱字段全部为空。
+3. 不要覆盖已有信息，不要猜测，sources 只列实际使用的公开 URL，notes 使用简体中文。`;
+}
+
+function mergeEnrichmentResults(primary, recovery) {
+  if (!recovery) return primary;
+  const updates = { ...(primary?.updates || {}) };
+  for (const [key, value] of Object.entries(recovery.updates || {})) {
+    if (!String(updates[key] || "").trim() && String(value || "").trim()) updates[key] = value;
+  }
+  return {
+    ...primary,
+    updates,
+    confidence: primary?.confidence === "high" || recovery.confidence === "high" ? "high" : primary?.confidence || recovery.confidence || "medium",
+    sources: [...new Set([...(primary?.sources || []), ...(recovery.sources || [])])].slice(0, 8),
+    warnings: [...new Set([...(primary?.warnings || []), ...(recovery.warnings || [])])].slice(0, 8),
+  };
 }
 
 async function enrichCreatorWithAi(sourceUrl, current, purpose = "creator") {
@@ -936,7 +1026,17 @@ async function enrichCreatorWithAi(sourceUrl, current, purpose = "creator") {
       const message = response.body?.error?.message || response.body?.raw || `OpenAI 兼容接口请求失败：HTTP ${response.statusCode}`;
       throw new Error(message);
     }
-    return sanitizeCreatorEnrich(parseOpenAiJson(response.body), sourceUrl, purpose);
+    const result = sanitizeCreatorEnrich(parseOpenAiJson(response.body), sourceUrl, purpose);
+    const missingFields = ["followers", "email"].filter((key) => !String(result.updates[key] || "").trim());
+    if (missingFields.length) {
+      result.warnings = [
+        ...new Set([
+          ...(result.warnings || []),
+          "当前 OpenAI 兼容协议未启用标准网页搜索，关键公开信息可能无法稳定补全；建议为此功能使用 Gemini 协议并开启联网检索。",
+        ]),
+      ];
+    }
+    return result;
   }
 
   const endpoint = buildGeminiEndpoint(settings);
@@ -968,7 +1068,20 @@ async function enrichCreatorWithAi(sourceUrl, current, purpose = "creator") {
     throw new Error(message);
   }
 
-  return sanitizeCreatorEnrich(parseGeminiJson(response.body), sourceUrl, purpose);
+  const primary = sanitizeCreatorEnrich(parseGeminiJson(response.body), sourceUrl, purpose);
+  const missingFields = ["followers", "email"].filter((key) => !String(primary.updates[key] || "").trim());
+  if (!missingFields.length) return primary;
+
+  const recoveryResponse = await post(endpoint, {
+    ...basePayload,
+    contents: [{ role: "user", parts: [{ text: buildMissingFieldFollowupPrompt(sourceUrl, { ...current, ...primary.updates }, purpose, missingFields) }] }],
+    tools: [{ googleSearch: {} }],
+  });
+  if (recoveryResponse.statusCode >= 400) {
+    primary.warnings = [...new Set([...(primary.warnings || []), "关键字段补查未完成，已保留首次检索结果。"])];
+    return primary;
+  }
+  return mergeEnrichmentResults(primary, sanitizeCreatorEnrich(parseGeminiJson(recoveryResponse.body), sourceUrl, purpose));
 }
 
 function handleApi(req, res, pathname) {

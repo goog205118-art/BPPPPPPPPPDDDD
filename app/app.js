@@ -685,7 +685,7 @@ function defaultRecord(type) {
   };
 
   for (const field of entityConfig[type].fields) {
-    if (field.type === "number") item[field.key] = 0;
+    if (field.type === "number") item[field.key] = "";
     else if (field.type === "select") item[field.key] = field.options[0] || "";
     else item[field.key] = "";
   }
@@ -977,11 +977,11 @@ function renderFilters() {
       if (!filter) return "";
       const count = state.filters.values[key]?.length || 0;
       const label = count ? `${filter.label}：${count}` : filter.label;
-      return `<button type="button" class="ghost active-filter ${state.filterMenu?.mode === "values" && state.filterMenu.key === key ? "active" : ""}" data-filter-control="${escapeHtml(key)}">${escapeHtml(label)}</button>`;
+      return `<button type="button" class="ghost active-filter ${state.filterMenu?.mode === "drawer" && state.filterMenu.openSections?.includes(key) ? "active" : ""}" data-filter-control="${escapeHtml(key)}">${escapeHtml(label)}</button>`;
     })
     .join("");
 
-  elements.filterSetupBtn.classList.toggle("active", state.filterMenu?.mode === "setup");
+  elements.filterSetupBtn.classList.toggle("active", state.filterMenu?.mode === "drawer");
   renderFilterPopover();
 }
 
@@ -997,60 +997,86 @@ function filterOptions(filter) {
 }
 
 function renderFilterPopover() {
-  const menu = state.filterMenu;
-  if (!menu) {
+  if (state.filterMenu?.mode !== "drawer") {
     elements.filterPopover.innerHTML = "";
     elements.filterPopover.classList.add("hidden");
     return;
   }
 
-  if (menu.mode === "setup") {
-    const selected = new Set(state.filters.activeKeys);
-    elements.filterPopover.innerHTML = `
-      <div class="filter-popover-head">
-        <strong>筛选内容</strong>
-      </div>
-      <div class="filter-option-list">
-        ${getFilterDefinitions()
-          .map(
-            (filter) => `
-              <label class="filter-option">
-                <input type="checkbox" data-filter-visibility="${escapeHtml(filter.key)}" ${selected.has(filter.key) ? "checked" : ""} />
-                <span>${escapeHtml(filter.label)}</span>
-              </label>`,
-          )
-          .join("")}
-      </div>`;
-  } else {
-    const filter = getFilterDefinition(menu.key);
-    if (!filter) {
-      state.filterMenu = null;
-      renderFilterPopover();
-      return;
-    }
-    const selected = new Set(state.filters.values[filter.key] || []);
-    const options = filterOptions(filter);
-    elements.filterPopover.innerHTML = `
-      <div class="filter-popover-head">
-        <strong>${escapeHtml(filter.label)}</strong>
-        <button type="button" class="filter-reset" data-filter-reset="${escapeHtml(filter.key)}">清空</button>
-      </div>
-      <div class="filter-option-list">
-        ${
-          options.length
-            ? options
+  const openSections = new Set(state.filterMenu.openSections || []);
+  const selectedFields = new Set(state.filters.activeKeys);
+  const sections = getFilterDefinitions()
+    .filter((filter) => selectedFields.has(filter.key))
+    .map((filter) => {
+      const selected = new Set(state.filters.values[filter.key] || []);
+      const options = filterOptions(filter);
+      const expanded = openSections.has(filter.key);
+      return `
+        <section class="filter-drawer-section">
+          <button type="button" class="filter-section-toggle" data-filter-section="${escapeHtml(filter.key)}" aria-expanded="${expanded}">
+            <span>${escapeHtml(filter.label)}${selected.size ? `<em>${selected.size}</em>` : ""}</span>
+            <b>${expanded ? "-" : "+"}</b>
+          </button>
+          <div class="filter-section-body ${expanded ? "" : "hidden"}">
+            <div class="filter-section-tools">
+              <span>${options.length ? `可选 ${options.length} 项` : "暂无可选内容"}</span>
+              ${selected.size ? `<button type="button" class="filter-reset" data-filter-reset="${escapeHtml(filter.key)}">清空</button>` : ""}
+            </div>
+            <div class="filter-option-list">
+              ${
+                options.length
+                  ? options
+                      .map(
+                        (value) => `
+                          <label class="filter-option">
+                            <input type="checkbox" data-filter-value="${escapeHtml(filter.key)}" value="${escapeHtml(value)}" ${selected.has(value) ? "checked" : ""} />
+                            <span>${escapeHtml(value)}</span>
+                          </label>`,
+                      )
+                      .join("")
+                  : `<p class="filter-empty">录入资料后会在这里出现可筛选项</p>`
+              }
+            </div>
+          </div>
+        </section>`;
+    })
+    .join("");
+
+  const fieldsExpanded = openSections.has("__fields");
+  elements.filterPopover.innerHTML = `
+    <aside class="filter-drawer-sheet" role="dialog" aria-modal="true" aria-label="筛选">
+      <header class="filter-drawer-head">
+        <strong>筛选</strong>
+        <button type="button" class="filter-drawer-close" data-filter-close aria-label="关闭筛选" title="关闭">×</button>
+      </header>
+      <div class="filter-drawer-content">
+        <section class="filter-drawer-section filter-field-settings">
+          <button type="button" class="filter-section-toggle" data-filter-section="__fields" aria-expanded="${fieldsExpanded}">
+            <span>筛选字段<em>${state.filters.activeKeys.length}</em></span>
+            <b>${fieldsExpanded ? "-" : "+"}</b>
+          </button>
+          <div class="filter-section-body ${fieldsExpanded ? "" : "hidden"}">
+            <p class="filter-section-hint">勾选需要显示和使用的筛选条件</p>
+            <div class="filter-option-list">
+              ${getFilterDefinitions()
                 .map(
-                  (value) => `
+                  (filter) => `
                     <label class="filter-option">
-                      <input type="checkbox" data-filter-value="${escapeHtml(filter.key)}" value="${escapeHtml(value)}" ${selected.has(value) ? "checked" : ""} />
-                      <span>${escapeHtml(value)}</span>
+                      <input type="checkbox" data-filter-visibility="${escapeHtml(filter.key)}" ${selectedFields.has(filter.key) ? "checked" : ""} />
+                      <span>${escapeHtml(filter.label)}</span>
                     </label>`,
                 )
-                .join("")
-            : `<p class="filter-empty">暂无可筛选内容</p>`
-        }
-      </div>`;
-  }
+                .join("")}
+            </div>
+          </div>
+        </section>
+        ${sections || `<p class="filter-empty filter-drawer-empty">请先在“筛选字段”中选择至少一个条件</p>`}
+      </div>
+      <footer class="filter-drawer-foot">
+        <button type="button" class="ghost" data-filter-clear-all ${Object.values(state.filters.values).some((values) => values?.length) ? "" : "disabled"}>清除条件</button>
+        <button type="button" class="primary" data-filter-close>完成</button>
+      </footer>
+    </aside>`;
   elements.filterPopover.classList.remove("hidden");
 }
 
@@ -1301,7 +1327,8 @@ async function handleCreatorAiEnrich() {
     const applied = applyCreatorAiUpdates(payload.updates, sourceUrl);
     const confidenceText = payload.confidence ? `，可信度：${payload.confidence}` : "";
     const sourceText = Array.isArray(payload.sources) && payload.sources.length ? `，来源 ${payload.sources.length} 个` : "";
-    if (status) status.textContent = `已补全 ${applied} 个空字段${confidenceText}${sourceText}，请人工复核后保存。`;
+    const warningText = Array.isArray(payload.warnings) && payload.warnings.length ? `；提示：${payload.warnings.join("；")}` : "";
+    if (status) status.textContent = `已补全 ${applied} 个空字段${confidenceText}${sourceText}${warningText}。请人工复核后保存。`;
     if (button) button.dataset.enrichedUrl = sourceUrl;
     renderIdentityCheck();
   } catch (error) {
@@ -2751,8 +2778,9 @@ function bindEvents() {
     state.filters.query = elements.searchInput.value;
     renderFilteredRows();
   });
-  elements.filterSetupBtn.addEventListener("click", () => {
-    state.filterMenu = state.filterMenu?.mode === "setup" ? null : { mode: "setup" };
+  elements.filterSetupBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    state.filterMenu = state.filterMenu?.mode === "drawer" ? null : { mode: "drawer", openSections: ["__fields"] };
     renderFilters();
   });
   elements.activeFilters.addEventListener("click", (event) => {
@@ -2760,7 +2788,7 @@ function bindEvents() {
     if (!button) return;
     event.stopPropagation();
     const key = button.dataset.filterControl;
-    state.filterMenu = state.filterMenu?.mode === "values" && state.filterMenu.key === key ? null : { mode: "values", key };
+    state.filterMenu = { mode: "drawer", openSections: [key] };
     renderFilters();
   });
   elements.filterPopover.addEventListener("change", async (event) => {
@@ -2772,7 +2800,6 @@ function bindEvents() {
       else {
         active.delete(key);
         delete state.filters.values[key];
-        if (state.filterMenu?.mode === "values" && state.filterMenu.key === key) state.filterMenu = { mode: "setup" };
       }
       state.filters.activeKeys = [...active];
       state.data.meta.filterPreferences[state.activeTab] = [...active];
@@ -2796,6 +2823,29 @@ function bindEvents() {
   });
   elements.filterPopover.addEventListener("click", (event) => {
     event.stopPropagation();
+    if (event.target === elements.filterPopover || event.target.closest("[data-filter-close]")) {
+      state.filterMenu = null;
+      renderFilters();
+      return;
+    }
+
+    const section = event.target.closest("[data-filter-section]");
+    if (section) {
+      const key = section.dataset.filterSection;
+      const openSections = new Set(state.filterMenu?.openSections || []);
+      if (openSections.has(key)) openSections.delete(key);
+      else openSections.add(key);
+      state.filterMenu = { mode: "drawer", openSections: [...openSections] };
+      renderFilterPopover();
+      return;
+    }
+
+    if (event.target.closest("[data-filter-clear-all]")) {
+      state.filters.values = {};
+      renderFilteredRows();
+      return;
+    }
+
     const reset = event.target.closest("[data-filter-reset]");
     if (!reset) return;
     delete state.filters.values[reset.dataset.filterReset];

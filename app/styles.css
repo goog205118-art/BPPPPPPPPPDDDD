@@ -1023,7 +1023,7 @@ h1 {
   align-items: center;
 }
 
-.search-group input {
+.search-group > input[type="search"] {
   border: 1px solid var(--line);
   border-radius: 8px;
   min-height: 34px;
@@ -1031,7 +1031,7 @@ h1 {
   background: white;
 }
 
-.search-group input {
+.search-group > input[type="search"] {
   min-width: 320px;
   flex: 1;
 }
@@ -1076,29 +1076,139 @@ h1 {
 }
 
 .filter-popover {
-  position: absolute;
-  z-index: 12;
-  top: calc(100% + 7px);
-  left: 0;
-  width: min(300px, calc(100vw - 44px));
-  max-height: min(390px, calc(100vh - 180px));
-  overflow: auto;
-  border: 1px solid #cbd7e8;
-  border-radius: 8px;
-  background: white;
-  box-shadow: 0 14px 34px rgba(15, 23, 42, 0.15);
-  padding: 8px;
+  position: fixed;
+  z-index: 45;
+  inset: 0;
+  display: flex;
+  justify-content: flex-end;
+  background: rgba(15, 23, 42, 0.18);
 }
 
-.filter-popover-head {
+.filter-drawer-sheet {
   display: flex;
+  width: min(360px, 100%);
+  height: 100%;
+  flex-direction: column;
+  border-left: 1px solid #d8e0eb;
+  background: white;
+  box-shadow: -12px 0 30px rgba(15, 23, 42, 0.14);
+}
+
+.filter-drawer-head {
+  display: flex;
+  min-height: 58px;
   align-items: center;
   justify-content: space-between;
   gap: 10px;
-  padding: 2px 4px 8px;
-  border-bottom: 1px solid #edf1f7;
-  color: #334155;
-  font-size: 0.84rem;
+  padding: 0 18px;
+  border-bottom: 1px solid #e6ebf2;
+  color: #172033;
+  font-size: 1rem;
+}
+
+.filter-drawer-close {
+  width: 32px;
+  height: 32px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  color: #475569;
+  font-size: 1.35rem;
+  line-height: 1;
+  cursor: pointer;
+}
+
+.filter-drawer-close:hover {
+  background: #f1f5f9;
+}
+
+.filter-drawer-content {
+  flex: 1;
+  overflow: auto;
+  padding: 0 18px;
+}
+
+.filter-drawer-section {
+  border-bottom: 1px solid #e6ebf2;
+}
+
+.filter-section-toggle {
+  display: flex;
+  width: 100%;
+  min-height: 48px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 0;
+  background: transparent;
+  color: #273449;
+  cursor: pointer;
+  font-size: 0.88rem;
+  font-weight: 700;
+  text-align: left;
+}
+
+.filter-section-toggle span {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+
+.filter-section-toggle b {
+  color: #64748b;
+  font-size: 1rem;
+  font-weight: 500;
+}
+
+.filter-section-toggle em {
+  display: inline-grid;
+  min-width: 18px;
+  height: 18px;
+  place-items: center;
+  border-radius: 9px;
+  background: #edf3ff;
+  color: #325db3;
+  font-size: 0.72rem;
+  font-style: normal;
+  font-weight: 700;
+}
+
+.filter-section-body {
+  padding: 0 0 12px;
+}
+
+.filter-section-tools {
+  display: flex;
+  min-height: 25px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.filter-section-hint {
+  margin: -1px 0 7px;
+  color: var(--muted);
+  font-size: 0.76rem;
+}
+
+.filter-drawer-foot {
+  display: flex;
+  min-height: 66px;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 0 18px;
+  border-top: 1px solid #e6ebf2;
+  background: #fff;
+}
+
+.filter-drawer-foot .ghost,
+.filter-drawer-foot .primary {
+  min-height: 34px;
+  padding: 0.38rem 0.72rem;
 }
 
 .filter-reset {
@@ -1117,27 +1227,28 @@ h1 {
 
 .filter-option-list {
   display: grid;
-  gap: 2px;
-  padding-top: 6px;
+  gap: 1px;
 }
 
 .filter-option {
   display: flex;
+  min-height: 32px;
   min-width: 0;
   align-items: center;
   gap: 8px;
-  border-radius: 6px;
-  padding: 0.4rem;
+  padding: 0.34rem 0;
   color: #334155;
   font-size: 0.84rem;
   cursor: pointer;
 }
 
 .filter-option:hover {
-  background: #f4f7fc;
+  color: #1f4da7;
 }
 
 .filter-option input {
+  min-width: 15px;
+  flex: 0 0 15px;
   width: 15px;
   height: 15px;
   margin: 0;
@@ -1151,9 +1262,13 @@ h1 {
 }
 
 .filter-empty {
-  margin: 4px;
+  margin: 6px 0;
   color: var(--muted);
   font-size: 0.82rem;
+}
+
+.filter-drawer-empty {
+  padding: 14px 0;
 }
 
 .table-wrap {
@@ -1359,7 +1474,7 @@ tbody tr:hover {
     grid-template-columns: 1fr;
   }
 
-  .search-group input {
+  .search-group > input[type="search"] {
     min-width: 100%;
   }
 
