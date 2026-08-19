@@ -40,7 +40,7 @@
         <div class="settings-head">
           <div>
             <h2>AI 参数设置</h2>
-            <p class="panel-hint">为完整补全、待开发快录和开发邮件分别配置 AI 服务。支持 Gemini 和 OpenAI 兼容接口。</p>
+            <p class="panel-hint">为完整补全、待开发快录、产品链接补全和开发邮件分别配置 AI 服务。支持 Gemini 和 OpenAI 兼容接口。</p>
           </div>
           <button type="button" id="aiSettingsReloadBtn" class="ghost">重新读取</button>
         </div>
@@ -118,6 +118,44 @@
               <div class="field field-wide proxy-setting">
                 <label for="leadAiProxyUrl">自定义代理地址（留空自动识别）</label>
                 <input id="leadAiProxyUrl" name="lead.proxyUrl" type="url" placeholder="默认自动读取 Windows / FlClash；仅特殊网络时填写" />
+              </div>
+            </div>
+          </section>
+          <section class="ai-profile">
+            <div class="ai-profile-head">
+              <h3>产品链接 AI 补全</h3>
+              <p>网页读取失败或资料不全时自动接力，只补充空白字段；无法核验的名称、主图和卖点会保持为空。</p>
+            </div>
+            <div class="settings-fields">
+              <div class="field">
+                <label for="productAiProtocol">接入协议</label>
+                <select id="productAiProtocol" name="product.protocol">
+                  <option value="gemini">Gemini</option>
+                  <option value="openai">OpenAI 兼容</option>
+                </select>
+              </div>
+              <div class="field">
+                <label for="productAiKeySource">Key 来源</label>
+                <select id="productAiKeySource" name="product.keySource">
+                  <option value="local">本地设置</option>
+                  <option value="environment">环境变量</option>
+                </select>
+              </div>
+              <div class="field field-wide">
+                <label for="productAiApiBaseUrl">API 地址</label>
+                <input id="productAiApiBaseUrl" name="product.apiBaseUrl" type="url" placeholder="Gemini 基础地址，或 OpenAI 兼容基础地址 / chat/completions 地址" />
+              </div>
+              <div class="field">
+                <label for="productAiApiKey">API Key</label>
+                <input id="productAiApiKey" name="product.apiKey" type="password" autocomplete="new-password" placeholder="已保存时可留空不改" />
+              </div>
+              <div class="field">
+                <label for="productAiModel">模型名</label>
+                <input id="productAiModel" name="product.model" type="text" placeholder="填写商品补全模型名" />
+              </div>
+              <div class="field field-wide proxy-setting">
+                <label for="productAiProxyUrl">自定义代理地址（留空自动识别）</label>
+                <input id="productAiProxyUrl" name="product.proxyUrl" type="url" placeholder="默认自动读取 Windows / FlClash；仅特殊网络时填写" />
               </div>
             </div>
           </section>

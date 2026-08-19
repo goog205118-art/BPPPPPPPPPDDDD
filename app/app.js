@@ -24,6 +24,7 @@ const defaultAiSettings = {
   profiles: {
     creator: { ...defaultAiProfile },
     lead: { ...defaultAiProfile },
+    product: { ...defaultAiProfile },
     outreach: { ...defaultAiProfile },
   },
 };
@@ -458,6 +459,12 @@ const elements = {
   leadAiKeySource: document.getElementById("leadAiKeySource"),
   leadAiModel: document.getElementById("leadAiModel"),
   leadAiProxyUrl: document.getElementById("leadAiProxyUrl"),
+  productAiApiBaseUrl: document.getElementById("productAiApiBaseUrl"),
+  productAiProtocol: document.getElementById("productAiProtocol"),
+  productAiApiKey: document.getElementById("productAiApiKey"),
+  productAiKeySource: document.getElementById("productAiKeySource"),
+  productAiModel: document.getElementById("productAiModel"),
+  productAiProxyUrl: document.getElementById("productAiProxyUrl"),
   outreachAiApiBaseUrl: document.getElementById("outreachAiApiBaseUrl"),
   outreachAiProtocol: document.getElementById("outreachAiProtocol"),
   outreachAiApiKey: document.getElementById("outreachAiApiKey"),
@@ -847,6 +854,7 @@ async function loadAiSettings() {
       profiles: {
         creator: { ...clone(defaultAiProfile), ...(payload.profiles?.creator || legacyProfile) },
         lead: { ...clone(defaultAiProfile), ...(payload.profiles?.lead || payload.profiles?.creator || legacyProfile) },
+        product: { ...clone(defaultAiProfile), ...(payload.profiles?.product || payload.profiles?.lead || payload.profiles?.creator || legacyProfile) },
         outreach: { ...clone(defaultAiProfile), ...(payload.profiles?.outreach || payload.profiles?.lead || payload.profiles?.creator || legacyProfile) },
       },
     };
@@ -870,6 +878,7 @@ function readAiSettingsForm() {
     profiles: {
       creator: profile("creator"),
       lead: profile("lead"),
+      product: profile("product"),
       outreach: profile("outreach"),
     },
   };
@@ -907,6 +916,14 @@ function renderAiSettings() {
     model: elements.leadAiModel,
     proxyUrl: elements.leadAiProxyUrl,
   });
+  const product = bindProfile("product", {
+    protocol: elements.productAiProtocol,
+    apiBaseUrl: elements.productAiApiBaseUrl,
+    keySource: elements.productAiKeySource,
+    apiKey: elements.productAiApiKey,
+    model: elements.productAiModel,
+    proxyUrl: elements.productAiProxyUrl,
+  });
   const outreach = bindProfile("outreach", {
     protocol: elements.outreachAiProtocol,
     apiBaseUrl: elements.outreachAiApiBaseUrl,
@@ -916,7 +933,7 @@ function renderAiSettings() {
     proxyUrl: elements.outreachAiProxyUrl,
   });
   const describe = (settings, label) => `${label}${settings.hasApiKey ? "已配置" : "未配置"}${settings.model ? `（${settings.model}）` : ""}`;
-  elements.aiSettingsStatus.textContent = `${describe(creator, "完整补全")}; ${describe(lead, "快速录入")}; ${describe(outreach, "开发邮件")}。`;
+  elements.aiSettingsStatus.textContent = `${describe(creator, "完整补全")}; ${describe(lead, "快速录入")}; ${describe(product, "产品补全")}; ${describe(outreach, "开发邮件")}。`;
 }
 
 async function saveAiSettings(event) {
@@ -938,13 +955,14 @@ async function saveAiSettings(event) {
     profiles: {
       creator: { ...clone(defaultAiProfile), ...(payload.settings?.profiles?.creator || payload.settings || {}) },
       lead: { ...clone(defaultAiProfile), ...(payload.settings?.profiles?.lead || payload.settings?.profiles?.creator || payload.settings || {}) },
+      product: { ...clone(defaultAiProfile), ...(payload.settings?.profiles?.product || payload.settings?.profiles?.lead || payload.settings?.profiles?.creator || payload.settings || {}) },
       outreach: { ...clone(defaultAiProfile), ...(payload.settings?.profiles?.outreach || payload.settings?.profiles?.lead || payload.settings?.profiles?.creator || payload.settings || {}) },
     },
   };
   renderAiSettings();
   const profiles = state.aiSettings.profiles;
   const saved = (profile) => (profile?.hasApiKey ? "已配置" : "未配置");
-  elements.aiSettingsStatus.textContent = `设置已保存：完整补全 ${saved(profiles.creator)}；快速录入 ${saved(profiles.lead)}；开发邮件 ${saved(profiles.outreach)}。API Key 为安全起见不会回显。`;
+  elements.aiSettingsStatus.textContent = `设置已保存：完整补全 ${saved(profiles.creator)}；快速录入 ${saved(profiles.lead)}；产品补全 ${saved(profiles.product)}；开发邮件 ${saved(profiles.outreach)}。API Key 为安全起见不会回显。`;
 }
 
 async function checkAiStatus() {
@@ -960,7 +978,7 @@ async function checkAiStatus() {
       const networkText = network.mode === "cloud" ? "网络：Vercel 云端直连" : network.mode === "proxy" ? `代理：${network.source || "已连接"}` : "网络：直连";
       return `${label}${profile.configured ? "已配置" : "未配置"}${profile.model ? `（${profile.model}）` : ""}，${networkText}`;
     };
-    elements.aiSettingsStatus.textContent = `${describe("creator", "完整补全")}; ${describe("lead", "快速录入")}; ${describe("outreach", "开发邮件")}。`;
+    elements.aiSettingsStatus.textContent = `${describe("creator", "完整补全")}; ${describe("lead", "快速录入")}; ${describe("product", "产品补全")}; ${describe("outreach", "开发邮件")}。`;
   } catch (error) {
     elements.aiSettingsStatus.textContent = error.message || "检查失败";
   }
@@ -2029,7 +2047,7 @@ async function handleProductPreview() {
   }
   const button = document.getElementById("productPreviewBtn");
   if (button) button.disabled = true;
-  if (status) status.textContent = "正在读取公开产品信息...";
+  if (status) status.textContent = "正在读取公开产品信息，必要时将由 AI 补充...";
   try {
     const response = await apiFetch(API_PRODUCT_PREVIEW, {
       method: "POST",
@@ -2047,12 +2065,19 @@ async function handleProductPreview() {
       }
     }
     if (status) {
+      const webFields = Array.isArray(payload.web_fields) ? payload.web_fields : [];
+      const aiFields = Array.isArray(payload.ai_fields) ? payload.ai_fields : [];
+      const labels = { name: "产品名称", image_url: "主图", description: "简介" };
+      const detail = [
+        webFields.length ? `网页读取：${webFields.map((key) => labels[key] || key).join("、")}` : "",
+        aiFields.length ? `AI 补充：${aiFields.map((key) => labels[key] || key).join("、")}（请核对）` : "",
+      ].filter(Boolean).join("；");
       if (filled.length) {
-        status.textContent = `已读取并填入${filled.join("、")}，可继续人工调整。${payload.warning ? ` ${payload.warning}` : ""}`;
+        status.textContent = `已填入${filled.join("、")}。${detail ? ` ${detail}。` : ""}${payload.warning ? ` ${payload.warning}` : ""}`;
       } else if (payload.warning) {
-        status.textContent = payload.warning;
+        status.textContent = `${detail ? `${detail}。` : ""}${payload.warning}`;
       } else {
-        status.textContent = "已读取公开页面；现有手填内容未被覆盖。";
+        status.textContent = detail ? `${detail}。现有手填内容未被覆盖。` : "已读取公开页面；现有手填内容未被覆盖。";
       }
     }
   } catch (error) {
@@ -3237,6 +3262,7 @@ function bindEvents() {
   };
   bindKeySource(elements.aiKeySource, elements.aiApiKey);
   bindKeySource(elements.leadAiKeySource, elements.leadAiApiKey);
+  bindKeySource(elements.productAiKeySource, elements.productAiApiKey);
   bindKeySource(elements.outreachAiKeySource, elements.outreachAiApiKey);
   elements.resetFormBtn.addEventListener("click", resetForm);
   elements.newRecordBtn.addEventListener("click", () => openEditor());

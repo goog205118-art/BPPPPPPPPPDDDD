@@ -38,6 +38,7 @@ const defaultAiSettings = {
   profiles: {
     creator: { ...defaultAiProfile },
     lead: { ...defaultAiProfile },
+    product: { ...defaultAiProfile },
     outreach: { ...defaultAiProfile },
   },
 };
@@ -328,6 +329,7 @@ function normalizeAiSettings(raw = {}, existing = {}) {
     profiles: {
       creator: normalizeAiProfile(rawProfiles.creator || legacyRaw, existingProfiles.creator || legacyExisting),
       lead: normalizeAiProfile(rawProfiles.lead || {}, existingProfiles.lead || existingProfiles.creator || legacyExisting),
+      product: normalizeAiProfile(rawProfiles.product || {}, existingProfiles.product || existingProfiles.lead || existingProfiles.creator || legacyExisting),
       outreach: normalizeAiProfile(rawProfiles.outreach || {}, existingProfiles.outreach || existingProfiles.lead || existingProfiles.creator || legacyExisting),
     },
   };
@@ -351,7 +353,7 @@ function saveAiSettings(input) {
   ensureDataFile();
   const existing = loadAiSettings();
   const next = normalizeAiSettings(input, existing);
-  for (const key of ["creator", "lead", "outreach"]) {
+  for (const key of ["creator", "lead", "product", "outreach"]) {
     const profile = next.profiles[key];
     const previous = existing.profiles[key] || {};
     if (!profile.apiKey || profile.apiKey === "********") {
@@ -367,11 +369,13 @@ function saveAiSettings(input) {
 
 function resolveAiSettings(purpose = "creator") {
   const saved = loadAiSettings();
-  const profileKey = ["creator", "lead", "outreach"].includes(purpose) ? purpose : "creator";
+  const profileKey = ["creator", "lead", "product", "outreach"].includes(purpose) ? purpose : "creator";
   const profile = saved.profiles[profileKey] || saved.profiles.creator || defaultAiProfile;
   const purposeKey =
     profileKey === "lead"
       ? process.env.RESOURCE_WORKBENCH_LEAD_AI_KEY || process.env.LEAD_AI_API_KEY
+      : profileKey === "product"
+        ? process.env.RESOURCE_WORKBENCH_PRODUCT_AI_KEY || process.env.PRODUCT_AI_API_KEY
       : profileKey === "outreach"
         ? process.env.RESOURCE_WORKBENCH_OUTREACH_AI_KEY || process.env.OUTREACH_AI_API_KEY
         : process.env.RESOURCE_WORKBENCH_CREATOR_AI_KEY || process.env.CREATOR_AI_API_KEY;
@@ -504,6 +508,7 @@ async function publicAiStatus() {
   return {
     creator: await statusFor("creator"),
     lead: await statusFor("lead"),
+    product: await statusFor("product"),
     outreach: await statusFor("outreach"),
   };
 }
@@ -514,6 +519,7 @@ function publicAiSettings() {
     profiles: {
       creator: publicAiProfile(resolveAiSettings("creator"), saved.profiles.creator || {}),
       lead: publicAiProfile(resolveAiSettings("lead"), saved.profiles.lead || {}),
+      product: publicAiProfile(resolveAiSettings("product"), saved.profiles.product || {}),
       outreach: publicAiProfile(resolveAiSettings("outreach"), saved.profiles.outreach || {}),
     },
   };
@@ -1097,6 +1103,85 @@ async function enrichCreatorWithAi(sourceUrl, current, purpose = "creator") {
   return mergeEnrichmentResults(primary, sanitizeCreatorEnrich(parseGeminiJson(recoveryResponse.body), sourceUrl, purpose));
 }
 
+function sanitizeProductEnrich(raw, productUrl) {
+  const updates = raw?.updates || raw || {};
+  const name = usableProductTitle(updates.name || "", productUrl).slice(0, 300);
+  const imageUrl = String(updates.image_url || "").trim();
+  const description = stripHtml(updates.description || "").slice(0, 700);
+  return {
+    ok: true,
+    updates: {
+      ...(name ? { name } : {}),
+      ...(isPublicSourceUrl(imageUrl) ? { image_url: imageUrl } : {}),
+      ...(description ? { description } : {}),
+    },
+    sources: Array.isArray(raw?.sources) ? raw.sources.map((item) => String(item).trim()).filter(isPublicSourceUrl).slice(0, 8) : [],
+    warnings: Array.isArray(raw?.warnings) ? raw.warnings.map((item) => String(item).trim()).filter(Boolean).slice(0, 8) : [],
+  };
+}
+
+function buildProductEnrichPrompt(productUrl, current) {
+  return `你是严谨的跨境商品资料录入助手。请检索并核验以下公开商品链接，只补充可以确认的商品资料。
+
+商品链接：${productUrl}
+网页读取到的已有资料：${JSON.stringify(current || {}, null, 2)}
+
+只返回有效 JSON，不要 Markdown：
+{
+  "updates": {
+    "name": "",
+    "image_url": "",
+    "description": ""
+  },
+  "sources": [],
+  "warnings": []
+}
+
+规则：
+1. name 必须是该链接对应的公开商品名称，不可填写网站名、店铺名、品类名或页面标题中的无关营销语；无法确认则留空。
+2. image_url 必须是可公开加载、与该商品对应的完整 http(s) 图片地址。不要返回搜索页、站点 logo、数据 URI、占位图或猜测的链接；无法确认则留空。
+3. description 用简体中文简短总结已核验的卖点和适用场景，最多 220 个汉字。不得编造材质、规格、尺寸、兼容型号、认证、价格、折扣、评分或库存。
+4. 不能覆盖已有资料。sources 只能列出实际使用的公开 URL；没有可靠资料时，updates 对应字段必须留空。`;
+}
+
+async function enrichProductWithAi(productUrl, current) {
+  const settings = resolveAiSettings("product");
+  if (!settings.apiKey) throw new Error("未配置产品链接 AI 补全。");
+  const prompt = buildProductEnrichPrompt(productUrl, current);
+  const network = await resolveAiNetwork(settings);
+  const post = (endpoint, payload, headers = {}) => (network.proxyUrl ? postJsonViaProxy(endpoint, payload, network.proxyUrl, headers) : postJson(endpoint, payload, headers));
+
+  if (settings.protocol === "openai") {
+    const response = await post(
+      buildOpenAiEndpoint(settings),
+      {
+        model: settings.model,
+        messages: [
+          { role: "system", content: "You extract only verifiable public product facts. Return valid JSON only." },
+          { role: "user", content: prompt },
+        ],
+        temperature: 0.1,
+        response_format: { type: "json_object" },
+      },
+      { Authorization: `Bearer ${settings.apiKey}` },
+    );
+    if (response.statusCode >= 400) throw new Error(response.body?.error?.message || response.body?.raw || `OpenAI 兼容接口请求失败：HTTP ${response.statusCode}`);
+    const result = sanitizeProductEnrich(parseOpenAiJson(response.body), productUrl);
+    result.warnings = [...new Set([...(result.warnings || []), "当前 OpenAI 兼容协议不保证联网检索，AI 补充结果请人工核对。"])];
+    return result;
+  }
+
+  const endpoint = buildGeminiEndpoint(settings);
+  const basePayload = {
+    contents: [{ role: "user", parts: [{ text: prompt }] }],
+    generationConfig: { temperature: 0.1, responseMimeType: "application/json" },
+  };
+  let response = await post(endpoint, { ...basePayload, tools: [{ googleSearch: {} }] });
+  if (response.statusCode >= 400) response = await post(endpoint, basePayload);
+  if (response.statusCode >= 400) throw new Error(response.body?.error?.message || response.body?.raw || `Gemini API 请求失败：HTTP ${response.statusCode}`);
+  return sanitizeProductEnrich(parseGeminiJson(response.body), productUrl);
+}
+
 function outreachLeadPayload(lead) {
   return {
     id: String(lead?.id || "").trim(),
@@ -1401,32 +1486,76 @@ function getPagePreview(targetUrl) {
 
 async function previewProductFromUrl(productUrl) {
   if (!isSafePublicUrl(productUrl)) throw new Error("产品链接必须是可公开访问的 http(s) 地址，且不能是本机或内网地址。");
-  const { html, finalUrl } = await getPagePreview(productUrl);
-  const structured = extractStructuredProductData(html);
-  const amazon = /(^|\.)amazon\./i.test(new URL(finalUrl).hostname) ? extractAmazonProductData(html) : {};
-  const title = usableProductTitle(
-    amazon.name ||
-      structured.name ||
-      extractHtmlMeta(html, "property", "og:title") ||
-      extractHtmlMeta(html, "name", "twitter:title") ||
-      decodeHtml((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || "").replace(/\s+/g, " ").trim(),
-    finalUrl,
-  );
-  const image = amazon.image_url || structured.image_url || extractHtmlMeta(html, "property", "og:image") || extractHtmlMeta(html, "name", "twitter:image");
-  const description = structured.description || amazon.description || extractHtmlMeta(html, "property", "og:description") || extractHtmlMeta(html, "name", "description");
-  let imageUrl = "";
+  const result = { name: "", image_url: "", description: "" };
+  const webFields = [];
+  const aiFields = [];
+  const warnings = [];
+  const sources = [];
+
   try {
-    imageUrl = image ? new URL(image, finalUrl).toString() : "";
-  } catch {
-    imageUrl = "";
+    const { html, finalUrl } = await getPagePreview(productUrl);
+    const structured = extractStructuredProductData(html);
+    const amazon = /(^|\.)amazon\./i.test(new URL(finalUrl).hostname) ? extractAmazonProductData(html) : {};
+    const title = usableProductTitle(
+      amazon.name ||
+        structured.name ||
+        extractHtmlMeta(html, "property", "og:title") ||
+        extractHtmlMeta(html, "name", "twitter:title") ||
+        decodeHtml((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || "").replace(/\s+/g, " ").trim(),
+      finalUrl,
+    );
+    const image = amazon.image_url || structured.image_url || extractHtmlMeta(html, "property", "og:image") || extractHtmlMeta(html, "name", "twitter:image");
+    const description = structured.description || amazon.description || extractHtmlMeta(html, "property", "og:description") || extractHtmlMeta(html, "name", "description");
+    let imageUrl = "";
+    try {
+      imageUrl = image ? new URL(image, finalUrl).toString() : "";
+    } catch {
+      imageUrl = "";
+    }
+    Object.assign(result, { name: title.slice(0, 300), image_url: imageUrl, description: stripHtml(description).slice(0, 700) });
+    for (const key of ["name", "image_url", "description"]) {
+      if (result[key]) webFields.push(key);
+    }
+    if (isPublicSourceUrl(finalUrl)) sources.push(finalUrl);
+  } catch (error) {
+    warnings.push(`网页读取未完成：${formatProductPreviewError(error)}`);
   }
-  const foundCount = [title, imageUrl, description].filter(Boolean).length;
-  const warning = foundCount
-    ? foundCount < 3
-      ? "仅读取到部分公开资料，其他字段请人工补充核对。"
-      : ""
-    : "该页面没有返回可用的公开商品资料。Amazon 等平台可能限制自动访问；请手动补充，或改用品牌官网的商品页。";
-  return { ok: true, name: title.slice(0, 300), image_url: imageUrl, description: stripHtml(description).slice(0, 700), warning };
+
+  const missing = ["name", "image_url", "description"].filter((key) => !result[key]);
+  if (missing.length) {
+    const settings = resolveAiSettings("product");
+    if (settings.apiKey) {
+      try {
+        const enriched = await enrichProductWithAi(productUrl, result);
+        for (const key of missing) {
+          if (enriched.updates[key]) {
+            result[key] = enriched.updates[key];
+            aiFields.push(key);
+          }
+        }
+        sources.push(...(enriched.sources || []));
+        warnings.push(...(enriched.warnings || []));
+      } catch (error) {
+        warnings.push(`AI 补充未完成：${formatError(error)}`);
+      }
+    } else {
+      warnings.push("产品链接 AI 补全未配置，未读取到的字段已保留为空。");
+    }
+  }
+
+  if (!webFields.length && !aiFields.length && !warnings.length) {
+    warnings.push("没有读取到可核验的公开商品资料，字段已保留为空。");
+  } else if (["name", "image_url", "description"].some((key) => !result[key])) {
+    warnings.push("未能核验的字段已保留为空，请人工补充或核对。");
+  }
+  return {
+    ok: true,
+    ...result,
+    web_fields: webFields,
+    ai_fields: aiFields,
+    sources: [...new Set(sources)].slice(0, 8),
+    warning: [...new Set(warnings.filter(Boolean))].join(" "),
+  };
 }
 
 function formatProductPreviewError(error) {
