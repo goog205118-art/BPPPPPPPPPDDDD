@@ -139,10 +139,22 @@ function requireAccess(req, res) {
   return true;
 }
 
+function resolveBlobToken() {
+  const standardToken = String(process.env.BLOB_READ_WRITE_TOKEN || "").trim();
+  if (standardToken) return standardToken;
+
+  const customToken = Object.entries(process.env).find(([key, value]) => {
+    return /(?:^|_)READ_WRITE_TOKEN$/i.test(key) && Boolean(String(value || "").trim());
+  });
+  return customToken ? String(customToken[1]).trim() : "";
+}
+
 function requireBlobToken() {
-  if (!process.env.BLOB_READ_WRITE_TOKEN) {
-    throw new Error("线上存储尚未连接。请在 Vercel Storage 中创建 Blob，并配置 BLOB_READ_WRITE_TOKEN。");
+  const token = resolveBlobToken();
+  if (!token) {
+    throw new Error("私有 Blob 已创建，但尚未连接读写令牌。请在 Vercel Blob 创建页勾选“Add a read-write token env var to this connection”，然后重新部署。");
   }
+  return token;
 }
 
 async function getBlobClient() {
@@ -157,17 +169,18 @@ async function getExcelJs() {
 }
 
 async function findBlob(pathname) {
-  requireBlobToken();
+  const token = requireBlobToken();
   const { list } = await getBlobClient();
-  const result = await list({ prefix: pathname, limit: 100 });
+  const result = await list({ prefix: pathname, limit: 100, token });
   return result.blobs.find((item) => item.pathname === pathname) || null;
 }
 
 async function readBlobJson(pathname, fallback) {
+  const token = requireBlobToken();
   const blob = await findBlob(pathname);
   if (!blob) return fallback;
   const response = await fetch(blob.url, {
-    headers: { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` },
+    headers: { Authorization: `Bearer ${token}` },
   });
   if (!response.ok) {
     throw new Error(`无法读取线上数据（HTTP ${response.status}）。`);
@@ -176,13 +189,14 @@ async function readBlobJson(pathname, fallback) {
 }
 
 async function writeBlobJson(pathname, data) {
-  requireBlobToken();
+  const token = requireBlobToken();
   const { put } = await getBlobClient();
   await put(pathname, JSON.stringify(data, null, 2), {
     access: "private",
     addRandomSuffix: false,
     allowOverwrite: true,
     contentType: "application/json; charset=utf-8",
+    token,
   });
 }
 
