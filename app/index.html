@@ -20,7 +20,13 @@
     </section>
     <div class="app-shell">
       <header class="topbar">
-        <h1>开发资源库</h1>
+        <div class="topbar-title">
+          <h1>开发资源库</h1>
+          <button type="button" class="global-search-trigger" id="globalSearchBtn" title="打开全局搜索（Ctrl/Cmd + K）">
+            <span>搜索达人、合作单号、商品</span>
+            <kbd>Ctrl K</kbd>
+          </button>
+        </div>
         <div class="topbar-actions">
           <button class="ghost" id="refreshBtn">刷新</button>
           <button class="ghost" id="exportStateBtn">导出 JSON</button>
@@ -334,6 +340,34 @@
         <section class="outreach-result hidden" id="outreachResult"></section>
       </article>
     </section>
+
+    <section class="global-search-modal hidden" id="globalSearchModal" aria-hidden="true">
+      <div class="global-search-backdrop" id="globalSearchBackdrop"></div>
+      <article class="global-search-dialog" role="dialog" aria-modal="true" aria-labelledby="globalSearchTitle">
+        <header class="global-search-head">
+          <div>
+            <span class="eyebrow">COMMAND</span>
+            <h2 id="globalSearchTitle">全局搜索</h2>
+          </div>
+          <button type="button" class="icon-button" id="closeGlobalSearchBtn" aria-label="关闭搜索" title="关闭">×</button>
+        </header>
+        <div class="global-search-input-wrap">
+          <span class="search-symbol" aria-hidden="true">⌕</span>
+          <input id="globalSearchInput" type="search" autocomplete="off" placeholder="搜索 Handle、合作单号、商品名或链接..." />
+          <kbd>ESC</kbd>
+        </div>
+        <p class="global-search-hint" id="globalSearchHint">输入关键词后实时检索全部业务资料</p>
+        <section class="global-search-results" id="globalSearchResults"></section>
+      </article>
+    </section>
+
+    <aside class="creator-drawer hidden" id="creatorDrawer" aria-hidden="true">
+      <div class="creator-drawer-backdrop" id="creatorDrawerBackdrop"></div>
+      <section class="creator-drawer-panel" role="dialog" aria-modal="true" aria-labelledby="creatorDrawerTitle">
+        <header class="creator-drawer-head" id="creatorDrawerHead"></header>
+        <div class="creator-drawer-content" id="creatorDrawerContent"></div>
+      </section>
+    </aside>
 
     <script type="module" src="./app.js"></script>
   </body>

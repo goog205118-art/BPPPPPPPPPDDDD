@@ -44,6 +44,7 @@ const entityConfig = {
     prefix: "CR",
     columns: [
       ["name", "达人名称"],
+      ["handle", "Handle"],
       ["brand", "品牌"],
       ["platform", "平台"],
       ["social_url", "社媒地址"],
@@ -52,6 +53,7 @@ const entityConfig = {
       ["niche", "内容垂类"],
       ["followers", "粉丝"],
       ["status", "状态"],
+      ["priority", "优先级"],
       ["tags", "标签"],
     ],
     filters: [
@@ -61,6 +63,7 @@ const entityConfig = {
     fields: [
       { key: "brand", label: "所属品牌", type: "brand", placeholder: "选择或输入品牌" },
       { key: "name", label: "达人名称", type: "text", required: true },
+      { key: "handle", label: "账号 Handle", type: "text", placeholder: "例如：@creator_name" },
       { key: "social_url", label: "社媒地址", type: "text", placeholder: "主页链接 / 达人链接" },
       { key: "email", label: "达人邮箱", type: "text", placeholder: "公开邮箱或人工补充" },
       { key: "email_source", label: "邮箱公开来源", type: "text", placeholder: "公开页面链接；AI 补全时自动记录" },
@@ -77,6 +80,7 @@ const entityConfig = {
       { key: "cps", label: "是否接受 CPS / 佣金", type: "select", options: yesNoOptions },
       { key: "price", label: "报价", type: "text" },
       { key: "status", label: "合作状态", type: "select", options: ["待联系", "沟通中", "已合作", "沉淀"] },
+      { key: "priority", label: "跟进优先级", type: "select", options: ["高", "中", "低"] },
       { key: "longterm", label: "是否愿意长期合作", type: "select", options: yesNoOptions },
       { key: "content_types", label: "可提供内容类型", type: "text" },
       { key: "ad_auth", label: "是否允许广告授权二次使用", type: "select", options: ["否", "可谈", "是"] },
@@ -86,6 +90,7 @@ const entityConfig = {
     aliases: {
       brand: ["所属品牌", "品牌", "brand", "brand name"],
       name: ["达人名称", "达人", "名称", "账号名", "博主", "KOL", "creator", "name"],
+      handle: ["账号handle", "handle", "用户名", "账号", "社媒账号"],
       social_url: ["社媒地址", "达人链接", "主页链接", "账号链接", "链接", "profile", "url", "social_url", "homepage"],
       email: ["达人邮箱", "邮箱", "邮件", "email", "e-mail", "mail"],
       email_source: ["邮箱公开来源", "邮箱来源", "邮箱出处", "email_source", "email source"],
@@ -102,6 +107,7 @@ const entityConfig = {
       cps: ["是否接受CPS/佣金", "CPS", "佣金", "cps"],
       price: ["报价", "价格", "price"],
       status: ["合作状态", "状态", "status"],
+      priority: ["跟进优先级", "优先级", "priority"],
       longterm: ["是否愿意长期合作", "长期合作", "longterm"],
       content_types: ["可提供内容类型", "内容类型", "content_types"],
       ad_auth: ["广告授权", "二次使用", "ad_auth"],
@@ -177,6 +183,7 @@ const entityConfig = {
     prefix: "LD",
     columns: [
       ["name", "达人名称"],
+      ["handle", "Handle"],
       ["brand", "品牌"],
       ["platform", "平台"],
       ["social_url", "社媒地址"],
@@ -184,6 +191,7 @@ const entityConfig = {
       ["niche", "内容垂类"],
       ["followers", "粉丝"],
       ["status", "开发状态"],
+      ["priority", "优先级"],
     ],
     filters: [
       { key: "brand", label: "品牌", options: ["全部"], dynamic: true },
@@ -194,6 +202,7 @@ const entityConfig = {
       { key: "brand", label: "所属品牌", type: "brand", placeholder: "选择或输入品牌" },
       { key: "social_url", label: "社媒地址", type: "text", required: true, placeholder: "粘贴主页链接后自动检索" },
       { key: "name", label: "达人名称", type: "text" },
+      { key: "handle", label: "账号 Handle", type: "text", placeholder: "例如：@creator_name" },
       { key: "platform", label: "平台", type: "text" },
       { key: "country", label: "国家和地区", type: "text" },
       { key: "niche", label: "内容垂类", type: "text" },
@@ -203,12 +212,14 @@ const entityConfig = {
       { key: "email", label: "达人邮箱", type: "text", placeholder: "仅保留可验证公开邮箱" },
       { key: "email_source", label: "邮箱公开来源", type: "text", placeholder: "公开页面链接" },
       { key: "status", label: "开发状态", type: "select", options: ["待开发", "已联系", "已转达人库", "不适合"] },
+      { key: "priority", label: "跟进优先级", type: "select", options: ["高", "中", "低"] },
       { key: "notes", label: "备注", type: "textarea" },
     ],
     aliases: {
       brand: ["所属品牌", "品牌", "brand", "brand name"],
       social_url: ["社媒地址", "达人链接", "主页链接", "账号链接", "链接", "profile", "url", "social_url", "homepage"],
       name: ["达人名称", "达人", "名称", "账号名", "博主", "KOL", "creator", "name"],
+      handle: ["账号handle", "handle", "用户名", "账号", "社媒账号"],
       platform: ["平台", "渠道", "platform"],
       country: ["国家和地区", "国家", "地区", "country"],
       niche: ["内容垂类", "领域", "品类", "niche"],
@@ -218,6 +229,7 @@ const entityConfig = {
       email: ["达人邮箱", "邮箱", "邮件", "email", "e-mail", "mail"],
       email_source: ["邮箱公开来源", "邮箱来源", "邮箱出处", "email_source", "email source"],
       status: ["开发状态", "状态", "status"],
+      priority: ["跟进优先级", "优先级", "priority"],
       notes: ["备注", "说明", "notes"],
     },
   },
@@ -266,6 +278,7 @@ const entityConfig = {
     hint: "记录单次合作、复盘结论和下一次动作。",
     prefix: "CO",
     columns: [
+      ["cooperation_no", "合作单号"],
       ["creator_name", "达人"],
       ["resource_name", "资源"],
       ["product", "产品"],
@@ -279,14 +292,18 @@ const entityConfig = {
       { key: "result", label: "结果", options: ["全部", "表现稳定，可复投", "一般", "效果差", "待观察"] },
     ],
     fields: [
+      { key: "cooperation_no", label: "合作单号", type: "text", placeholder: "内部合作单号 / PO 编号" },
       { key: "creator_id", label: "关联达人", type: "reference", reference: "creators" },
       { key: "resource_id", label: "关联资源", type: "reference", reference: "resources" },
       { key: "match_id", label: "关联匹配任务", type: "reference", reference: "matches" },
       { key: "creator_name", label: "达人名称", type: "text", required: true },
       { key: "resource_name", label: "资源名称", type: "text" },
       { key: "product", label: "合作产品", type: "text" },
+      { key: "product_id", label: "关联产品库商品", type: "reference", reference: "products" },
       { key: "model", label: "合作方式", type: "select", options: ["置换", "付费", "CPS", "混合"] },
       { key: "budget", label: "预算 / 成本", type: "number" },
+      { key: "tracking_no", label: "寄样物流单号", type: "text", placeholder: "可选，便于后续追踪" },
+      { key: "shipping_status", label: "寄样物流状态", type: "select", options: ["未寄样", "待揽收", "运输中", "已送达", "异常"] },
       { key: "post_date", label: "发布时间", type: "date" },
       { key: "link", label: "内容链接", type: "text" },
       { key: "clicks", label: "点击", type: "number" },
@@ -295,14 +312,18 @@ const entityConfig = {
       { key: "notes", label: "备注", type: "textarea" },
     ],
     aliases: {
+      cooperation_no: ["合作单号", "合作编号", "订单号", "po编号", "po number", "cooperation_no"],
       creator_id: ["达人ID", "达人 id", "creator_id"],
       resource_id: ["资源ID", "资源 id", "resource_id"],
       match_id: ["匹配任务ID", "任务ID", "match_id"],
       creator_name: ["达人名称", "达人", "creator_name"],
       resource_name: ["资源名称", "资源", "resource_name"],
       product: ["合作产品", "产品", "product"],
+      product_id: ["产品ID", "产品 id", "product_id"],
       model: ["合作方式", "合作形式", "model"],
       budget: ["预算", "成本", "预算 / 成本", "budget"],
+      tracking_no: ["寄样物流单号", "物流单号", "快递单号", "tracking_no", "tracking number"],
+      shipping_status: ["寄样物流状态", "物流状态", "寄样状态", "shipping_status"],
       post_date: ["发布时间", "日期", "post_date"],
       link: ["内容链接", "链接", "link"],
       clicks: ["点击", "clicks"],
@@ -356,6 +377,7 @@ const filterDefinitions = {
     { key: "platform", label: "平台" },
     { key: "niche", label: "内容垂类" },
     { key: "status", label: "合作状态" },
+    { key: "priority", label: "跟进优先级" },
     { key: "competitor", label: "做过竞品" },
     { key: "exchange", label: "接受置换" },
     { key: "cps", label: "接受 CPS" },
@@ -380,6 +402,7 @@ const filterDefinitions = {
     { key: "platform", label: "平台" },
     { key: "niche", label: "内容垂类" },
     { key: "status", label: "开发状态" },
+    { key: "priority", label: "跟进优先级" },
     { key: "email", label: "邮箱", mode: "email" },
   ],
   products: [
@@ -432,6 +455,8 @@ const state = {
   selectedLeadIds: new Set(),
   productFilters: { query: "", brand: "", country: "", category: "", store: "" },
   outreach: { open: false, leadIds: [], result: null },
+  globalSearch: { open: false, query: "" },
+  creatorDrawer: { open: false, creatorId: null },
 };
 
 const elements = {
@@ -521,6 +546,17 @@ const elements = {
   outreachHint: document.getElementById("outreachHint"),
   outreachForm: document.getElementById("outreachForm"),
   outreachResult: document.getElementById("outreachResult"),
+  globalSearchBtn: document.getElementById("globalSearchBtn"),
+  globalSearchModal: document.getElementById("globalSearchModal"),
+  globalSearchBackdrop: document.getElementById("globalSearchBackdrop"),
+  closeGlobalSearchBtn: document.getElementById("closeGlobalSearchBtn"),
+  globalSearchInput: document.getElementById("globalSearchInput"),
+  globalSearchHint: document.getElementById("globalSearchHint"),
+  globalSearchResults: document.getElementById("globalSearchResults"),
+  creatorDrawer: document.getElementById("creatorDrawer"),
+  creatorDrawerBackdrop: document.getElementById("creatorDrawerBackdrop"),
+  creatorDrawerHead: document.getElementById("creatorDrawerHead"),
+  creatorDrawerContent: document.getElementById("creatorDrawerContent"),
 };
 
 const formSections = {
@@ -1064,6 +1100,7 @@ function renderTabs() {
   elements.tabs.querySelectorAll("[data-tab]").forEach((button) => {
     button.addEventListener("click", () => {
       state.activeTab = button.dataset.tab;
+      closeCreatorDrawer();
       resetEditorState();
       state.matchingEditingId = null;
       state.importDraft = null;
@@ -1286,6 +1323,10 @@ function renderForm() {
   if (resourceReference) {
     resourceReference.addEventListener("change", () => syncCooperationName("resource"));
   }
+  const productReference = elements.form.elements.product_id;
+  if (productReference) {
+    productReference.addEventListener("change", () => syncCooperationName("product"));
+  }
 
   elements.form.querySelectorAll("input, select, textarea").forEach((control) => {
     control.addEventListener("input", renderAssistant);
@@ -1476,6 +1517,262 @@ function safeExternalUrl(value) {
   }
 }
 
+function statusTone(value) {
+  const current = text(value);
+  if (/已合作|成功|稳定|复投|已完成/.test(current)) return "success";
+  if (/沟通|进行中|待观察|已联系/.test(current)) return "info";
+  if (/待|开发|未配置/.test(current)) return "warning";
+  if (/拒绝|失败|无订单|取消|不适合/.test(current)) return "danger";
+  return "neutral";
+}
+
+function statusBadge(value, fallback = "未填写") {
+  const label = text(value) || fallback;
+  return `<span class="status-pill status-${statusTone(label)}">${escapeHtml(label)}</span>`;
+}
+
+function numberValue(value, fallback = "-") {
+  return text(value) ? `<span class="numeric">${escapeHtml(value)}</span>` : `<span class="muted">${fallback}</span>`;
+}
+
+function creatorCooperations(creator) {
+  return rows("cooperations")
+    .filter((record) => text(record.creator_id) === text(creator.id) || (text(record.creator_name) && text(record.creator_name) === text(creator.name)))
+    .sort((a, b) => new Date(b.post_date || b.updatedAt || 0) - new Date(a.post_date || a.updatedAt || 0));
+}
+
+function creatorProducts(cooperations) {
+  const productRows = rows("products");
+  const found = [];
+  for (const cooperation of cooperations) {
+    const rawCandidates = [
+      cooperation.product_id,
+      ...(Array.isArray(cooperation.product_ids) ? cooperation.product_ids : []),
+      cooperation.product,
+    ].flatMap((value) => splitList(value));
+    for (const candidate of rawCandidates) {
+      const normalized = normalizeHeader(candidate);
+      const product = productRows.find((item) => item.id === candidate || normalizeHeader(item.name) === normalized || normalizeHeader(item.product_url) === normalized);
+      if (product && !found.some((item) => item.id === product.id)) found.push(product);
+    }
+  }
+  return found;
+}
+
+function creatorLogistics(cooperations) {
+  return cooperations
+    .map((record) => {
+      const trackingNo = text(record.tracking_no || record.tracking_number || record.tracking);
+      const shippingStatus = text(record.shipping_status);
+      const legacyDetails = text(record.shipping || record.logistics || record.shipment);
+      const details = [trackingNo && `单号：${trackingNo}`, shippingStatus, legacyDetails].filter(Boolean).join(" · ");
+      return details
+        ? {
+            label: record.cooperation_no || record.no || record.id || "合作记录",
+            value: details,
+            date: record.post_date || record.updatedAt,
+          }
+        : null;
+    })
+    .filter(Boolean);
+}
+
+function openCreatorDrawer(creatorId) {
+  const creator = rows("creators").find((row) => row.id === creatorId);
+  if (!creator) return;
+  state.creatorDrawer = { open: true, creatorId };
+  renderCreatorDrawer();
+}
+
+function closeCreatorDrawer() {
+  state.creatorDrawer = { open: false, creatorId: null };
+  renderCreatorDrawer();
+}
+
+function renderCreatorDrawer() {
+  const creator = rows("creators").find((row) => row.id === state.creatorDrawer.creatorId);
+  const visible = Boolean(state.creatorDrawer.open && creator);
+  elements.creatorDrawer.classList.toggle("hidden", !visible);
+  elements.creatorDrawer.setAttribute("aria-hidden", String(!visible));
+  if (!visible) {
+    elements.creatorDrawerHead.innerHTML = "";
+    elements.creatorDrawerContent.innerHTML = "";
+    return;
+  }
+
+  const cooperations = creatorCooperations(creator);
+  const logistics = creatorLogistics(cooperations);
+  const products = creatorProducts(cooperations);
+  const profileUrl = safeExternalUrl(creator.social_url);
+  elements.creatorDrawerHead.innerHTML = `
+    <div class="creator-drawer-identity">
+      <div class="creator-avatar">${escapeHtml((creator.name || creator.handle || "达").slice(0, 1).toUpperCase())}</div>
+      <div>
+        <span class="eyebrow">CREATOR PROFILE</span>
+        <h2 id="creatorDrawerTitle">${escapeHtml(creator.name || creator.handle || "未命名达人")}</h2>
+        <p>${escapeHtml([creator.handle, creator.platform, normalizeCountry(creator.country)].filter(Boolean).join(" · ") || "基础信息待补充")}</p>
+      </div>
+    </div>
+    <div class="creator-drawer-actions">
+      ${profileUrl ? `<a class="icon-button" href="${escapeHtml(profileUrl)}" target="_blank" rel="noopener noreferrer" title="打开社媒主页" aria-label="打开社媒主页">↗</a>` : ""}
+      <button type="button" class="icon-button" data-drawer-edit="${escapeHtml(creator.id)}" title="编辑达人" aria-label="编辑达人">✎</button>
+      <button type="button" class="icon-button" data-drawer-close title="关闭详情" aria-label="关闭详情">×</button>
+    </div>`;
+
+  const metric = (label, value) => `<div class="drawer-metric"><span>${label}</span><strong>${value}</strong></div>`;
+  elements.creatorDrawerContent.innerHTML = `
+    <section class="drawer-section drawer-metrics">
+      ${metric("粉丝", numberValue(creator.followers))}
+      ${metric("近 30 条均播", numberValue(creator.avg_views))}
+      ${metric("互动率", creator.engagement ? `${escapeHtml(creator.engagement)}%` : "-")}
+      ${metric("合作次数", cooperations.length)}
+    </section>
+    <section class="drawer-section drawer-profile-grid">
+      <div><span>合作状态</span>${statusBadge(creator.status)}</div>
+      <div><span>优先级</span>${statusBadge(creator.priority || creator.follow_up_priority, "未设置")}</div>
+      <div><span>邮箱</span><strong>${creator.email ? escapeHtml(creator.email) : `<span class="muted">暂无</span>`}</strong>${creator.email_source ? `<small>来源：${escapeHtml(creator.email_source)}</small>` : ""}</div>
+      <div><span>社媒地址</span>${profileUrl ? `<a class="drawer-link" href="${escapeHtml(profileUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(creator.social_url)}</a>` : `<span class="muted">暂无</span>`}</div>
+    </section>
+    <section class="drawer-section">
+      <div class="drawer-section-head"><h3>历史合作</h3><span>${cooperations.length} 条</span></div>
+      ${
+        cooperations.length
+          ? `<div class="drawer-record-list">${cooperations
+              .map(
+                (record) => `
+                  <article class="drawer-record">
+                    <div class="drawer-record-head">
+                      <strong>${escapeHtml(record.cooperation_no || record.no || record.id || "合作记录")}</strong>
+                      ${statusBadge(record.result || record.status, "待复盘")}
+                    </div>
+                    <p>${escapeHtml([record.resource_name, record.product, record.model, record.post_date].filter(Boolean).join(" · ") || "合作信息待补充")}</p>
+                    <div class="drawer-record-stats"><span>订单 ${numberValue(record.orders, "0")}</span><span>点击 ${numberValue(record.clicks, "0")}</span><span>成本 ${numberValue(record.budget, "0")}</span></div>
+                    ${record.notes ? `<small>${escapeHtml(record.notes)}</small>` : ""}
+                  </article>`,
+              )
+              .join("")}</div>`
+          : `<p class="drawer-empty">暂无历史合作记录</p>`
+      }
+    </section>
+    <section class="drawer-section">
+      <div class="drawer-section-head"><h3>寄样物流</h3><span>${logistics.length} 条</span></div>
+      ${
+        logistics.length
+          ? `<div class="drawer-logistics-list">${logistics.map((item) => `<div class="drawer-logistics-row"><span>${escapeHtml(item.label)}</span><strong>${escapeHtml(item.value)}</strong><small>${escapeHtml(item.date ? new Date(item.date).toLocaleDateString("zh-CN") : "")}</small></div>`).join("")}</div>`
+          : `<p class="drawer-empty">暂无寄样物流记录，可在合作记录备注或物流字段中补充</p>`
+      }
+    </section>
+    <section class="drawer-section">
+      <div class="drawer-section-head"><h3>关联商品</h3><span>${products.length} 个</span></div>
+      ${
+        products.length
+          ? `<div class="drawer-product-list">${products.map((product) => `<a class="drawer-product" href="${escapeHtml(safeExternalUrl(product.product_url) || "#")}" ${safeExternalUrl(product.product_url) ? 'target="_blank" rel="noopener noreferrer"' : ""}><span>${escapeHtml((product.name || "产").slice(0, 1))}</span><strong>${escapeHtml(product.name || "未命名产品")}</strong><small>${escapeHtml([product.brand, product.store].filter(Boolean).join(" · "))}</small></a>`).join("")}</div>`
+          : `<p class="drawer-empty">暂无可识别的关联商品</p>`
+      }
+    </section>`;
+
+  elements.creatorDrawerContent.querySelector("[data-drawer-close]")?.addEventListener("click", closeCreatorDrawer);
+  elements.creatorDrawerContent.querySelector("[data-drawer-edit]")?.addEventListener("click", () => {
+    const id = elements.creatorDrawerContent.querySelector("[data-drawer-edit]")?.dataset.drawerEdit;
+    closeCreatorDrawer();
+    state.activeTab = "creators";
+    openEditor(id);
+  });
+  elements.creatorDrawerHead.querySelector("[data-drawer-close]")?.addEventListener("click", closeCreatorDrawer);
+  elements.creatorDrawerHead.querySelector("[data-drawer-edit]")?.addEventListener("click", () => {
+    const id = elements.creatorDrawerHead.querySelector("[data-drawer-edit]")?.dataset.drawerEdit;
+    closeCreatorDrawer();
+    state.activeTab = "creators";
+    openEditor(id);
+  });
+}
+
+function searchCatalog(query) {
+  const needle = text(query).toLowerCase();
+  if (!needle) return [];
+  const match = (row, fields) => fields.some((field) => text(row[field]).toLowerCase().includes(needle));
+  const results = [];
+  for (const creator of rows("creators")) {
+    if (match(creator, ["id", "name", "handle", "social_url", "email", "platform", "country", "niche"])) {
+      results.push({ type: "creator", label: "达人", title: creator.name || creator.handle || creator.social_url || creator.id, meta: [creator.handle, creator.platform, normalizeCountry(creator.country)].filter(Boolean).join(" · "), id: creator.id });
+    }
+  }
+  for (const cooperation of rows("cooperations")) {
+    if (match(cooperation, ["id", "cooperation_no", "no", "creator_name", "resource_name", "product", "result"])) {
+      results.push({ type: "cooperation", label: "合作", title: cooperation.cooperation_no || cooperation.no || cooperation.id, meta: [cooperation.creator_name, cooperation.resource_name, cooperation.product].filter(Boolean).join(" · "), id: cooperation.id });
+    }
+  }
+  for (const product of rows("products")) {
+    if (match(product, ["id", "name", "product_url", "brand", "store", "category", "tags"])) {
+      results.push({ type: "product", label: "商品", title: product.name || product.product_url || product.id, meta: [product.brand, product.store, product.category].filter(Boolean).join(" · "), id: product.id });
+    }
+  }
+  for (const resource of rows("resources")) {
+    if (match(resource, ["id", "name", "brand", "country", "categories", "contact"])) {
+      results.push({ type: "resource", label: "资源", title: resource.name || resource.id, meta: [resource.brand, normalizeCountry(resource.country), resource.categories].filter(Boolean).join(" · "), id: resource.id });
+    }
+  }
+  return results.slice(0, 24);
+}
+
+function openGlobalSearch() {
+  state.globalSearch.open = true;
+  elements.globalSearchModal.classList.remove("hidden");
+  elements.globalSearchModal.setAttribute("aria-hidden", "false");
+  elements.globalSearchInput.value = state.globalSearch.query;
+  renderGlobalSearch();
+  window.setTimeout(() => elements.globalSearchInput.focus(), 0);
+}
+
+function closeGlobalSearch() {
+  state.globalSearch.open = false;
+  state.globalSearch.query = "";
+  elements.globalSearchModal.classList.add("hidden");
+  elements.globalSearchModal.setAttribute("aria-hidden", "true");
+  elements.globalSearchResults.innerHTML = "";
+}
+
+function renderGlobalSearch() {
+  const query = text(state.globalSearch.query);
+  const results = searchCatalog(query);
+  elements.globalSearchHint.textContent = query ? `${results.length} 条结果 · Enter 打开第一条` : "输入关键词后实时检索全部业务资料";
+  elements.globalSearchResults.innerHTML = query
+    ? results.length
+      ? results
+          .map((result, index) => `<button type="button" class="global-search-result" data-global-result-type="${result.type}" data-global-result-id="${escapeHtml(result.id)}"><span class="search-result-index">${String(index + 1).padStart(2, "0")}</span><span class="search-result-main"><strong>${escapeHtml(result.title)}</strong><small>${escapeHtml(result.meta || "暂无补充信息")}</small></span><span class="search-result-kind">${escapeHtml(result.label)}</span><span class="search-result-arrow">↵</span></button>`)
+          .join("")
+      : `<div class="global-search-empty"><strong>没有找到匹配资料</strong><span>试试达人 Handle、合作单号或商品名</span></div>`
+    : `<div class="global-search-empty"><strong>快速定位业务资料</strong><span>达人、合作、商品和资源均可搜索</span></div>`;
+}
+
+function handleGlobalSearchResult(result) {
+  const type = result.dataset.globalResultType;
+  const id = result.dataset.globalResultId;
+  closeGlobalSearch();
+  if (type === "creator") {
+    state.activeTab = "creators";
+    state.filters = createFilters("creators");
+    render();
+    openCreatorDrawer(id);
+    return;
+  }
+  if (type === "product") {
+    state.activeTab = "products";
+    state.productFilters = { query: "", brand: "", country: "", category: "", store: "" };
+    render();
+    const card = elements.productPage.querySelector(`[data-open-product="${CSS.escape(id)}"]`);
+    card?.scrollIntoView({ behavior: "smooth", block: "center" });
+    card?.classList.add("search-target");
+    window.setTimeout(() => card?.classList.remove("search-target"), 1400);
+    return;
+  }
+  state.activeTab = type === "resource" ? "resources" : "cooperations";
+  state.filters = createFilters(state.activeTab);
+  state.filters.query = id;
+  render();
+  if (elements.searchInput) elements.searchInput.value = id;
+}
+
 function renderTable(visibleRows) {
   const item = config();
   const isLeadTable = state.activeTab === "leads";
@@ -1500,6 +1797,9 @@ function renderTable(visibleRows) {
             const tags = splitTags(row[key]).map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("");
             return `<td>${tags || escapeHtml(row[key])}</td>`;
           }
+          if (key === "status" || key === "priority") {
+            return `<td>${statusBadge(row[key])}</td>`;
+          }
           const cls = key === "grade" && row[key] === "A" ? "status-good" : key === "status" && row[key] === "已合作" ? "status-good" : "";
           if (["social_url", "link"].includes(key) && safeExternalUrl(row[key])) {
             return `<td class="${cls} link-cell"><a href="${escapeHtml(safeExternalUrl(row[key]))}" target="_blank" rel="noopener noreferrer" title="打开链接">${escapeHtml(row[key])}</a></td>`;
@@ -1520,14 +1820,22 @@ function renderTable(visibleRows) {
       const selectCell = isLeadTable
         ? `<td class="lead-select-cell"><input type="checkbox" data-select-lead="${escapeHtml(row.id)}" aria-label="选择 ${escapeHtml(text(row.name) || "该达人")}" ${selectedIds.has(row.id) ? "checked" : ""} /></td>`
         : "";
-      return `<tr data-open-editor="${escapeHtml(row.id)}" title="双击任意资料内容可编辑">${selectCell}${cells}<td><div class="row-actions">${emailAction}${outreachAction}${transferAction}<button class="ghost" data-delete="${row.id}">删除</button></div></td></tr>`;
+      const creatorClick = state.activeTab === "creators" ? `data-open-creator="${escapeHtml(row.id)}"` : "";
+      return `<tr data-open-editor="${escapeHtml(row.id)}" ${creatorClick} title="${state.activeTab === "creators" ? "单击查看详情，双击编辑" : "双击任意资料内容可编辑"}">${selectCell}${cells}<td><div class="row-actions">${emailAction}${outreachAction}${transferAction}<button class="ghost" data-delete="${row.id}">删除</button></div></td></tr>`;
     })
     .join("");
 
   elements.tableBody.querySelectorAll("[data-open-editor]").forEach((tableRow) => {
     tableRow.addEventListener("dblclick", (event) => {
       if (event.target.closest("a, button")) return;
+      if (state.activeTab === "creators") closeCreatorDrawer();
       openEditor(tableRow.dataset.openEditor);
+    });
+  });
+  elements.tableBody.querySelectorAll("[data-open-creator]").forEach((tableRow) => {
+    tableRow.addEventListener("click", (event) => {
+      if (event.target.closest("a, button, input, select, textarea")) return;
+      openCreatorDrawer(tableRow.dataset.openCreator);
     });
   });
 
@@ -2353,8 +2661,8 @@ function resolveCooperationLinks(record, creators = rows("creators"), resources 
 function syncCooperationName(kind) {
   if (state.activeTab !== "cooperations") return;
   const idField = `${kind}_id`;
-  const nameField = `${kind}_name`;
-  const sourceType = kind === "creator" ? "creators" : "resources";
+  const nameField = kind === "product" ? "product" : `${kind}_name`;
+  const sourceType = kind === "creator" ? "creators" : kind === "resource" ? "resources" : "products";
   const selected = rows(sourceType).find((row) => row.id === elements.form.elements[idField]?.value);
   if (selected && elements.form.elements[nameField]) elements.form.elements[nameField].value = selected.name || "";
 }
@@ -2578,7 +2886,7 @@ async function transferLeadToCreator(leadId) {
 
   const now = new Date().toISOString();
   const creator = defaultRecord("creators");
-  for (const key of ["brand", "name", "social_url", "email", "email_source", "country", "platform", "niche", "followers", "avg_views", "engagement"]) {
+  for (const key of ["brand", "name", "handle", "social_url", "email", "email_source", "country", "platform", "niche", "followers", "avg_views", "engagement", "priority"]) {
     creator[key] = lead[key] ?? creator[key];
   }
   creator.status = "待联系";
@@ -3311,6 +3619,43 @@ function bindEvents() {
     await loadState();
     await loadAiSettings();
     render();
+  });
+  elements.globalSearchBtn.addEventListener("click", openGlobalSearch);
+  elements.closeGlobalSearchBtn.addEventListener("click", closeGlobalSearch);
+  elements.globalSearchBackdrop.addEventListener("click", closeGlobalSearch);
+  elements.globalSearchInput.addEventListener("input", () => {
+    state.globalSearch.query = elements.globalSearchInput.value;
+    renderGlobalSearch();
+  });
+  elements.globalSearchInput.addEventListener("keydown", (event) => {
+    if (event.key !== "Enter") return;
+    const first = elements.globalSearchResults.querySelector("[data-global-result-id]");
+    if (!first) return;
+    event.preventDefault();
+    handleGlobalSearchResult(first);
+  });
+  elements.globalSearchResults.addEventListener("click", (event) => {
+    const result = event.target.closest("[data-global-result-id]");
+    if (result) handleGlobalSearchResult(result);
+  });
+  elements.creatorDrawerBackdrop.addEventListener("click", closeCreatorDrawer);
+  document.addEventListener("keydown", (event) => {
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === "k") {
+      event.preventDefault();
+      if (state.globalSearch.open) closeGlobalSearch();
+      else openGlobalSearch();
+      return;
+    }
+    if (event.key !== "Escape") return;
+    if (state.globalSearch.open) {
+      event.preventDefault();
+      closeGlobalSearch();
+      return;
+    }
+    if (state.creatorDrawer.open) {
+      event.preventDefault();
+      closeCreatorDrawer();
+    }
   });
   elements.searchInput.addEventListener("input", () => {
     if (state.activeTab === SETTINGS_TAB.key || state.activeTab === MATCHING_TAB.key) return;
