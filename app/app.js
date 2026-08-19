@@ -1976,7 +1976,7 @@ function renderProductPage() {
                             <div class="product-image-wrap">${productImageMarkup(product)}</div>
                             <div class="product-card-meta">
                               <strong>${escapeHtml(product.name || "未命名产品")}</strong>
-                              <span>${escapeHtml([product.brand, product.tags].filter(Boolean).join(" · ") || "尚未填写标签")}</span>
+                              <span class="product-card-context">${escapeHtml([product.brand, product.tags].filter(Boolean).join(" · ") || "尚未填写标签")}</span>
                               ${product.description ? `<p>${escapeHtml(product.description)}</p>` : ""}
                               <div class="product-card-actions">
                                 ${safeExternalUrl(product.product_url) ? `<a class="ghost" href="${escapeHtml(safeExternalUrl(product.product_url))}" target="_blank" rel="noopener noreferrer">打开链接</a>` : ""}
@@ -2046,7 +2046,15 @@ async function handleProductPreview() {
         filled.push(key === "name" ? "产品名称" : key === "image_url" ? "主图" : "简介");
       }
     }
-    if (status) status.textContent = filled.length ? `已读取并填入${filled.join("、")}，可继续人工调整。` : "已读取公开页面；现有手填内容未被覆盖。";
+    if (status) {
+      if (filled.length) {
+        status.textContent = `已读取并填入${filled.join("、")}，可继续人工调整。${payload.warning ? ` ${payload.warning}` : ""}`;
+      } else if (payload.warning) {
+        status.textContent = payload.warning;
+      } else {
+        status.textContent = "已读取公开页面；现有手填内容未被覆盖。";
+      }
+    }
   } catch (error) {
     if (status) status.textContent = `${error.message || "读取失败"}，可直接手工填写产品名称和主图。`;
   } finally {

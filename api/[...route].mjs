@@ -845,6 +845,97 @@ function extractHtmlMeta(html, attribute, key) {
   return decodeHtml(match?.[1] || match?.[2] || "").trim();
 }
 
+function stripHtml(value) {
+  return decodeHtml(String(value || "").replace(/<[^>]*>/g, " ").replace(/\s+/g, " ")).trim();
+}
+
+function attributeValue(tag, attribute) {
+  const escaped = String(attribute || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = String(tag || "").match(new RegExp(`\\b${escaped}\\s*=\\s*(?:"([^"]*)"|'([^']*)'|([^\\s>]+))`, "i"));
+  return decodeHtml(match?.[1] || match?.[2] || match?.[3] || "").trim();
+}
+
+function tagById(html, id) {
+  const escaped = String(id || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const tags = String(html || "").match(/<[^>]+>/g) || [];
+  return tags.find((tag) => new RegExp(`\\bid\\s*=\\s*(?:"${escaped}"|'${escaped}')`, "i").test(tag)) || "";
+}
+
+function elementTextById(html, id) {
+  const escaped = String(id || "").replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const match = String(html || "").match(new RegExp(`<[^>]*\\bid\\s*=\\s*(?:"${escaped}"|'${escaped}')[^>]*>([\\s\\S]*?)<\\/[^>]+>`, "i"));
+  return stripHtml(match?.[1] || "");
+}
+
+function firstImageValue(value) {
+  if (Array.isArray(value)) return firstImageValue(value[0]);
+  if (value && typeof value === "object") return String(value.url || value.contentUrl || "").trim();
+  return String(value || "").trim();
+}
+
+function extractStructuredProductData(html) {
+  const scripts = String(html || "").match(/<script\b[^>]*>[\s\S]*?<\/script>/gi) || [];
+  const products = [];
+  const visit = (value) => {
+    if (Array.isArray(value)) {
+      value.forEach(visit);
+      return;
+    }
+    if (!value || typeof value !== "object") return;
+    const types = Array.isArray(value["@type"]) ? value["@type"] : [value["@type"]];
+    if (types.some((type) => String(type || "").toLowerCase() === "product")) products.push(value);
+    if (value["@graph"]) visit(value["@graph"]);
+  };
+  for (const script of scripts) {
+    if (!/type\s*=\s*(?:"application\/ld\+json"|'application\/ld\+json')/i.test(script)) continue;
+    const body = script.replace(/^<script\b[^>]*>|<\/script>$/gi, "").trim();
+    try {
+      visit(JSON.parse(body));
+    } catch {
+      // A malformed JSON-LD block should not prevent reading ordinary meta tags.
+    }
+  }
+  const product = products.find((entry) => entry.name || entry.image || entry.description) || {};
+  return {
+    name: stripHtml(product.name || ""),
+    image_url: firstImageValue(product.image),
+    description: stripHtml(product.description || ""),
+  };
+}
+
+function extractAmazonProductData(html) {
+  const imageTag = tagById(html, "landingImage") || tagById(html, "imgTagWrapperId");
+  let imageUrl = attributeValue(imageTag, "data-old-hires") || attributeValue(imageTag, "src");
+  const dynamicImage = attributeValue(imageTag, "data-a-dynamic-image");
+  if (!imageUrl && dynamicImage) {
+    try {
+      const images = Object.keys(JSON.parse(dynamicImage));
+      imageUrl = images[0] || "";
+    } catch {
+      imageUrl = "";
+    }
+  }
+  return {
+    name: elementTextById(html, "productTitle"),
+    image_url: imageUrl,
+    description: elementTextById(html, "feature-bullets") || elementTextById(html, "productDescription"),
+  };
+}
+
+function usableProductTitle(value, pageUrl) {
+  const title = stripHtml(value);
+  if (!title) return "";
+  let host = "";
+  try {
+    host = new URL(pageUrl).hostname.replace(/^www\./i, "").toLowerCase();
+  } catch {
+    host = "";
+  }
+  const normalized = title.toLowerCase().replace(/^www\./, "").trim();
+  if (normalized === host || normalized === host.replace(/^m\./, "") || /^amazon(?:\.[a-z]{2,3})?$/.test(normalized)) return "";
+  return title;
+}
+
 async function fetchProductPage(targetUrl) {
   let currentUrl = targetUrl;
   const controller = new AbortController();
@@ -856,8 +947,9 @@ async function fetchProductPage(targetUrl) {
         redirect: "manual",
         signal: controller.signal,
         headers: {
-          "User-Agent": "Mozilla/5.0 ResourceWorkbench/1.0",
-          Accept: "text/html,application/xhtml+xml",
+          "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/126.0 Safari/537.36",
+          Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8",
+          "Accept-Language": "en-US,en;q=0.9",
         },
       });
       if (response.status >= 300 && response.status < 400) {
@@ -880,19 +972,42 @@ async function fetchProductPage(targetUrl) {
 
 async function previewProductFromUrl(productUrl) {
   const { html, finalUrl } = await fetchProductPage(productUrl);
-  const title =
-    extractHtmlMeta(html, "property", "og:title") ||
-    extractHtmlMeta(html, "name", "twitter:title") ||
-    decodeHtml((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || "").replace(/\s+/g, " ").trim();
-  const image = extractHtmlMeta(html, "property", "og:image") || extractHtmlMeta(html, "name", "twitter:image");
-  const description = extractHtmlMeta(html, "property", "og:description") || extractHtmlMeta(html, "name", "description");
+  const structured = extractStructuredProductData(html);
+  const amazon = /(^|\.)amazon\./i.test(new URL(finalUrl).hostname) ? extractAmazonProductData(html) : {};
+  const title = usableProductTitle(
+    amazon.name ||
+      structured.name ||
+      extractHtmlMeta(html, "property", "og:title") ||
+      extractHtmlMeta(html, "name", "twitter:title") ||
+      decodeHtml((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1] || "").replace(/\s+/g, " ").trim(),
+    finalUrl,
+  );
+  const image = amazon.image_url || structured.image_url || extractHtmlMeta(html, "property", "og:image") || extractHtmlMeta(html, "name", "twitter:image");
+  const description = structured.description || amazon.description || extractHtmlMeta(html, "property", "og:description") || extractHtmlMeta(html, "name", "description");
   let imageUrl = "";
   try {
     imageUrl = image ? new URL(image, finalUrl).toString() : "";
   } catch {
     imageUrl = "";
   }
-  return { ok: true, name: title.slice(0, 300), image_url: imageUrl, description: description.slice(0, 700) };
+  const foundCount = [title, imageUrl, description].filter(Boolean).length;
+  const warning = foundCount
+    ? foundCount < 3
+      ? "仅读取到部分公开资料，其他字段请人工补充核对。"
+      : ""
+    : "该页面没有返回可用的公开商品资料。Amazon 等平台可能限制自动访问；请手动补充，或改用品牌官网的商品页。";
+  return { ok: true, name: title.slice(0, 300), image_url: imageUrl, description: stripHtml(description).slice(0, 700), warning };
+}
+
+function formatProductPreviewError(error) {
+  const message = String(error?.message || error || "");
+  if (/EACCES|ENETUNREACH|ENOTFOUND|ECONNREFUSED|ETIMEDOUT|fetch failed|timeout|超时/i.test(message)) {
+    return "当前网络无法连接该商品站点，请稍后重试；也可以先手动填写产品名称、主图和卖点。";
+  }
+  if (/HTTP (401|403|429)/i.test(message)) {
+    return "该商品站点限制自动读取，请手动填写产品资料，或改用品牌官网的商品页。";
+  }
+  return message || "读取产品信息失败";
 }
 
 function readBody(req) {
@@ -1009,7 +1124,11 @@ export default async function handler(req, res) {
 
     if (req.method === "POST" && pathname === "/api/products/preview") {
       const body = JSON.parse((await readBody(req)) || "{}");
-      json(res, 200, await previewProductFromUrl(String(body.url || "").trim()));
+      try {
+        json(res, 200, await previewProductFromUrl(String(body.url || "").trim()));
+      } catch (error) {
+        json(res, 400, { ok: false, error: formatProductPreviewError(error) });
+      }
       return;
     }
 
