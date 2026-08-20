@@ -422,9 +422,17 @@ const filterDefinitions = {
 const defaultFilterPreferences = {
   creators: ["brand", "country"],
   resources: ["brand", "country"],
-  leads: ["brand", "platform", "email"],
+  leads: ["brand", "country", "platform", "email"],
   products: ["brand", "country", "category", "store"],
   cooperations: ["model", "result"],
+};
+
+const pinnedFilterPreferences = {
+  creators: ["brand", "country"],
+  resources: ["brand", "country"],
+  leads: ["brand", "country"],
+  products: ["brand", "country"],
+  cooperations: [],
 };
 
 const timeZoneOptions = [
@@ -823,7 +831,8 @@ function getFilterPreferences(type = state.activeTab) {
   const allowed = new Set(getFilterDefinitions(type).map((filter) => filter.key));
   const saved = state.data.meta.filterPreferences?.[type];
   const preferences = Array.isArray(saved) ? saved : defaultFilterPreferences[type] || [];
-  return [...new Set(preferences.filter((key) => allowed.has(key)))];
+  const pinned = pinnedFilterPreferences[type] || [];
+  return [...new Set([...pinned, ...preferences].filter((key) => allowed.has(key)))];
 }
 
 function createFilters(type = state.activeTab) {
@@ -835,7 +844,8 @@ function normalizeFilterPreferences(rawPreferences = {}) {
   for (const type of Object.keys(entityConfig)) {
     const allowed = new Set(getFilterDefinitions(type).map((filter) => filter.key));
     const incoming = Array.isArray(rawPreferences[type]) ? rawPreferences[type] : defaultFilterPreferences[type] || [];
-    output[type] = [...new Set(incoming.filter((key) => allowed.has(key)))];
+    const pinned = pinnedFilterPreferences[type] || [];
+    output[type] = [...new Set([...pinned, ...incoming].filter((key) => allowed.has(key)))];
   }
   return output;
 }
@@ -1245,6 +1255,7 @@ function renderFilterPopover() {
     .join("");
 
   const fieldsExpanded = openSections.has("__fields");
+  const pinnedFields = new Set(pinnedFilterPreferences[state.activeTab] || []);
   elements.filterPopover.innerHTML = `
     <aside class="filter-drawer-sheet" role="dialog" aria-modal="true" aria-label="筛选">
       <header class="filter-drawer-head">
@@ -1261,13 +1272,14 @@ function renderFilterPopover() {
             <p class="filter-section-hint">勾选需要显示和使用的筛选条件</p>
             <div class="filter-option-list">
               ${getFilterDefinitions()
-                .map(
-                  (filter) => `
+                .map((filter) => {
+                  const pinned = pinnedFields.has(filter.key);
+                  return `
                     <label class="filter-option">
-                      <input type="checkbox" data-filter-visibility="${escapeHtml(filter.key)}" ${selectedFields.has(filter.key) ? "checked" : ""} />
-                      <span>${escapeHtml(filter.label)}</span>
-                    </label>`,
-                )
+                      <input type="checkbox" data-filter-visibility="${escapeHtml(filter.key)}" ${selectedFields.has(filter.key) ? "checked" : ""} ${pinned ? "disabled" : ""} />
+                      <span>${escapeHtml(filter.label)}${pinned ? '<small>常用</small>' : ""}</span>
+                    </label>`;
+                })
                 .join("")}
             </div>
           </div>

@@ -2214,6 +2214,25 @@ body {
   background: var(--panel);
 }
 
+.ai-profile,
+.option-settings {
+  border-color: var(--line);
+  background: var(--panel);
+}
+
+.ai-assignment {
+  border-color: #2b3949;
+}
+
+.ai-profile-head h3,
+.option-settings-head h3 {
+  color: #dce7f2;
+}
+
+.ai-profile-head p {
+  color: var(--muted);
+}
+
 h1 {
   font-size: 1.24rem;
   letter-spacing: 0;
@@ -2601,6 +2620,80 @@ tbody tr[data-open-creator] {
 .filter-option,
 .filter-drawer-section {
   border-color: #2c3b4b;
+}
+
+.filter-drawer-head {
+  color: #e8eef6;
+}
+
+.filter-drawer-close {
+  color: #aebed0;
+}
+
+.filter-drawer-close:hover {
+  background: #243242;
+  color: #e8eef6;
+}
+
+.filter-drawer-foot {
+  background: #18222e;
+}
+
+.filter-section-toggle {
+  color: #dce7f2;
+}
+
+.filter-section-toggle b {
+  color: #9fb1c5;
+}
+
+.filter-section-toggle em {
+  background: #28415f;
+  color: #c9ddff;
+}
+
+.filter-section-tools,
+.filter-section-hint,
+.filter-empty {
+  color: #a4b3c3;
+}
+
+.filter-option {
+  color: #d4dee9;
+}
+
+.filter-option:hover {
+  color: #f0f6ff;
+}
+
+.filter-option span {
+  display: inline-flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.filter-option small {
+  border: 1px solid #38516d;
+  border-radius: 3px;
+  color: #a8c8ee;
+  font-size: 0.62rem;
+  font-weight: 700;
+  line-height: 1.2;
+  padding: 1px 4px;
+}
+
+.filter-option input:disabled {
+  cursor: default;
+  opacity: 0.9;
+}
+
+.filter-reset {
+  color: #9fc5fb;
+}
+
+.filter-reset:hover {
+  background: #26394f;
 }
 
 .filter-option:hover,
