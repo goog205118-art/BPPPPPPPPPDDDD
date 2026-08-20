@@ -270,6 +270,8 @@ function getMime(filePath) {
       return "application/javascript; charset=utf-8";
     case ".css":
       return "text/css; charset=utf-8";
+    case ".png":
+      return "image/png";
     case ".json":
       return "application/json; charset=utf-8";
     case ".csv":
@@ -1941,6 +1943,7 @@ function serveStatic(req, res, pathname) {
     "/index.html": path.join(appDir, "index.html"),
     "/styles.css": path.join(appDir, "styles.css"),
     "/app.js": path.join(appDir, "app.js"),
+    "/favicon.png": path.join(appDir, "favicon.png"),
   };
 
   const filePath = routeMap[pathname];

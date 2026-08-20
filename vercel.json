@@ -30,6 +30,10 @@
     {
       "src": "/app.js",
       "dest": "/app/app.js"
+    },
+    {
+      "src": "/favicon.png",
+      "dest": "/app/favicon.png"
     }
   ]
 }
