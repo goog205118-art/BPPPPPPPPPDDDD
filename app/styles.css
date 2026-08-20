@@ -2761,6 +2761,49 @@ tbody tr[data-open-creator] {
   color: #f1c77c;
 }
 
+.outreach-result {
+  border-color: #405267;
+}
+
+.outreach-draft {
+  border-color: #405267;
+  border-radius: 6px;
+  background: #18222e;
+}
+
+.outreach-draft header strong {
+  color: #e7eef7;
+}
+
+.outreach-draft header span,
+.outreach-draft label,
+.outreach-draft-note {
+  color: #aebed0;
+}
+
+.outreach-draft .mail-link {
+  border-color: #49617c;
+  background: #1d2d3e;
+  color: #dcecff;
+}
+
+.outreach-draft .mail-link:hover {
+  border-color: #6d9bd0;
+  background: #263b50;
+  color: #ffffff;
+}
+
+.outreach-draft input,
+.outreach-draft textarea {
+  border-color: #405267;
+  background: #101720;
+  color: #edf4fb;
+}
+
+.outreach-draft textarea {
+  caret-color: #dcecff;
+}
+
 .product-image-wrap,
 .outreach-product-thumb {
   background: #111a24;

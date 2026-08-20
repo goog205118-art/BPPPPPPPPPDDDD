@@ -1303,7 +1303,7 @@ ${productChecklist}
 }
 
 硬性规则：
-1. 每位输入达人必须只生成一份草稿，lead_id 必须与输入完全一致。正文使用英文；不要写假签名、虚构公司地址、具体报价或未经提供的折扣。
+1. 每位输入达人必须只生成一份草稿，lead_id 必须与输入完全一致。正文使用英文；不要生成任何邮件签名或落款，包括 Best regards、Kind regards、Sincerely、Cheers、姓名、团队名、公司名、网址、联系方式或公司地址。不要写具体报价或未经提供的折扣。
 2. 只能使用输入中提供的信息。不得声称看过某条视频、知道某个具体痛点、确认达人所在地、使用过竞品，除非输入资料明确写出。资料不足时，使用轻量且诚实的开场，例如欣赏其内容领域，而不是杜撰观看细节。
 3. 本次勾选的 ${products.length} 个产品必须全部在每封正文中出现，不能只挑其中 1-2 个代表产品，不能用“以及其他产品”替代。每个产品至少准确写出输入中的产品名称一次；若产品卖点为空，不要发明材料、功能、兼容型号或性能。
 4. 合作方式要综合 followers、avg_views、engagement 判断：长尾或数据较小优先产品置换或置换 + CPS；中量级可建议置换 + CPS / 小预算可谈；头部或高播放可建议付费合作或先询价；数据不足时建议先询问合作偏好。必须尊重本次用户勾选的合作方式；不要承诺价格。
@@ -1320,6 +1320,16 @@ function insertBeforeEmailSignoff(body, addition) {
   const before = normalized.slice(0, signoff.index).trimEnd();
   const closing = normalized.slice(signoff.index).trimStart();
   return `${before}\n\n${addition}\n\n${closing}`.trim();
+}
+
+function removeOutreachSignature(body) {
+  const normalized = String(body || "").trim();
+  return normalized
+    .replace(
+      /(?:\n\s*)+(?:(?:best|kind|warm)\s+regards|all the best|sincerely|cheers|best|thanks(?:\s+and\s+best)?),?(?:\s*\n[\s\S]*)?$/i,
+      "",
+    )
+    .trim();
 }
 
 function completeSelectedProductsInDraft(body, products, rules) {
@@ -1365,7 +1375,7 @@ function sanitizeOutreachDrafts(raw, leads, products, rules) {
     const leadId = String(draft?.lead_id || "").trim();
     if (!allowedIds.has(leadId) || draftsById.has(leadId)) continue;
     const subject = String(draft?.subject || "").trim().slice(0, 220);
-    const body = String(draft?.body || "").trim().slice(0, 5000);
+    const body = removeOutreachSignature(String(draft?.body || "").trim().slice(0, 5000));
     if (!subject || !body) continue;
     const completed = completeSelectedProductsInDraft(body, products, rules);
     const sampleChoice = completeSampleChoiceInDraft(completed.body, rules);
