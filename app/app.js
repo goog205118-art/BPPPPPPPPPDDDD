@@ -494,6 +494,7 @@ const state = {
 
 let timeZoneTickerId = null;
 let activityDepth = 0;
+let productPickerAbortController = null;
 
 const elements = {
   accessGate: document.getElementById("accessGate"),
@@ -882,6 +883,8 @@ function openEditor(id = null) {
 }
 
 function resetEditorState() {
+  productPickerAbortController?.abort();
+  productPickerAbortController = null;
   state.editingId = null;
   state.editorDraft = null;
   state.editorBaseline = "";
@@ -1433,6 +1436,9 @@ function renderForm() {
       if (field.type === "reference") {
         const sourceRows = rows(field.reference);
         const selectedValue = text(value);
+        if (state.activeTab === "cooperations" && field.key === "product_id") {
+          return [...section, renderProductReferencePicker(field, selectedValue, `${fieldClass} field-wide`, mark, required)];
+        }
         return [
           ...section,
           `<div class="${fieldClass}"><label for="${field.key}">${field.label}${mark}</label><select id="${field.key}" name="${field.key}" ${required}><option value="">不关联</option>${sourceRows
@@ -1485,6 +1491,7 @@ function renderForm() {
   const productReference = elements.form.elements.product_id;
   if (productReference) {
     productReference.addEventListener("change", () => syncCooperationName("product"));
+    bindProductReferencePicker();
   }
 
   elements.form.querySelectorAll("input, select, textarea").forEach((control) => {
@@ -1505,6 +1512,112 @@ function renderForm() {
   elements.assistantPanel.classList.toggle("hidden", state.activeTab === "leads");
   renderIdentityCheck();
   renderAssistant();
+}
+
+function productPickerMeta(product) {
+  return [product.brand, product.country, product.store].filter((value) => text(value)).join(" · ") || "产品库商品";
+}
+
+function productPickerTriggerMarkup(product) {
+  if (!product) {
+    return `<span class="product-picker-trigger-empty">选择产品库商品</span><span class="product-picker-chevron" aria-hidden="true"></span>`;
+  }
+  return `<span class="product-picker-trigger-thumb">${productImageMarkup(product)}</span><span class="product-picker-trigger-copy"><strong title="${escapeHtml(product.name || "未命名产品")}">${escapeHtml(product.name || "未命名产品")}</strong><small>${escapeHtml(productPickerMeta(product))}</small></span><span class="product-picker-chevron" aria-hidden="true"></span>`;
+}
+
+function renderProductReferencePicker(field, value, fieldClass, mark, required) {
+  const products = [...rows("products")].sort((a, b) => text(a.name).localeCompare(text(b.name), "zh-CN", { sensitivity: "base" }));
+  const selected = products.find((product) => product.id === value);
+  const productOptions = products
+    .map((product) => {
+      const searchable = [product.name, product.brand, product.country, product.category, product.store, product.tags].map((item) => text(item).toLowerCase()).join(" ");
+      const active = product.id === value;
+      return `<button type="button" class="product-picker-option ${active ? "is-selected" : ""}" data-product-picker-option="${escapeHtml(product.id)}" data-product-picker-search="${escapeHtml(searchable)}" aria-pressed="${active ? "true" : "false"}"><span class="product-picker-option-thumb">${productImageMarkup(product)}</span><span class="product-picker-option-copy"><strong title="${escapeHtml(product.name || "未命名产品")}">${escapeHtml(product.name || "未命名产品")}</strong><small>${escapeHtml(productPickerMeta(product))}</small></span></button>`;
+    })
+    .join("");
+
+  return `<div class="${fieldClass} product-reference-field"><label id="${field.key}-label">${field.label}${mark}</label><input id="${field.key}" name="${field.key}" type="hidden" value="${escapeHtml(value)}" ${required} /><div class="product-picker" data-product-picker><button type="button" class="product-picker-trigger" data-product-picker-trigger aria-expanded="false" aria-haspopup="dialog" aria-labelledby="${field.key}-label">${productPickerTriggerMarkup(selected)}</button><section class="product-picker-popover hidden" data-product-picker-popover aria-label="选择关联产品"><div class="product-picker-search"><input type="search" data-product-picker-search-input placeholder="搜索产品名称、品牌、店铺..." autocomplete="off" /></div><div class="product-picker-grid" data-product-picker-grid><button type="button" class="product-picker-option product-picker-clear ${value ? "" : "is-selected"}" data-product-picker-option="" aria-pressed="${value ? "false" : "true"}"><span class="product-picker-clear-mark" aria-hidden="true">×</span><span class="product-picker-option-copy"><strong>不关联产品库</strong><small>保留手动填写的合作产品名称</small></span></button>${productOptions || `<p class="product-picker-empty">产品库暂无商品，请先在产品库中新增。</p>`}<p class="product-picker-empty hidden" data-product-picker-empty>没有匹配的产品</p></div></section></div></div>`;
+}
+
+function closeProductReferencePicker({ focusTrigger = false } = {}) {
+  const picker = elements.form.querySelector("[data-product-picker]");
+  if (!picker) return;
+  const trigger = picker.querySelector("[data-product-picker-trigger]");
+  const popover = picker.querySelector("[data-product-picker-popover]");
+  if (!popover || popover.classList.contains("hidden")) return;
+  popover.classList.add("hidden");
+  trigger?.setAttribute("aria-expanded", "false");
+  if (focusTrigger) trigger?.focus();
+}
+
+function updateProductReferencePickerSelection(picker, productId) {
+  const product = rows("products").find((item) => item.id === productId);
+  const trigger = picker.querySelector("[data-product-picker-trigger]");
+  if (trigger) trigger.innerHTML = productPickerTriggerMarkup(product);
+  picker.querySelectorAll("[data-product-picker-option]").forEach((option) => {
+    const selected = option.dataset.productPickerOption === productId;
+    option.classList.toggle("is-selected", selected);
+    option.setAttribute("aria-pressed", selected ? "true" : "false");
+  });
+}
+
+function bindProductReferencePicker() {
+  productPickerAbortController?.abort();
+  const picker = elements.form.querySelector("[data-product-picker]");
+  const reference = elements.form.elements.product_id;
+  if (!picker || !reference) return;
+
+  const controller = new AbortController();
+  productPickerAbortController = controller;
+  const { signal } = controller;
+  const trigger = picker.querySelector("[data-product-picker-trigger]");
+  const popover = picker.querySelector("[data-product-picker-popover]");
+  const search = picker.querySelector("[data-product-picker-search-input]");
+  const options = [...picker.querySelectorAll("[data-product-picker-option]")];
+  const empty = picker.querySelector("[data-product-picker-empty]");
+
+  const filterOptions = () => {
+    const query = text(search?.value).toLowerCase();
+    let visible = 0;
+    options.forEach((option) => {
+      const matches = !query || option.dataset.productPickerOption === "" || text(option.dataset.productPickerSearch).includes(query);
+      option.classList.toggle("hidden", !matches);
+      if (matches && option.dataset.productPickerOption) visible += 1;
+    });
+    empty?.classList.toggle("hidden", !query || visible > 0);
+  };
+
+  trigger.addEventListener("click", () => {
+    const willOpen = popover.classList.contains("hidden");
+    if (willOpen) {
+      popover.classList.remove("hidden");
+      trigger.setAttribute("aria-expanded", "true");
+      search?.focus();
+    } else {
+      closeProductReferencePicker();
+    }
+  }, { signal });
+
+  search?.addEventListener("input", filterOptions, { signal });
+  picker.addEventListener("click", (event) => {
+    const option = event.target.closest("[data-product-picker-option]");
+    if (!option) return;
+    const productId = option.dataset.productPickerOption || "";
+    reference.value = productId;
+    updateProductReferencePickerSelection(picker, productId);
+    reference.dispatchEvent(new Event("change", { bubbles: true }));
+    closeProductReferencePicker({ focusTrigger: true });
+  }, { signal });
+
+  document.addEventListener("click", (event) => {
+    if (!picker.contains(event.target)) closeProductReferencePicker();
+  }, { signal });
+  document.addEventListener("keydown", (event) => {
+    if (event.key !== "Escape" || popover.classList.contains("hidden")) return;
+    event.preventDefault();
+    event.stopPropagation();
+    closeProductReferencePicker({ focusTrigger: true });
+  }, { signal, capture: true });
 }
 
 function renderEditor() {

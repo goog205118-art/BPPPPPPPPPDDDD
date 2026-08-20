@@ -3774,3 +3774,210 @@ body.access-locked .app-shell {
     animation: none;
   }
 }
+
+/* Cooperation product picker */
+.product-reference-field {
+  position: relative;
+}
+
+.product-picker {
+  position: relative;
+}
+
+.product-picker-trigger {
+  display: grid;
+  width: 100%;
+  min-height: 50px;
+  grid-template-columns: 38px minmax(0, 1fr) 12px;
+  align-items: center;
+  gap: 9px;
+  border: 1px solid #34455a;
+  border-radius: 5px;
+  background: #101720;
+  color: var(--text);
+  padding: 5px 8px;
+  text-align: left;
+}
+
+.product-picker-trigger:hover,
+.product-picker-trigger[aria-expanded="true"] {
+  border-color: #5d87bb;
+  background: #142131;
+}
+
+.product-picker-trigger-empty {
+  grid-column: 1 / -2;
+  color: #8ea0b5;
+  font-weight: 500;
+}
+
+.product-picker-trigger-thumb,
+.product-picker-option-thumb {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid #34475c;
+  border-radius: 4px;
+  background: #111a24;
+}
+
+.product-picker-trigger-thumb .product-image,
+.product-picker-option-thumb .product-image {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.product-picker-trigger-thumb .product-image-empty,
+.product-picker-option-thumb .product-image-empty {
+  min-height: 38px;
+  font-size: 0.86rem;
+}
+
+.product-picker-trigger-copy,
+.product-picker-option-copy {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.product-picker-trigger-copy strong,
+.product-picker-trigger-copy small,
+.product-picker-option-copy strong,
+.product-picker-option-copy small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.product-picker-trigger-copy strong,
+.product-picker-option-copy strong {
+  color: #e8f0f8;
+  font-size: 0.8rem;
+  font-weight: 650;
+}
+
+.product-picker-trigger-copy small,
+.product-picker-option-copy small {
+  color: #9bafc2;
+  font-size: 0.7rem;
+}
+
+.product-picker-chevron {
+  width: 7px;
+  height: 7px;
+  justify-self: end;
+  border-right: 1px solid #8fa6bf;
+  border-bottom: 1px solid #8fa6bf;
+  transform: rotate(45deg) translateY(-2px);
+}
+
+.product-picker-trigger[aria-expanded="true"] .product-picker-chevron {
+  transform: rotate(225deg) translateY(-2px);
+}
+
+.product-picker-popover {
+  position: absolute;
+  z-index: 30;
+  top: calc(100% + 6px);
+  right: 0;
+  left: 0;
+  border: 1px solid #3b5169;
+  border-radius: 6px;
+  background: #141e29;
+  box-shadow: 0 18px 42px rgba(0, 0, 0, 0.38);
+  padding: 8px;
+}
+
+.product-picker-search {
+  margin-bottom: 7px;
+}
+
+.product-picker-search input {
+  width: 100%;
+  min-height: 31px;
+  border: 1px solid #3a4f66;
+  border-radius: 5px;
+  background: #0e161f;
+  color: #e8f0f8;
+  padding: 0.38rem 0.5rem;
+}
+
+.product-picker-search input::placeholder {
+  color: #72859a;
+}
+
+.product-picker-search input:focus {
+  border-color: #6a9ed4;
+  outline: 2px solid rgba(106, 158, 212, 0.14);
+  outline-offset: 1px;
+}
+
+.product-picker-grid {
+  display: grid;
+  max-height: 270px;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+  overflow: auto;
+  padding: 1px;
+}
+
+.product-picker-option {
+  display: grid;
+  min-width: 0;
+  min-height: 52px;
+  grid-template-columns: 38px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #304256;
+  border-radius: 5px;
+  background: #18232f;
+  color: var(--text);
+  padding: 6px;
+  text-align: left;
+}
+
+.product-picker-option:hover {
+  border-color: #5b7fac;
+  background: #1d2b3b;
+}
+
+.product-picker-option.is-selected {
+  border-color: #70a9ff;
+  background: #1b3555;
+  box-shadow: inset 0 0 0 1px rgba(113, 170, 255, 0.2);
+}
+
+.product-picker-clear {
+  grid-template-columns: 38px minmax(0, 1fr);
+  background: #15202b;
+}
+
+.product-picker-clear-mark {
+  display: grid;
+  width: 38px;
+  height: 38px;
+  place-items: center;
+  border: 1px solid #3b4c60;
+  border-radius: 4px;
+  color: #9db3c9;
+  font-size: 1.2rem;
+  line-height: 1;
+}
+
+.product-picker-empty {
+  grid-column: 1 / -1;
+  margin: 0;
+  color: #9fb0c3;
+  font-size: 0.76rem;
+  padding: 8px 3px;
+}
+
+@media (max-width: 760px) {
+  .product-picker-grid {
+    max-height: 260px;
+    grid-template-columns: 1fr;
+  }
+}
