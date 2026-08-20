@@ -871,7 +871,7 @@ function buildOutreachPrompt(leads, products, rules) {
       return `${index + 1}. id=${item.id || "未提供"}；名称=${item.name || "未提供"}；链接=${item.product_url || "未提供"}`;
     })
     .join("\n");
-  return `你是跨境品牌的达人合作开发专家。请只基于输入中给出的达人资料、产品资料和本次规则，为每位达人写一封自然、不模板化的英文开发邮件。
+  return `你是跨境品牌的达人合作开发专家。当前只处理 1 位达人。请只基于输入中给出的达人资料、产品资料和本次规则，为这位达人写一封自然、不模板化的英文开发邮件。
 
 达人资料：
 ${JSON.stringify(leads.map(outreachLeadPayload), null, 2)}
@@ -900,13 +900,13 @@ ${productChecklist}
 }
 
 硬性规则：
-1. 每位输入达人必须只生成一份草稿，lead_id 必须与输入完全一致。正文使用英文；不要生成任何邮件签名或落款，包括 Best regards、Kind regards、Sincerely、Cheers、姓名、团队名、公司名、网址、联系方式或公司地址。不要写具体报价或未经提供的折扣。
+1. 必须只生成 1 份草稿，lead_id 必须与唯一输入达人完全一致。正文使用英文；不要生成任何邮件签名或落款，包括 Best regards、Kind regards、Sincerely、Cheers、姓名、团队名、公司名、网址、联系方式或公司地址。不要写具体报价或未经提供的折扣。
 2. 只能使用输入中提供的信息。不得声称看过某条视频、知道某个具体痛点、确认达人所在地、使用过竞品，除非输入资料明确写出。资料不足时，使用轻量且诚实的开场，例如欣赏其内容领域，而不是杜撰观看细节。
 3. 本次勾选的 ${products.length} 个产品必须全部在每封正文中出现，不能只挑其中 1-2 个代表产品，不能用“以及其他产品”替代。每个产品至少准确写出输入中的产品名称一次；若产品卖点为空，不要发明材料、功能、兼容型号或性能。
 4. 合作方式要综合 followers、avg_views、engagement 判断：长尾或数据较小优先产品置换或置换 + CPS；中量级可建议置换 + CPS / 小预算可谈；头部或高播放可建议付费合作或先询价；数据不足时建议先询问合作偏好。必须尊重本次用户勾选的合作方式；不要承诺价格。
 5. ${includeProductLinks ? "必须把每个已选产品提供的 product_url 原样写入正文各一次。" : "规则未要求附产品链接，正文中不要出现 URL。"} 若规则中不提及合作方式，则不要在正文写明合作模式，但仍填写 recommended_cooperation 供内部参考。
 6. ${allowSampleChoice ? "必须在完整推荐已选产品后，自然、非强制地说明：若本品牌其他样品更适合达人的内容方向，达人可告知偏好以探索替换选择，且需视库存或可用性而定。不要虚构未提供的商品名称、链接或库存。" : "不得提及达人可以自由选品、替换样品、选择其他产品或未提供的样品。"}
-7. 邮件控制在 110-${targetWordLimit} 英文词，产品较多时优先用紧凑的产品清单或自然分句确保全部覆盖；语气遵循用户选择；不同达人使用不同的开场和产品匹配角度，避免完全相同的话术。
+7. 邮件控制在 110-${targetWordLimit} 英文词。正文必须使用清晰的纯文本段落：第一段为简短开场；第二段说明合作想法；若有产品，单独起一段产品引导语，随后每个产品单独占一行，以 "- 产品名称: URL" 的形式列出；最后的行动邀请或样品偏好另起一段。段落之间必须留一个空行。禁止把整封邮件写成一个大段，禁止 Markdown 标题或签名。
 8. email 字段只是寄送地址提示，不可写入邮件正文，也不可声称其来源。`;
 }
 
@@ -964,6 +964,17 @@ function completeSampleChoiceInDraft(body, rules) {
   return { body: insertBeforeEmailSignoff(currentBody, note), appended: true };
 }
 
+function ensureOutreachParagraphs(body) {
+  return String(body || "")
+    .replace(/\r\n?/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/([.!?])\s+(?=(?:For easy reference|For this collaboration|Here are|The selected products|If another sample|Let me know|Looking forward)\b)/gi, "$1\n\n")
+    .replace(/(:)\s+(?=-\s+)/g, "$1\n")
+    .replace(/\s+(-\s+[^-\n]+?)(?=\s+-\s+)/g, "\n$1")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function sanitizeOutreachDrafts(raw, leads, products, rules) {
   const allowedIds = new Set(leads.map((lead) => String(lead.id || "").trim()).filter(Boolean));
   const draftsById = new Map();
@@ -980,7 +991,7 @@ function sanitizeOutreachDrafts(raw, leads, products, rules) {
     draftsById.set(leadId, {
       lead_id: leadId,
       subject,
-      body: sampleChoice.body.slice(0, 7000),
+      body: ensureOutreachParagraphs(sampleChoice.body).slice(0, 7000),
       recommended_cooperation: String(draft?.recommended_cooperation || "请人工确认合作方式").trim().slice(0, 180),
       reason: String(draft?.reason || "").trim().slice(0, 360),
     });
@@ -992,38 +1003,76 @@ function sanitizeOutreachDrafts(raw, leads, products, rules) {
   };
 }
 
+async function mapWithConcurrency(items, limit, worker) {
+  const results = new Array(items.length);
+  let nextIndex = 0;
+  const workers = Array.from({ length: Math.min(limit, items.length) }, async () => {
+    while (true) {
+      const index = nextIndex;
+      nextIndex += 1;
+      if (index >= items.length) return;
+      results[index] = await worker(items[index], index);
+    }
+  });
+  await Promise.all(workers);
+  return results;
+}
+
 async function generateOutreachWithAi(leads, products, rules) {
   if (!Array.isArray(leads) || !leads.length) throw new Error("请至少选择一位待开发达人。");
   if (!Array.isArray(products) || !products.length) throw new Error("请至少选择一个产品。");
   const saved = await loadAiSettings();
   const settings = resolveAiSettings(saved, "outreach");
   if (!settings.apiKey) throw new Error("未配置开发邮件 AI API Key。请先在设置页填写“达人开发邮件”参数。");
-  const prompt = buildOutreachPrompt(leads, products, rules);
+  const results = await mapWithConcurrency(leads, 2, async (lead) => {
+    const prompt = buildOutreachPrompt([lead], products, rules);
+    try {
+      if (settings.protocol === "openai") {
+        const response = await postJson(
+          buildOpenAiEndpoint(settings),
+          {
+            model: settings.model,
+            messages: [
+              { role: "system", content: "You write one concise, well-structured creator outreach email. Return valid JSON only." },
+              { role: "user", content: prompt },
+            ],
+            temperature: 0.35,
+            response_format: { type: "json_object" },
+          },
+          { Authorization: `Bearer ${settings.apiKey}` },
+        );
+        if (response.statusCode >= 400) throw new Error(response.body?.error?.message || response.body?.raw || `OpenAI 兼容接口请求失败：HTTP ${response.statusCode}`);
+        const sanitized = sanitizeOutreachDrafts(parseOpenAiJson(response.body), [lead], products, rules);
+        if (!sanitized.drafts.length) sanitized.warnings.push(`${String(lead.name || lead.social_url || "一位达人")}：AI 未返回可用草稿。`);
+        return sanitized;
+      }
 
-  if (settings.protocol === "openai") {
-    const response = await postJson(
-      buildOpenAiEndpoint(settings),
-      {
-        model: settings.model,
-        messages: [
-          { role: "system", content: "You write concise creator outreach emails. Return valid JSON only." },
-          { role: "user", content: prompt },
-        ],
-        temperature: 0.72,
-        response_format: { type: "json_object" },
-      },
-      { Authorization: `Bearer ${settings.apiKey}` },
-    );
-    if (response.statusCode >= 400) throw new Error(response.body?.error?.message || response.body?.raw || `OpenAI 兼容接口请求失败：HTTP ${response.statusCode}`);
-    return sanitizeOutreachDrafts(parseOpenAiJson(response.body), leads, products, rules);
-  }
-
-  const response = await postJson(buildGeminiEndpoint(settings), {
-    contents: [{ role: "user", parts: [{ text: prompt }] }],
-    generationConfig: { temperature: 0.72, responseMimeType: "application/json" },
+      const response = await postJson(buildGeminiEndpoint(settings), {
+        contents: [{ role: "user", parts: [{ text: prompt }] }],
+        generationConfig: { temperature: 0.35, responseMimeType: "application/json" },
+      });
+      if (response.statusCode >= 400) throw new Error(response.body?.error?.message || response.body?.raw || `Gemini API 请求失败：HTTP ${response.statusCode}`);
+      const sanitized = sanitizeOutreachDrafts(parseGeminiJson(response.body), [lead], products, rules);
+      if (!sanitized.drafts.length) sanitized.warnings.push(`${String(lead.name || lead.social_url || "一位达人")}：AI 未返回可用草稿。`);
+      return sanitized;
+    } catch (error) {
+      return {
+        ok: false,
+        drafts: [],
+        warnings: [`${String(lead.name || lead.social_url || "一位达人")}：${error.message || "生成失败"}`],
+      };
+    }
   });
-  if (response.statusCode >= 400) throw new Error(response.body?.error?.message || response.body?.raw || `Gemini API 请求失败：HTTP ${response.statusCode}`);
-  return sanitizeOutreachDrafts(parseGeminiJson(response.body), leads, products, rules);
+
+  const draftsById = new Map();
+  const warnings = [];
+  for (const result of results) {
+    for (const draft of result.drafts || []) draftsById.set(String(draft.lead_id || ""), draft);
+    warnings.push(...(result.warnings || []));
+  }
+  const drafts = leads.map((lead) => draftsById.get(String(lead.id || ""))).filter(Boolean);
+  if (!drafts.length) throw new Error(warnings[0] || "邮件生成失败，请稍后重试。");
+  return { ok: true, drafts, warnings: [...new Set(warnings)].slice(0, 8) };
 }
 
 function isSafePublicUrl(value) {

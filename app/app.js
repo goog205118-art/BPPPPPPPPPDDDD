@@ -1,5 +1,6 @@
 const STORAGE_FALLBACK = "resource-workbench-fallback";
 const STORAGE_DUPLICATE_IGNORES = "resource-workbench-duplicate-ignores";
+const STORAGE_OUTREACH_OPTIONS = "resource-workbench.outreach-options.v1";
 const API_STATE = "/api/state";
 const API_IMPORT_EXCEL = "/api/import-excel";
 const API_CREATOR_ENRICH = "/api/ai/creator-enrich";
@@ -758,6 +759,63 @@ function loadDuplicateIgnores() {
 
 function saveDuplicateIgnores() {
   localStorage.setItem(STORAGE_DUPLICATE_IGNORES, JSON.stringify([...state.duplicateIgnores]));
+}
+
+const defaultOutreachOptions = {
+  productIds: [],
+  language: "English",
+  tone: "自然友好",
+  cooperation: ["让 AI 根据量级建议"],
+  mentionCooperation: true,
+  includeProductLinks: true,
+  mentionProductBenefits: true,
+  allowSampleChoice: false,
+  customRules: "",
+};
+
+function normalizeOutreachOptions(value) {
+  const source = value && typeof value === "object" ? value : {};
+  return {
+    ...defaultOutreachOptions,
+    productIds: Array.isArray(source.productIds) ? source.productIds.map(text).filter(Boolean) : [],
+    language: ["English", "creator"].includes(source.language) ? source.language : defaultOutreachOptions.language,
+    tone: ["自然友好", "专业简洁", "创作者同行"].includes(source.tone) ? source.tone : defaultOutreachOptions.tone,
+    cooperation: Array.isArray(source.cooperation)
+      ? source.cooperation.map(text).filter(Boolean)
+      : [...defaultOutreachOptions.cooperation],
+    mentionCooperation: source.mentionCooperation !== false,
+    includeProductLinks: source.includeProductLinks !== false,
+    mentionProductBenefits: source.mentionProductBenefits !== false,
+    allowSampleChoice: source.allowSampleChoice === true,
+    customRules: text(source.customRules),
+  };
+}
+
+function loadOutreachOptions() {
+  try {
+    return normalizeOutreachOptions(JSON.parse(localStorage.getItem(STORAGE_OUTREACH_OPTIONS) || "{}"));
+  } catch {
+    return { ...defaultOutreachOptions, cooperation: [...defaultOutreachOptions.cooperation] };
+  }
+}
+
+function saveOutreachOptions(options) {
+  localStorage.setItem(STORAGE_OUTREACH_OPTIONS, JSON.stringify(normalizeOutreachOptions(options)));
+}
+
+function outreachOptionsFromForm(form) {
+  const formData = new FormData(form);
+  return normalizeOutreachOptions({
+    productIds: formData.getAll("productIds"),
+    language: text(formData.get("language")),
+    tone: text(formData.get("tone")),
+    cooperation: formData.getAll("cooperation"),
+    mentionCooperation: formData.get("mentionCooperation") === "on",
+    includeProductLinks: formData.get("includeProductLinks") === "on",
+    mentionProductBenefits: formData.get("mentionProductBenefits") === "on",
+    allowSampleChoice: formData.get("allowSampleChoice") === "on",
+    customRules: text(formData.get("customRules")),
+  });
 }
 
 function config() {
@@ -2628,6 +2686,9 @@ function renderOutreachModal() {
     return;
   }
   const products = rows("products");
+  const savedOptions = loadOutreachOptions();
+  const validProductIds = new Set(products.map((product) => product.id));
+  const selectedProductIds = new Set(savedOptions.productIds.filter((id) => validProductIds.has(id)));
   elements.outreachModal.classList.remove("hidden");
   elements.outreachModal.setAttribute("aria-hidden", "false");
   elements.outreachHint.textContent = `已选择 ${leads.length} 位达人：${leads.map((lead) => lead.name || lead.social_url).join("、")}`;
@@ -2640,7 +2701,7 @@ function renderOutreachModal() {
               .map(
                 (product) => `
                   <label class="outreach-product-option">
-                    <input type="checkbox" name="productIds" value="${escapeHtml(product.id)}" />
+                    <input type="checkbox" name="productIds" value="${escapeHtml(product.id)}" ${selectedProductIds.has(product.id) ? "checked" : ""} />
                     <span class="outreach-product-thumb">${productImageMarkup(product)}</span>
                     <span><strong>${escapeHtml(product.name || "未命名产品")}</strong><small>${escapeHtml([product.country, product.category, product.store].filter(Boolean).join(" · ") || "未分组产品")}</small></span>
                   </label>`,
@@ -2652,28 +2713,28 @@ function renderOutreachModal() {
     <section class="outreach-section">
       <h3>邮件口径</h3>
       <div class="outreach-rule-grid">
-        <label class="field"><span>语言</span><select name="language"><option value="English">英文</option><option value="creator">按达人公开语言判断</option></select></label>
-        <label class="field"><span>语气</span><select name="tone"><option value="自然友好">自然友好</option><option value="专业简洁">专业简洁</option><option value="创作者同行">创作者同行</option></select></label>
+        <label class="field"><span>语言</span><select name="language"><option value="English" ${savedOptions.language === "English" ? "selected" : ""}>英文</option><option value="creator" ${savedOptions.language === "creator" ? "selected" : ""}>按达人公开语言判断</option></select></label>
+        <label class="field"><span>语气</span><select name="tone"><option value="自然友好" ${savedOptions.tone === "自然友好" ? "selected" : ""}>自然友好</option><option value="专业简洁" ${savedOptions.tone === "专业简洁" ? "selected" : ""}>专业简洁</option><option value="创作者同行" ${savedOptions.tone === "创作者同行" ? "selected" : ""}>创作者同行</option></select></label>
       </div>
       <fieldset class="outreach-checklist">
         <legend>合作方式</legend>
-        <label><input type="checkbox" name="cooperation" value="让 AI 根据量级建议" checked /> 让 AI 根据量级建议</label>
-        <label><input type="checkbox" name="cooperation" value="产品置换" /> 产品置换</label>
-        <label><input type="checkbox" name="cooperation" value="CPS / 佣金" /> CPS / 佣金</label>
-        <label><input type="checkbox" name="cooperation" value="付费合作" /> 付费合作</label>
-        <label><input type="checkbox" name="cooperation" value="长期合作" /> 长期合作</label>
+        <label><input type="checkbox" name="cooperation" value="让 AI 根据量级建议" ${savedOptions.cooperation.includes("让 AI 根据量级建议") ? "checked" : ""} /> 让 AI 根据量级建议</label>
+        <label><input type="checkbox" name="cooperation" value="产品置换" ${savedOptions.cooperation.includes("产品置换") ? "checked" : ""} /> 产品置换</label>
+        <label><input type="checkbox" name="cooperation" value="CPS / 佣金" ${savedOptions.cooperation.includes("CPS / 佣金") ? "checked" : ""} /> CPS / 佣金</label>
+        <label><input type="checkbox" name="cooperation" value="付费合作" ${savedOptions.cooperation.includes("付费合作") ? "checked" : ""} /> 付费合作</label>
+        <label><input type="checkbox" name="cooperation" value="长期合作" ${savedOptions.cooperation.includes("长期合作") ? "checked" : ""} /> 长期合作</label>
       </fieldset>
       <fieldset class="outreach-checklist">
         <legend>样品选择</legend>
-        <label><input type="checkbox" name="allowSampleChoice" /> 允许达人按偏好从本品牌其他样品中替换选择</label>
+        <label><input type="checkbox" name="allowSampleChoice" ${savedOptions.allowSampleChoice ? "checked" : ""} /> 允许达人按偏好从本品牌其他样品中替换选择</label>
       </fieldset>
       <fieldset class="outreach-checklist">
         <legend>内容细节</legend>
-        <label><input type="checkbox" name="mentionCooperation" checked /> 邮件中提及合作方式</label>
-        <label><input type="checkbox" name="includeProductLinks" checked /> 附上产品链接</label>
-        <label><input type="checkbox" name="mentionProductBenefits" checked /> 提及产品卖点</label>
+        <label><input type="checkbox" name="mentionCooperation" ${savedOptions.mentionCooperation ? "checked" : ""} /> 邮件中提及合作方式</label>
+        <label><input type="checkbox" name="includeProductLinks" ${savedOptions.includeProductLinks ? "checked" : ""} /> 附上产品链接</label>
+        <label><input type="checkbox" name="mentionProductBenefits" ${savedOptions.mentionProductBenefits ? "checked" : ""} /> 提及产品卖点</label>
       </fieldset>
-      <label class="field field-wide"><span>补充规则</span><textarea name="customRules" placeholder="例如：本次不提及付费合作；不要推荐某类产品；必须保持简短。"></textarea></label>
+      <label class="field field-wide"><span>补充规则</span><textarea name="customRules" placeholder="例如：本次不提及付费合作；不要推荐某类产品；必须保持简短。">${escapeHtml(savedOptions.customRules)}</textarea></label>
     </section>
     <div class="form-actions outreach-actions">
       <button type="submit" class="primary" ${products.length ? "" : "disabled"}>生成开发邮件</button>
@@ -2683,6 +2744,9 @@ function renderOutreachModal() {
   `;
   renderOutreachResults();
   elements.outreachForm.querySelector("[data-close-outreach]")?.addEventListener("click", closeOutreachModal);
+  const rememberOptions = () => saveOutreachOptions(outreachOptionsFromForm(elements.outreachForm));
+  elements.outreachForm.addEventListener("change", rememberOptions);
+  elements.outreachForm.addEventListener("input", rememberOptions);
 }
 
 function renderOutreachResults() {
@@ -2718,6 +2782,7 @@ function renderOutreachResults() {
 async function submitOutreach(event) {
   event.preventDefault();
   const formData = new FormData(elements.outreachForm);
+  saveOutreachOptions(outreachOptionsFromForm(elements.outreachForm));
   const productIds = formData.getAll("productIds").map(text).filter(Boolean);
   const status = document.getElementById("outreachStatus");
   if (!productIds.length) {
