@@ -2664,6 +2664,10 @@ function renderOutreachModal() {
         <label><input type="checkbox" name="cooperation" value="长期合作" /> 长期合作</label>
       </fieldset>
       <fieldset class="outreach-checklist">
+        <legend>样品选择</legend>
+        <label><input type="checkbox" name="allowSampleChoice" /> 允许达人按偏好从本品牌其他样品中替换选择</label>
+      </fieldset>
+      <fieldset class="outreach-checklist">
         <legend>内容细节</legend>
         <label><input type="checkbox" name="mentionCooperation" checked /> 邮件中提及合作方式</label>
         <label><input type="checkbox" name="includeProductLinks" checked /> 附上产品链接</label>
@@ -2742,6 +2746,7 @@ async function submitOutreach(event) {
           mentionCooperation: formData.get("mentionCooperation") === "on",
           includeProductLinks: formData.get("includeProductLinks") === "on",
           mentionProductBenefits: formData.get("mentionProductBenefits") === "on",
+          allowSampleChoice: formData.get("allowSampleChoice") === "on",
           customRules: text(formData.get("customRules")),
         },
       }),

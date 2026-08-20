@@ -2721,6 +2721,46 @@ tbody tr[data-open-creator] {
   background: #1d2a38;
 }
 
+.outreach-section h3,
+.outreach-result h3 {
+  color: #e0eaf5;
+}
+
+.outreach-section h3 span,
+.outreach-checklist legend {
+  color: #aebed0;
+}
+
+.outreach-checklist {
+  border-color: #405267;
+  background: #18222e;
+}
+
+.outreach-checklist label {
+  color: #d3deea;
+}
+
+.outreach-checklist label:hover {
+  color: #f0f6ff;
+}
+
+.outreach-product-option strong {
+  color: #e7eef7;
+}
+
+.outreach-product-option small,
+.outreach-empty,
+.outreach-status,
+.outreach-no-email {
+  color: #aebed0;
+}
+
+.outreach-warning {
+  border-color: #a77727;
+  background: #352914;
+  color: #f1c77c;
+}
+
 .product-image-wrap,
 .outreach-product-thumb {
   background: #111a24;

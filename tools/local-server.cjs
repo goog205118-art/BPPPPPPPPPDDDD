@@ -1266,6 +1266,7 @@ function outreachProductPayload(product) {
 
 function buildOutreachPrompt(leads, products, rules) {
   const includeProductLinks = Boolean(rules?.includeProductLinks);
+  const allowSampleChoice = Boolean(rules?.allowSampleChoice);
   const targetWordLimit = Math.min(520, Math.max(190, 125 + products.length * 42));
   const productChecklist = products
     .map((product, index) => {
@@ -1307,8 +1308,9 @@ ${productChecklist}
 3. 本次勾选的 ${products.length} 个产品必须全部在每封正文中出现，不能只挑其中 1-2 个代表产品，不能用“以及其他产品”替代。每个产品至少准确写出输入中的产品名称一次；若产品卖点为空，不要发明材料、功能、兼容型号或性能。
 4. 合作方式要综合 followers、avg_views、engagement 判断：长尾或数据较小优先产品置换或置换 + CPS；中量级可建议置换 + CPS / 小预算可谈；头部或高播放可建议付费合作或先询价；数据不足时建议先询问合作偏好。必须尊重本次用户勾选的合作方式；不要承诺价格。
 5. ${includeProductLinks ? "必须把每个已选产品提供的 product_url 原样写入正文各一次。" : "规则未要求附产品链接，正文中不要出现 URL。"} 若规则中不提及合作方式，则不要在正文写明合作模式，但仍填写 recommended_cooperation 供内部参考。
-6. 邮件控制在 110-${targetWordLimit} 英文词，产品较多时优先用紧凑的产品清单或自然分句确保全部覆盖；语气遵循用户选择；不同达人使用不同的开场和产品匹配角度，避免完全相同的话术。
-7. email 字段只是寄送地址提示，不可写入邮件正文，也不可声称其来源。`;
+6. ${allowSampleChoice ? "必须在完整推荐已选产品后，自然、非强制地说明：若本品牌其他样品更适合达人的内容方向，达人可告知偏好以探索替换选择，且需视库存或可用性而定。不要虚构未提供的商品名称、链接或库存。" : "不得提及达人可以自由选品、替换样品、选择其他产品或未提供的样品。"}
+7. 邮件控制在 110-${targetWordLimit} 英文词，产品较多时优先用紧凑的产品清单或自然分句确保全部覆盖；语气遵循用户选择；不同达人使用不同的开场和产品匹配角度，避免完全相同的话术。
+8. email 字段只是寄送地址提示，不可写入邮件正文，也不可声称其来源。`;
 }
 
 function insertBeforeEmailSignoff(body, addition) {
@@ -1346,6 +1348,15 @@ function completeSelectedProductsInDraft(body, products, rules) {
   };
 }
 
+function completeSampleChoiceInDraft(body, rules) {
+  const currentBody = String(body || "").trim();
+  if (!rules?.allowSampleChoice) return { body: currentBody, appended: false };
+  const alreadyMentionsChoice = /\b(?:alternative|another|other|different)\s+(?:brand\s+)?sample\b|\bchoose\s+(?:another|an alternative|a different|other)\s+(?:sample|item|product)\b|\bsample\s+(?:choice|preference)\b|\bpreference\s+(?:for|on)\s+(?:another|an alternative|a different|other)?\s*(?:sample|product|item)\b/i.test(currentBody);
+  if (alreadyMentionsChoice) return { body: currentBody, appended: false };
+  const note = "If another sample from our brand would be a better fit for your content, you are welcome to share your preference and we can explore an alternative, subject to availability.";
+  return { body: insertBeforeEmailSignoff(currentBody, note), appended: true };
+}
+
 function sanitizeOutreachDrafts(raw, leads, products, rules) {
   const allowedIds = new Set(leads.map((lead) => String(lead.id || "").trim()).filter(Boolean));
   const draftsById = new Map();
@@ -1357,11 +1368,12 @@ function sanitizeOutreachDrafts(raw, leads, products, rules) {
     const body = String(draft?.body || "").trim().slice(0, 5000);
     if (!subject || !body) continue;
     const completed = completeSelectedProductsInDraft(body, products, rules);
+    const sampleChoice = completeSampleChoiceInDraft(completed.body, rules);
     if (completed.appendedCount) completionWarnings.push(`AI 漏写了 ${completed.appendedCount} 个已选产品，系统已在邮件落款前补全。`);
     draftsById.set(leadId, {
       lead_id: leadId,
       subject,
-      body: completed.body.slice(0, 7000),
+      body: sampleChoice.body.slice(0, 7000),
       recommended_cooperation: String(draft?.recommended_cooperation || "请人工确认合作方式").trim().slice(0, 180),
       reason: String(draft?.reason || "").trim().slice(0, 360),
     });
