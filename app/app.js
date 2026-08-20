@@ -427,6 +427,29 @@ const defaultFilterPreferences = {
   cooperations: ["model", "result"],
 };
 
+const timeZoneOptions = [
+  { value: "Asia/Shanghai", label: "中国 北京" },
+  { value: "America/Los_Angeles", label: "美国 西岸" },
+  { value: "America/New_York", label: "美国 东岸" },
+  { value: "America/Chicago", label: "美国 中部" },
+  { value: "America/Toronto", label: "加拿大 多伦多" },
+  { value: "America/Vancouver", label: "加拿大 温哥华" },
+  { value: "America/Mexico_City", label: "墨西哥城" },
+  { value: "America/Sao_Paulo", label: "巴西 圣保罗" },
+  { value: "Europe/London", label: "英国 伦敦" },
+  { value: "Europe/Paris", label: "法国 巴黎" },
+  { value: "Europe/Berlin", label: "德国 柏林" },
+  { value: "Europe/Madrid", label: "西班牙 马德里" },
+  { value: "Asia/Tokyo", label: "日本 东京" },
+  { value: "Asia/Seoul", label: "韩国 首尔" },
+  { value: "Asia/Singapore", label: "新加坡" },
+  { value: "Asia/Dubai", label: "阿联酋 迪拜" },
+  { value: "Australia/Sydney", label: "澳大利亚 悉尼" },
+  { value: "UTC", label: "协调世界时 UTC" },
+];
+
+const defaultTimeZones = ["Asia/Shanghai", "America/Los_Angeles", "America/New_York"];
+
 const emptyState = {
   meta: { version: 1, updatedAt: new Date().toISOString() },
   creators: [],
@@ -458,6 +481,8 @@ const state = {
   globalSearch: { open: false, query: "" },
   creatorDrawer: { open: false, creatorId: null },
 };
+
+let timeZoneTickerId = null;
 
 const elements = {
   accessGate: document.getElementById("accessGate"),
@@ -502,6 +527,10 @@ const elements = {
   aiSettingsStatus: document.getElementById("aiSettingsStatus"),
   aiSettingsStatusBtn: document.getElementById("aiSettingsStatusBtn"),
   aiSettingsReloadBtn: document.getElementById("aiSettingsReloadBtn"),
+  timezoneBar: document.getElementById("timezoneBar"),
+  timezoneSettingsFields: document.getElementById("timezoneSettingsFields"),
+  saveTimezonesBtn: document.getElementById("saveTimezonesBtn"),
+  timezoneSettingsStatus: document.getElementById("timezoneSettingsStatus"),
   formTitle: document.getElementById("formTitle"),
   formHint: document.getElementById("formHint"),
   form: document.getElementById("recordForm"),
@@ -581,6 +610,17 @@ const formFocusFields = {
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+function normalizeTimeZones(raw = []) {
+  const allowed = new Set(timeZoneOptions.map((item) => item.value));
+  const selected = Array.isArray(raw) ? raw.map((item) => String(item)).filter((item) => allowed.has(item)) : [];
+  const unique = [...new Set(selected)];
+  for (const fallback of defaultTimeZones) {
+    if (unique.length >= 3) break;
+    if (!unique.includes(fallback)) unique.push(fallback);
+  }
+  return unique.slice(0, 3);
 }
 
 function isOnlineDeployment() {
@@ -823,6 +863,7 @@ function ensureStateShape(nextState) {
     ...(nextState?.meta || {}),
     optionSets: { ...(nextState?.meta?.optionSets || {}) },
     filterPreferences: normalizeFilterPreferences(nextState?.meta?.filterPreferences),
+    timeZones: normalizeTimeZones(nextState?.meta?.timeZones),
   };
   shaped.creators = Array.isArray(nextState?.creators) ? nextState.creators.map((row) => ({ ...row, country: normalizeCountry(row.country) })) : [];
   shaped.resources = Array.isArray(nextState?.resources) ? nextState.resources.map((row) => ({ ...row, country: normalizeCountry(row.country) })) : [];
@@ -864,6 +905,7 @@ async function persist() {
     updatedAt: new Date().toISOString(),
     optionSets: { ...(state.data.meta.optionSets || {}) },
     filterPreferences: normalizeFilterPreferences(state.data.meta.filterPreferences),
+    timeZones: normalizeTimeZones(state.data.meta.timeZones),
   };
   const payload = JSON.stringify(state.data, null, 2);
   localStorage.setItem(STORAGE_FALLBACK, payload);
@@ -1967,7 +2009,75 @@ function renderSettingsPage() {
   setEntityUiVisible(false);
   elements.matchingPage.classList.add("hidden");
   renderAiSettings();
+  renderTimeZoneSettings();
   renderOptionSettings();
+}
+
+function getTimeZoneLabel(timeZone) {
+  return timeZoneOptions.find((item) => item.value === timeZone)?.label || timeZone;
+}
+
+function formatTimeInZone(timeZone) {
+  return new Intl.DateTimeFormat("zh-CN", {
+    timeZone,
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+    hourCycle: "h23",
+  }).format(new Date());
+}
+
+function renderTimeZoneBar() {
+  const zones = normalizeTimeZones(state.data.meta?.timeZones);
+  elements.timezoneBar.innerHTML = zones
+    .map(
+      (timeZone) => `
+        <div class="timezone-clock" title="${escapeHtml(timeZone)}">
+          <span>${escapeHtml(getTimeZoneLabel(timeZone))}</span>
+          <strong>${escapeHtml(formatTimeInZone(timeZone))}</strong>
+        </div>`,
+    )
+    .join("");
+}
+
+function renderTimeZoneSettings() {
+  const zones = normalizeTimeZones(state.data.meta?.timeZones);
+  const options = timeZoneOptions.map((item) => `<option value="${escapeHtml(item.value)}">${escapeHtml(item.label)}</option>`).join("");
+  elements.timezoneSettingsFields.innerHTML = zones
+    .map(
+      (timeZone, index) => `
+        <label class="field">
+          <span>展示时区 ${index + 1}</span>
+          <select data-timezone-select="${index}">
+            ${options.replace(`value="${timeZone}"`, `value="${timeZone}" selected`)}
+          </select>
+        </label>`,
+    )
+    .join("");
+  elements.timezoneSettingsStatus.textContent = `当前展示：${zones.map(getTimeZoneLabel).join("、")}。`;
+}
+
+async function saveTimeZones() {
+  const zones = [...elements.timezoneSettingsFields.querySelectorAll("[data-timezone-select]")].map((select) => select.value);
+  if (new Set(zones).size !== zones.length) {
+    elements.timezoneSettingsStatus.textContent = "请选择三个不同的时区。";
+    return;
+  }
+  state.data.meta.timeZones = normalizeTimeZones(zones);
+  try {
+    await persist();
+    renderTimeZoneBar();
+    renderTimeZoneSettings();
+    elements.timezoneSettingsStatus.textContent = "全局时区时间已保存。";
+  } catch (error) {
+    elements.timezoneSettingsStatus.textContent = error.message || "时区设置保存失败。";
+  }
+}
+
+function startTimeZoneTicker() {
+  if (timeZoneTickerId) return;
+  renderTimeZoneBar();
+  timeZoneTickerId = window.setInterval(renderTimeZoneBar, 1000);
 }
 
 function markLeadAsContacted(leadId, channel) {
@@ -2723,6 +2833,7 @@ function renderEntityPage() {
 }
 
 function render() {
+  renderTimeZoneBar();
   renderTabs();
   if (state.activeTab === SETTINGS_TAB.key) {
     elements.outreachBtn.classList.add("hidden");
@@ -3698,6 +3809,7 @@ function bindEvents() {
     await loadAiSettings();
     renderAiSettings();
   });
+  elements.saveTimezonesBtn.addEventListener("click", saveTimeZones);
   const bindKeySource = (source, keyInput) => {
     source.addEventListener("change", () => {
       const useEnvironment = source.value === "environment";
@@ -3920,6 +4032,7 @@ async function init() {
   loadDuplicateIgnores();
   await loadState();
   await loadAiSettings();
+  startTimeZoneTicker();
   render();
 }
 

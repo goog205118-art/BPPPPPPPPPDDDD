@@ -27,6 +27,7 @@
             <kbd>Ctrl K</kbd>
           </button>
         </div>
+        <section class="timezone-bar" id="timezoneBar" aria-label="全球时区时间"></section>
         <div class="topbar-actions">
           <button class="ghost" id="refreshBtn">刷新</button>
           <button class="ghost" id="exportStateBtn">导出 JSON</button>
@@ -211,6 +212,19 @@
           </div>
           <p class="settings-status" id="aiSettingsStatus"></p>
         </form>
+        <section class="timezone-settings" aria-labelledby="timezoneSettingsTitle">
+          <div class="option-settings-head">
+            <div>
+              <h3 id="timezoneSettingsTitle">全局时区时间</h3>
+              <p>设置顶部固定展示的三个时区，时间会自动处理夏令时变化。</p>
+            </div>
+          </div>
+          <div class="timezone-settings-fields" id="timezoneSettingsFields"></div>
+          <div class="settings-actions">
+            <button type="button" id="saveTimezonesBtn" class="primary">保存时区</button>
+          </div>
+          <p class="settings-status" id="timezoneSettingsStatus"></p>
+        </section>
         <section class="option-settings" aria-labelledby="optionSettingsTitle">
           <div class="option-settings-head">
             <div>

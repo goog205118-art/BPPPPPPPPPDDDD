@@ -144,6 +144,45 @@ h1 {
   flex-wrap: wrap;
 }
 
+.timezone-bar {
+  display: grid;
+  grid-auto-columns: minmax(82px, auto);
+  grid-auto-flow: column;
+  overflow: hidden;
+  border: 1px solid #33475d;
+  border-radius: 6px;
+  background: #111923;
+}
+
+.timezone-clock {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+  padding: 4px 8px 5px;
+  border-right: 1px solid #33475d;
+  white-space: nowrap;
+}
+
+.timezone-clock:last-child {
+  border-right: 0;
+}
+
+.timezone-clock span {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 0.65rem;
+  text-overflow: ellipsis;
+}
+
+.timezone-clock strong {
+  color: #edf5ff;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.84rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+  letter-spacing: 0;
+}
+
 .tabs {
   display: flex;
   gap: 6px;
@@ -681,6 +720,22 @@ h1 {
   border-radius: 8px;
   background: #fbfdff;
   padding: 12px;
+}
+
+.timezone-settings {
+  display: grid;
+  gap: 10px;
+  margin-top: 14px;
+  border: 1px solid #e4eaf3;
+  border-radius: 8px;
+  background: #fbfdff;
+  padding: 12px;
+}
+
+.timezone-settings-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px 12px;
 }
 
 .option-settings-head h3 {
@@ -1974,6 +2029,10 @@ tbody tr:hover {
     grid-template-columns: 1fr;
   }
 
+  .timezone-settings-fields {
+    grid-template-columns: 1fr;
+  }
+
   .form {
     grid-template-columns: 1fr;
   }
@@ -2131,6 +2190,28 @@ body {
   min-width: 0;
   align-items: center;
   gap: 14px;
+}
+
+.timezone-bar {
+  border-color: #364a61;
+  background: #101720;
+}
+
+.timezone-clock {
+  border-color: #2b3b4c;
+}
+
+.timezone-clock span {
+  color: #8fa1b5;
+}
+
+.timezone-clock strong {
+  color: #e8f0fa;
+}
+
+.timezone-settings {
+  border-color: var(--line);
+  background: var(--panel);
 }
 
 h1 {
@@ -3061,6 +3142,15 @@ tbody tr[data-open-creator] {
     align-items: flex-start;
     flex-direction: column;
     gap: 7px;
+  }
+
+  .timezone-bar {
+    width: 100%;
+    grid-auto-columns: minmax(0, 1fr);
+  }
+
+  .timezone-clock {
+    padding: 5px 7px;
   }
 
   .global-search-trigger {
