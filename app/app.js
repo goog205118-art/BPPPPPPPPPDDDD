@@ -2706,7 +2706,7 @@ function renderOutreachResults() {
             <label>正文<textarea data-outreach-body="${index}">${escapeHtml(draft.body)}</textarea></label>
             <div class="outreach-draft-actions">
               <button type="button" class="ghost" data-copy-outreach="${index}">复制主题和排版正文</button>
-              <p class="outreach-draft-note" data-outreach-note="${index}">默认邮件软件会收到纯文本兼容版；同时已准备富文本正文，粘贴可保留段落和链接。</p>
+              <p class="outreach-draft-note" data-outreach-note="${index}">粘贴到支持富文本的邮件编辑器时，会保留段落，并将产品链接显示为简洁的可点击文字。</p>
             </div>
           </article>`;
       })
@@ -2771,12 +2771,22 @@ function normalizeOutreachBody(value) {
     .trim();
 }
 
+function outreachLinkLabel(url) {
+  try {
+    const hostname = new URL(url).hostname.replace(/^www\./i, "");
+    if (/(amazon\.[a-z.]+|amzn\.to)$/i.test(hostname)) return "View product";
+    return `Open ${hostname}`;
+  } catch {
+    return "Open link";
+  }
+}
+
 function linkifyOutreachText(value) {
   const escaped = escapeHtml(value);
   return escaped.replace(/(https?:\/\/[^\s<]+)/g, (url) => {
     const trailing = url.match(/[),.!?;:]+$/)?.[0] || "";
     const href = url.slice(0, url.length - trailing.length);
-    return `<a href="${href}" style="color:#1565c0;text-decoration:underline;">${href}</a>${trailing}`;
+    return `<a href="${href}" style="color:#1565c0;text-decoration:underline;">${outreachLinkLabel(href)}</a>${trailing}`;
   });
 }
 
@@ -2821,16 +2831,14 @@ async function launchOutreachMail(index) {
   const lead = selectedLeadsForOutreach(state.outreach.leadIds).find((item) => item.id === draft?.lead_id);
   if (!lead?.email) return;
   const subject = text(elements.outreachResult.querySelector(`[data-outreach-subject="${index}"]`)?.value || draft.subject);
-  const body = normalizeOutreachBody(elements.outreachResult.querySelector(`[data-outreach-body="${index}"]`)?.value || draft.body);
   const copiedRichText = await copyOutreachDraft(index, false);
-  const compatibleBody = body.replace(/\n/g, "\r\n");
   await persistLeadContactStatus(lead.id, "AI 开发邮件");
-  window.location.href = `mailto:${encodeURIComponent(lead.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(compatibleBody)}`;
+  window.location.href = `mailto:${encodeURIComponent(lead.email)}?subject=${encodeURIComponent(subject)}`;
   setOutreachDraftNote(
     index,
     copiedRichText
-      ? "邮件客户端已打开。正文已自动复制为排版版：若正文换行未保留，点正文后按 Ctrl+V 即可恢复段落和链接。"
-      : "邮件客户端已打开。若正文换行未保留，请使用上方“复制主题和排版正文”后粘贴。",
+      ? "邮件客户端已打开。带短链接的排版正文已复制，点正文后按 Ctrl+V 即可粘贴可点击的产品名称链接。"
+      : "邮件客户端已打开。请使用上方“复制主题和排版正文”后粘贴，可得到产品名称形式的可点击链接。",
   );
 }
 
