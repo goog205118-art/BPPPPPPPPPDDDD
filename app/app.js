@@ -427,6 +427,11 @@ const defaultFilterPreferences = {
   cooperations: ["model", "result"],
 };
 
+const defaultMailHistorySettings = {
+  provider: "none",
+  urlTemplate: "",
+};
+
 const emptyState = {
   meta: { version: 1, updatedAt: new Date().toISOString() },
   creators: [],
@@ -502,6 +507,10 @@ const elements = {
   aiSettingsStatus: document.getElementById("aiSettingsStatus"),
   aiSettingsStatusBtn: document.getElementById("aiSettingsStatusBtn"),
   aiSettingsReloadBtn: document.getElementById("aiSettingsReloadBtn"),
+  mailHistoryProvider: document.getElementById("mailHistoryProvider"),
+  mailHistoryUrlTemplate: document.getElementById("mailHistoryUrlTemplate"),
+  saveMailHistoryBtn: document.getElementById("saveMailHistoryBtn"),
+  mailHistoryStatus: document.getElementById("mailHistoryStatus"),
   formTitle: document.getElementById("formTitle"),
   formHint: document.getElementById("formHint"),
   form: document.getElementById("recordForm"),
@@ -581,6 +590,16 @@ const formFocusFields = {
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+function normalizeMailHistorySettings(raw = {}) {
+  const provider = ["none", "gmail", "outlook", "custom"].includes(String(raw?.provider || ""))
+    ? String(raw.provider)
+    : defaultMailHistorySettings.provider;
+  return {
+    provider,
+    urlTemplate: String(raw?.urlTemplate || "").trim(),
+  };
 }
 
 function isOnlineDeployment() {
@@ -823,6 +842,7 @@ function ensureStateShape(nextState) {
     ...(nextState?.meta || {}),
     optionSets: { ...(nextState?.meta?.optionSets || {}) },
     filterPreferences: normalizeFilterPreferences(nextState?.meta?.filterPreferences),
+    mailHistory: normalizeMailHistorySettings(nextState?.meta?.mailHistory),
   };
   shaped.creators = Array.isArray(nextState?.creators) ? nextState.creators.map((row) => ({ ...row, country: normalizeCountry(row.country) })) : [];
   shaped.resources = Array.isArray(nextState?.resources) ? nextState.resources.map((row) => ({ ...row, country: normalizeCountry(row.country) })) : [];
@@ -1814,7 +1834,7 @@ function renderTable(visibleRows) {
           : "";
       const emailAction =
         state.activeTab === "leads" && text(row.email)
-          ? `<a class="ghost mail-link" href="mailto:${encodeURIComponent(text(row.email))}" title="使用默认邮件软件联系此达人">邮件客户端</a>`
+          ? `<button type="button" class="ghost mail-link" data-open-mail-client="${escapeHtml(row.id)}" title="打开默认邮件软件，并将该达人标记为已联系">邮件客户端</button><button type="button" class="ghost mail-link" data-open-mail-history="${escapeHtml(row.id)}" title="查看与该邮箱的历史邮件往来">邮件往来</button>`
           : "";
       const outreachAction = state.activeTab === "leads" ? `<button class="ghost" data-outreach-lead="${row.id}">AI 邮件</button>` : "";
       const selectCell = isLeadTable
@@ -1861,6 +1881,14 @@ function renderTable(visibleRows) {
 
   elements.tableBody.querySelectorAll("[data-outreach-lead]").forEach((button) => {
     button.addEventListener("click", () => openOutreachModal([button.dataset.outreachLead]));
+  });
+
+  elements.tableBody.querySelectorAll("[data-open-mail-client]").forEach((button) => {
+    button.addEventListener("click", () => launchLeadMailClient(button.dataset.openMailClient));
+  });
+
+  elements.tableBody.querySelectorAll("[data-open-mail-history]").forEach((button) => {
+    button.addEventListener("click", () => openLeadMailHistory(button.dataset.openMailHistory));
   });
 
   elements.tableBody.querySelectorAll("[data-delete]").forEach((button) => {
@@ -1956,7 +1984,114 @@ function renderSettingsPage() {
   setEntityUiVisible(false);
   elements.matchingPage.classList.add("hidden");
   renderAiSettings();
+  renderMailHistorySettings();
   renderOptionSettings();
+}
+
+function getMailHistorySettings() {
+  return normalizeMailHistorySettings(state.data.meta?.mailHistory);
+}
+
+function syncMailHistorySettingsUi() {
+  const isCustom = elements.mailHistoryProvider.value === "custom";
+  elements.mailHistoryUrlTemplate.closest(".mail-history-template")?.classList.toggle("hidden", !isCustom);
+}
+
+function renderMailHistorySettings() {
+  const settings = getMailHistorySettings();
+  elements.mailHistoryProvider.value = settings.provider;
+  elements.mailHistoryUrlTemplate.value = settings.urlTemplate;
+  elements.mailHistoryStatus.textContent =
+    settings.provider === "none"
+      ? "未设置时，“邮件往来”会提示你选择 Gmail、Outlook 或自定义地址。"
+      : settings.provider === "custom"
+        ? "已使用自定义跳转地址。请确认地址中包含 {email}。"
+        : `已设置为 ${settings.provider === "gmail" ? "Gmail 网页版" : "Outlook 网页版"}。`;
+  syncMailHistorySettingsUi();
+}
+
+async function saveMailHistorySettings() {
+  const provider = elements.mailHistoryProvider.value;
+  const urlTemplate = text(elements.mailHistoryUrlTemplate.value);
+  if (provider === "custom" && !urlTemplate.includes("{email}")) {
+    elements.mailHistoryStatus.textContent = "自定义地址必须包含 {email}，系统才能替换为达人邮箱。";
+    elements.mailHistoryUrlTemplate.focus();
+    return;
+  }
+  state.data.meta.mailHistory = normalizeMailHistorySettings({ provider, urlTemplate });
+  try {
+    await persist();
+    renderMailHistorySettings();
+    elements.mailHistoryStatus.textContent = "邮件往来入口已保存。";
+  } catch (error) {
+    elements.mailHistoryStatus.textContent = error.message || "邮件往来入口保存失败。";
+  }
+}
+
+function buildMailHistoryUrl(email) {
+  const normalizedEmail = text(email);
+  if (!normalizedEmail) return "";
+  const settings = getMailHistorySettings();
+  const searchQuery = `from:${normalizedEmail} OR to:${normalizedEmail}`;
+  if (settings.provider === "gmail") return `https://mail.google.com/mail/u/0/#search/${encodeURIComponent(searchQuery)}`;
+  if (settings.provider === "outlook") return `https://outlook.office.com/mail/search?q=${encodeURIComponent(searchQuery)}`;
+  if (settings.provider === "custom" && settings.urlTemplate.includes("{email}")) {
+    return settings.urlTemplate.replaceAll("{email}", encodeURIComponent(normalizedEmail));
+  }
+  return "";
+}
+
+function markLeadAsContacted(leadId, channel) {
+  const index = state.data.leads.findIndex((lead) => lead.id === leadId);
+  if (index < 0) return false;
+  const lead = state.data.leads[index];
+  if (lead.status === "已转达人库") return false;
+  const now = new Date().toISOString();
+  state.data.leads[index] = {
+    ...lead,
+    status: "已联系",
+    first_contacted_at: text(lead.first_contacted_at) || now,
+    last_contacted_at: now,
+    contact_channel: text(channel) || text(lead.contact_channel),
+    updatedAt: now,
+  };
+  return true;
+}
+
+async function persistLeadContactStatus(leadId, channel) {
+  if (!markLeadAsContacted(leadId, channel)) return false;
+  try {
+    await persist();
+    if (state.activeTab === "leads") render();
+    return true;
+  } catch (error) {
+    elements.importStatus.textContent = error.message || "开发状态保存失败，仍将尝试打开邮件客户端。";
+    return false;
+  }
+}
+
+async function launchLeadMailClient(leadId) {
+  const lead = rows("leads").find((item) => item.id === leadId);
+  const email = text(lead?.email);
+  if (!email) return;
+  await persistLeadContactStatus(leadId, "邮件客户端");
+  window.location.href = `mailto:${encodeURIComponent(email)}`;
+}
+
+function openLeadMailHistory(leadId) {
+  const lead = rows("leads").find((item) => item.id === leadId);
+  const email = text(lead?.email);
+  if (!email) return;
+  const url = buildMailHistoryUrl(email);
+  if (url) {
+    window.open(url, "_blank", "noopener,noreferrer");
+    return;
+  }
+  state.activeTab = SETTINGS_TAB.key;
+  resetEditorState();
+  render();
+  elements.mailHistoryStatus.textContent = "请先设置邮件服务；桌面邮件软件没有统一的“按邮箱打开历史对话”链接标准。";
+  elements.mailHistoryProvider.focus();
 }
 
 function setMatchingUiVisible(isVisible) {
@@ -2630,6 +2765,7 @@ async function launchOutreachMail(index) {
   const body = normalizeOutreachBody(elements.outreachResult.querySelector(`[data-outreach-body="${index}"]`)?.value || draft.body);
   const copiedRichText = await copyOutreachDraft(index, false);
   const compatibleBody = body.replace(/\n/g, "\r\n");
+  await persistLeadContactStatus(lead.id, "AI 开发邮件");
   window.location.href = `mailto:${encodeURIComponent(lead.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(compatibleBody)}`;
   setOutreachDraftNote(
     index,
@@ -3630,6 +3766,8 @@ function bindEvents() {
     await loadAiSettings();
     renderAiSettings();
   });
+  elements.mailHistoryProvider.addEventListener("change", syncMailHistorySettingsUi);
+  elements.saveMailHistoryBtn.addEventListener("click", saveMailHistorySettings);
   const bindKeySource = (source, keyInput) => {
     source.addEventListener("change", () => {
       const useEnvironment = source.value === "environment";
