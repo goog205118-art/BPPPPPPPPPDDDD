@@ -3007,6 +3007,20 @@ tbody tr[data-open-creator] {
   outline-offset: 2px;
 }
 
+.outreach-draft-actions {
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.outreach-draft-note {
+  flex: 1 1 260px;
+  margin: 0;
+  color: #91a3b8;
+  font-size: 0.69rem;
+  line-height: 1.45;
+}
+
 @media (max-width: 760px) {
   .topbar-title {
     width: 100%;
@@ -3028,5 +3042,10 @@ tbody tr[data-open-creator] {
 
   .global-search-modal {
     padding: 54px 8px 8px;
+  }
+
+  .outreach-draft-actions {
+    align-items: flex-start;
+    flex-direction: column-reverse;
   }
 }

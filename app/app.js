@@ -2508,10 +2508,13 @@ function renderOutreachResults() {
         const lead = leadMap.get(draft.lead_id) || {};
         return `
           <article class="outreach-draft" data-outreach-draft="${index}">
-            <header><div><strong>${escapeHtml(lead.name || lead.social_url || "达人")}</strong><span>${escapeHtml(draft.recommended_cooperation || "请人工确认合作方式")}${draft.reason ? ` · ${escapeHtml(draft.reason)}` : ""}</span></div>${lead.email ? `<a class="ghost mail-link" data-send-outreach="${index}" href="#">用默认邮件软件打开</a>` : `<span class="outreach-no-email">暂无可验证邮箱</span>`}</header>
+            <header><div><strong>${escapeHtml(lead.name || lead.social_url || "达人")}</strong><span>${escapeHtml(draft.recommended_cooperation || "请人工确认合作方式")}${draft.reason ? ` · ${escapeHtml(draft.reason)}` : ""}</span></div>${lead.email ? `<a class="ghost mail-link" data-send-outreach="${index}" href="#">打开邮件并复制排版正文</a>` : `<span class="outreach-no-email">暂无可验证邮箱</span>`}</header>
             <label>主题<input data-outreach-subject="${index}" value="${escapeHtml(draft.subject)}" /></label>
             <label>正文<textarea data-outreach-body="${index}">${escapeHtml(draft.body)}</textarea></label>
-            <div class="outreach-draft-actions"><button type="button" class="ghost" data-copy-outreach="${index}">复制邮件</button></div>
+            <div class="outreach-draft-actions">
+              <button type="button" class="ghost" data-copy-outreach="${index}">复制主题和排版正文</button>
+              <p class="outreach-draft-note" data-outreach-note="${index}">默认邮件软件会收到纯文本兼容版；同时已准备富文本正文，粘贴可保留段落和链接。</p>
+            </div>
           </article>`;
       })
       .join("")}
@@ -2566,24 +2569,74 @@ async function submitOutreach(event) {
   }
 }
 
-async function copyOutreachDraft(index) {
+function normalizeOutreachBody(value) {
+  return text(value)
+    .replace(/\r\n?/g, "\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
+function linkifyOutreachText(value) {
+  const escaped = escapeHtml(value);
+  return escaped.replace(/(https?:\/\/[^\s<]+)/g, (url) => {
+    const trailing = url.match(/[),.!?;:]+$/)?.[0] || "";
+    const href = url.slice(0, url.length - trailing.length);
+    return `<a href="${href}" style="color:#1565c0;text-decoration:underline;">${href}</a>${trailing}`;
+  });
+}
+
+function buildOutreachHtml(body) {
+  const paragraphs = normalizeOutreachBody(body).split(/\n\s*\n/).filter(Boolean);
+  const paragraphHtml = paragraphs
+    .map((paragraph) => `<p style="margin:0 0 16px;line-height:1.6;">${linkifyOutreachText(paragraph).replace(/\n/g, "<br>")}</p>`)
+    .join("");
+  return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:11pt;line-height:1.6;color:#111827;">${paragraphHtml || "<p></p>"}</div>`;
+}
+
+async function copyOutreachDraft(index, includeSubject = true) {
   const subject = text(elements.outreachResult.querySelector(`[data-outreach-subject="${index}"]`)?.value);
-  const body = text(elements.outreachResult.querySelector(`[data-outreach-body="${index}"]`)?.value);
-  const payload = `Subject: ${subject}\n\n${body}`;
+  const body = normalizeOutreachBody(elements.outreachResult.querySelector(`[data-outreach-body="${index}"]`)?.value);
+  const plainText = includeSubject ? `Subject: ${subject}\n\n${body}` : body;
+  const html = buildOutreachHtml(body);
   try {
-    await navigator.clipboard.writeText(payload);
+    if (navigator.clipboard?.write && window.ClipboardItem) {
+      await navigator.clipboard.write([
+        new ClipboardItem({
+          "text/plain": new Blob([plainText], { type: "text/plain" }),
+          "text/html": new Blob([html], { type: "text/html" }),
+        }),
+      ]);
+    } else {
+      await navigator.clipboard.writeText(plainText);
+    }
+    return true;
   } catch {
-    window.prompt("复制以下邮件内容：", payload);
+    window.prompt("复制以下邮件内容：", plainText);
+    return false;
   }
 }
 
-function launchOutreachMail(index) {
+function setOutreachDraftNote(index, message) {
+  const note = elements.outreachResult.querySelector(`[data-outreach-note="${index}"]`);
+  if (note) note.textContent = message;
+}
+
+async function launchOutreachMail(index) {
   const draft = state.outreach.result?.drafts?.[Number(index)];
   const lead = selectedLeadsForOutreach(state.outreach.leadIds).find((item) => item.id === draft?.lead_id);
   if (!lead?.email) return;
   const subject = text(elements.outreachResult.querySelector(`[data-outreach-subject="${index}"]`)?.value || draft.subject);
-  const body = text(elements.outreachResult.querySelector(`[data-outreach-body="${index}"]`)?.value || draft.body);
-  window.location.href = `mailto:${encodeURIComponent(lead.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(body)}`;
+  const body = normalizeOutreachBody(elements.outreachResult.querySelector(`[data-outreach-body="${index}"]`)?.value || draft.body);
+  const copiedRichText = await copyOutreachDraft(index, false);
+  const compatibleBody = body.replace(/\n/g, "\r\n");
+  window.location.href = `mailto:${encodeURIComponent(lead.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(compatibleBody)}`;
+  setOutreachDraftNote(
+    index,
+    copiedRichText
+      ? "邮件客户端已打开。正文已自动复制为排版版：若正文换行未保留，点正文后按 Ctrl+V 即可恢复段落和链接。"
+      : "邮件客户端已打开。若正文换行未保留，请使用上方“复制主题和排版正文”后粘贴。",
+  );
 }
 
 function renderEntityPage() {
@@ -3601,7 +3654,12 @@ function bindEvents() {
   elements.outreachResult.addEventListener("click", (event) => {
     const copyButton = event.target.closest("[data-copy-outreach]");
     if (copyButton) {
-      copyOutreachDraft(copyButton.dataset.copyOutreach);
+      void copyOutreachDraft(copyButton.dataset.copyOutreach).then((copiedRichText) => {
+        setOutreachDraftNote(
+          copyButton.dataset.copyOutreach,
+          copiedRichText ? "已复制主题和排版正文。粘贴到支持富文本的邮件编辑器时会保留段落和链接。" : "请从弹出的文本框复制内容后粘贴到邮件编辑器。",
+        );
+      });
       return;
     }
     const mailLink = event.target.closest("[data-send-outreach]");
