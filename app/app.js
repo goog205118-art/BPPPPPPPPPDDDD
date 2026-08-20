@@ -477,6 +477,7 @@ const state = {
   editorDraft: null,
   editorBaseline: "",
   editorOpen: false,
+  editorSaving: false,
   matchingEditingId: null,
   importDraft: null,
   duplicateIgnores: new Set(),
@@ -492,12 +493,16 @@ const state = {
 };
 
 let timeZoneTickerId = null;
+let activityDepth = 0;
 
 const elements = {
   accessGate: document.getElementById("accessGate"),
   accessForm: document.getElementById("accessForm"),
   accessPassword: document.getElementById("accessPassword"),
   accessStatus: document.getElementById("accessStatus"),
+  activityOverlay: document.getElementById("activityOverlay"),
+  activityTitle: document.getElementById("activityTitle"),
+  activityMessage: document.getElementById("activityMessage"),
   tabs: document.getElementById("tabs"),
   summary: document.getElementById("summary"),
   workspace: document.querySelector(".workspace"),
@@ -638,6 +643,7 @@ function isOnlineDeployment() {
 
 function showAccessGate(message = "") {
   document.body.classList.add("access-locked");
+  elements.accessGate.classList.remove("is-leaving");
   elements.accessGate.classList.remove("hidden");
   elements.accessStatus.textContent = message;
   window.setTimeout(() => elements.accessPassword.focus(), 0);
@@ -645,9 +651,41 @@ function showAccessGate(message = "") {
 
 function hideAccessGate() {
   document.body.classList.remove("access-locked");
-  elements.accessGate.classList.add("hidden");
+  elements.accessGate.classList.add("is-leaving");
   elements.accessStatus.textContent = "";
   elements.accessPassword.value = "";
+  window.setTimeout(() => {
+    if (elements.accessGate.classList.contains("is-leaving")) {
+      elements.accessGate.classList.add("hidden");
+      elements.accessGate.classList.remove("is-leaving");
+    }
+  }, 220);
+}
+
+function showActivity(title = "正在处理", message = "请稍候...") {
+  activityDepth += 1;
+  elements.activityTitle.textContent = title;
+  elements.activityMessage.textContent = message;
+  elements.activityOverlay.classList.remove("hidden");
+  window.requestAnimationFrame(() => elements.activityOverlay.classList.add("is-visible"));
+}
+
+function hideActivity() {
+  activityDepth = Math.max(0, activityDepth - 1);
+  if (activityDepth) return;
+  elements.activityOverlay.classList.remove("is-visible");
+  window.setTimeout(() => {
+    if (!activityDepth) elements.activityOverlay.classList.add("hidden");
+  }, 180);
+}
+
+async function withActivity(title, message, action) {
+  showActivity(title, message);
+  try {
+    return await action();
+  } finally {
+    hideActivity();
+  }
 }
 
 async function apiFetch(resource, options = {}) {
@@ -1110,17 +1148,23 @@ function renderAiSettings() {
 async function saveAiSettings(event) {
   event.preventDefault();
   elements.aiSettingsStatus.textContent = "正在保存...";
-  const response = await apiFetch(API_AI_SETTINGS, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(readAiSettingsForm()),
-  });
-  const payload = await response.json().catch(() => ({}));
-  if (!response.ok || payload.ok === false) {
-    elements.aiSettingsStatus.textContent = payload.error || "AI 设置保存失败";
+  try {
+    await withActivity("正在保存 AI 设置", "正在加密提交你的模型接入参数...", async () => {
+      const response = await apiFetch(API_AI_SETTINGS, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(readAiSettingsForm()),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.ok === false) {
+        throw new Error(payload.error || "AI 设置保存失败");
+      }
+      state.aiSettings = normalizeAiSettingsPayload(payload.settings);
+    });
+  } catch (error) {
+    elements.aiSettingsStatus.textContent = error.message || "AI 设置保存失败";
     return;
   }
-  state.aiSettings = normalizeAiSettingsPayload(payload.settings);
   renderAiSettings();
   const profiles = state.aiSettings.profiles;
   const saved = (profile) => (profile?.hasApiKey ? "已配置" : "未配置");
@@ -1130,9 +1174,12 @@ async function saveAiSettings(event) {
 async function checkAiStatus() {
   elements.aiSettingsStatus.textContent = "正在检查...";
   try {
-    const response = await apiFetch(API_AI_STATUS);
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || payload.ok === false) throw new Error(payload.error || "检查失败");
+    const payload = await withActivity("正在检查 AI 配置", "正在确认各模型的接入状态...", async () => {
+      const response = await apiFetch(API_AI_STATUS);
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.ok === false) throw new Error(result.error || "检查失败");
+      return result;
+    });
     const profiles = payload.profiles || {};
     const describe = (key, label) => {
       const profile = profiles[key] || {};
@@ -1596,23 +1643,29 @@ async function handleCreatorAiEnrich() {
   if (status) status.textContent = state.activeTab === "leads" ? "快速 AI 正在整理核心信息..." : "AI 正在搜索并整理可验证信息...";
 
   try {
-    const response = await apiFetch(API_CREATOR_ENRICH, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: sourceUrl, current, purpose: state.activeTab === "leads" ? "lead" : "creator" }),
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || payload.ok === false) {
-      throw new Error(payload.error || "AI 补全失败");
-    }
+    await withActivity(
+      state.activeTab === "leads" ? "AI 正在整理待开发达人" : "AI 正在补全达人资料",
+      state.activeTab === "leads" ? "正在提取公开的核心信息..." : "正在检索并核对公开资料...",
+      async () => {
+        const response = await apiFetch(API_CREATOR_ENRICH, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ url: sourceUrl, current, purpose: state.activeTab === "leads" ? "lead" : "creator" }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload.ok === false) {
+          throw new Error(payload.error || "AI 补全失败");
+        }
 
-    const applied = applyCreatorAiUpdates(payload.updates, sourceUrl);
-    const confidenceText = payload.confidence ? `，可信度：${payload.confidence}` : "";
-    const sourceText = Array.isArray(payload.sources) && payload.sources.length ? `，来源 ${payload.sources.length} 个` : "";
-    const warningText = Array.isArray(payload.warnings) && payload.warnings.length ? `；提示：${payload.warnings.join("；")}` : "";
-    if (status) status.textContent = `已补全 ${applied} 个空字段${confidenceText}${sourceText}${warningText}。请人工复核后保存。`;
-    if (button) button.dataset.enrichedUrl = sourceUrl;
-    renderIdentityCheck();
+        const applied = applyCreatorAiUpdates(payload.updates, sourceUrl);
+        const confidenceText = payload.confidence ? `，可信度：${payload.confidence}` : "";
+        const sourceText = Array.isArray(payload.sources) && payload.sources.length ? `，来源 ${payload.sources.length} 个` : "";
+        const warningText = Array.isArray(payload.warnings) && payload.warnings.length ? `；提示：${payload.warnings.join("；")}` : "";
+        if (status) status.textContent = `已补全 ${applied} 个空字段${confidenceText}${sourceText}${warningText}。请人工复核后保存。`;
+        if (button) button.dataset.enrichedUrl = sourceUrl;
+        renderIdentityCheck();
+      },
+    );
   } catch (error) {
     if (status) status.textContent = error.message || "AI 补全失败，请检查本地服务或 API 配置。";
   } finally {
@@ -2620,37 +2673,39 @@ async function handleProductPreview() {
   if (button) button.disabled = true;
   if (status) status.textContent = "正在读取公开产品信息，必要时将由 AI 补充...";
   try {
-    const response = await apiFetch(API_PRODUCT_PREVIEW, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ url: productUrl }),
+    await withActivity("AI 正在读取产品资料", "正在提取网页信息并补齐可确认字段...", async () => {
+      const response = await apiFetch(API_PRODUCT_PREVIEW, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ url: productUrl }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.ok === false) throw new Error(payload.error || "读取产品信息失败");
+      const filled = [];
+      for (const key of ["name", "image_url", "description"]) {
+        const input = elements.form.elements[key];
+        if (input && !text(input.value) && text(payload[key])) {
+          input.value = payload[key];
+          filled.push(key === "name" ? "产品名称" : key === "image_url" ? "主图" : "简介");
+        }
+      }
+      if (status) {
+        const webFields = Array.isArray(payload.web_fields) ? payload.web_fields : [];
+        const aiFields = Array.isArray(payload.ai_fields) ? payload.ai_fields : [];
+        const labels = { name: "产品名称", image_url: "主图", description: "简介" };
+        const detail = [
+          webFields.length ? `网页读取：${webFields.map((key) => labels[key] || key).join("、")}` : "",
+          aiFields.length ? `AI 补充：${aiFields.map((key) => labels[key] || key).join("、")}（请核对）` : "",
+        ].filter(Boolean).join("；");
+        if (filled.length) {
+          status.textContent = `已填入${filled.join("、")}。${detail ? ` ${detail}。` : ""}${payload.warning ? ` ${payload.warning}` : ""}`;
+        } else if (payload.warning) {
+          status.textContent = `${detail ? `${detail}。` : ""}${payload.warning}`;
+        } else {
+          status.textContent = detail ? `${detail}。现有手填内容未被覆盖。` : "已读取公开页面；现有手填内容未被覆盖。";
+        }
+      }
     });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || payload.ok === false) throw new Error(payload.error || "读取产品信息失败");
-    const filled = [];
-    for (const key of ["name", "image_url", "description"]) {
-      const input = elements.form.elements[key];
-      if (input && !text(input.value) && text(payload[key])) {
-        input.value = payload[key];
-        filled.push(key === "name" ? "产品名称" : key === "image_url" ? "主图" : "简介");
-      }
-    }
-    if (status) {
-      const webFields = Array.isArray(payload.web_fields) ? payload.web_fields : [];
-      const aiFields = Array.isArray(payload.ai_fields) ? payload.ai_fields : [];
-      const labels = { name: "产品名称", image_url: "主图", description: "简介" };
-      const detail = [
-        webFields.length ? `网页读取：${webFields.map((key) => labels[key] || key).join("、")}` : "",
-        aiFields.length ? `AI 补充：${aiFields.map((key) => labels[key] || key).join("、")}（请核对）` : "",
-      ].filter(Boolean).join("；");
-      if (filled.length) {
-        status.textContent = `已填入${filled.join("、")}。${detail ? ` ${detail}。` : ""}${payload.warning ? ` ${payload.warning}` : ""}`;
-      } else if (payload.warning) {
-        status.textContent = `${detail ? `${detail}。` : ""}${payload.warning}`;
-      } else {
-        status.textContent = detail ? `${detail}。现有手填内容未被覆盖。` : "已读取公开页面；现有手填内容未被覆盖。";
-      }
-    }
   } catch (error) {
     if (status) status.textContent = `${error.message || "读取失败"}，可直接手工填写产品名称和主图。`;
   } finally {
@@ -2798,29 +2853,35 @@ async function submitOutreach(event) {
   if (button) button.disabled = true;
   if (status) status.textContent = "AI 正在根据达人资料和产品资料分别构思邮件...";
   try {
-    const response = await apiFetch(API_OUTREACH_GENERATE, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        leads: selectedLeadsForOutreach(state.outreach.leadIds),
-        products: selectedProducts,
-        rules: {
-          language: text(formData.get("language")),
-          tone: text(formData.get("tone")),
-          cooperation: formData.getAll("cooperation").map(text).filter(Boolean),
-          mentionCooperation: formData.get("mentionCooperation") === "on",
-          includeProductLinks: formData.get("includeProductLinks") === "on",
-          mentionProductBenefits: formData.get("mentionProductBenefits") === "on",
-          allowSampleChoice: formData.get("allowSampleChoice") === "on",
-          customRules: text(formData.get("customRules")),
-        },
-      }),
-    });
-    const payload = await response.json().catch(() => ({}));
-    if (!response.ok || payload.ok === false) throw new Error(payload.error || "邮件生成失败");
-    state.outreach.result = payload;
-    if (status) status.textContent = `已生成 ${payload.drafts?.length || 0} 封邮件草稿。`;
-    renderOutreachResults();
+    await withActivity(
+      "AI 正在构思开发邮件",
+      `正在为 ${state.outreach.leadIds.length} 位达人分别生成邮件草稿...`,
+      async () => {
+        const response = await apiFetch(API_OUTREACH_GENERATE, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            leads: selectedLeadsForOutreach(state.outreach.leadIds),
+            products: selectedProducts,
+            rules: {
+              language: text(formData.get("language")),
+              tone: text(formData.get("tone")),
+              cooperation: formData.getAll("cooperation").map(text).filter(Boolean),
+              mentionCooperation: formData.get("mentionCooperation") === "on",
+              includeProductLinks: formData.get("includeProductLinks") === "on",
+              mentionProductBenefits: formData.get("mentionProductBenefits") === "on",
+              allowSampleChoice: formData.get("allowSampleChoice") === "on",
+              customRules: text(formData.get("customRules")),
+            },
+          }),
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok || payload.ok === false) throw new Error(payload.error || "邮件生成失败");
+        state.outreach.result = payload;
+        if (status) status.textContent = `已生成 ${payload.drafts?.length || 0} 封邮件草稿。`;
+        renderOutreachResults();
+      },
+    );
   } catch (error) {
     if (status) status.textContent = error.message || "邮件生成失败，请检查设置页中的开发邮件 AI 参数。";
   } finally {
@@ -3117,6 +3178,7 @@ function focusFirstMissingRequired(record) {
 
 async function commitEditor({ close = false, showError = false } = {}) {
   if (!state.editorOpen) return true;
+  if (state.editorSaving) return false;
   const record = readFormRecord();
   const changed = editableSnapshot(record) !== state.editorBaseline;
 
@@ -3157,15 +3219,28 @@ async function commitEditor({ close = false, showError = false } = {}) {
   const index = list.findIndex((row) => row.id === record.id);
   if (index >= 0) list[index] = record;
   else list.unshift(record);
-  await persist();
-  if (close) {
-    resetEditorState();
-    render();
-  } else {
-    state.editingId = record.id;
-    state.editorDraft = clone(record);
-    state.editorBaseline = editableSnapshot(record);
-    elements.editorStatus.textContent = "已自动保存。";
+
+  state.editorSaving = true;
+  const title = state.editingId ? "正在保存资料" : "正在新增资料";
+  const message = close ? "正在同步资料并更新工作台..." : "正在自动保存本次更改...";
+  try {
+    await withActivity(title, message, persist);
+    if (close) {
+      resetEditorState();
+      render();
+    } else {
+      state.editingId = record.id;
+      state.editorDraft = clone(record);
+      state.editorBaseline = editableSnapshot(record);
+      elements.editorStatus.textContent = "已自动保存。";
+    }
+  } catch (error) {
+    const message = error.message || "保存失败，请稍后重试。";
+    elements.editorStatus.textContent = message;
+    if (showError) window.alert(message);
+    return false;
+  } finally {
+    state.editorSaving = false;
   }
   return true;
 }
@@ -4136,14 +4211,16 @@ function bindAccessGate() {
     event.preventDefault();
     const password = text(elements.accessPassword.value);
     if (!password) return;
-    elements.accessStatus.textContent = "正在验证...";
+    elements.accessStatus.textContent = "正在验证并加载工作台...";
     sessionStorage.setItem(STORAGE_ACCESS_PASSWORD, password);
     try {
-      const response = await apiFetch(API_STATE);
-      const payload = await response.json().catch(() => ({}));
-      if (!response.ok) throw new Error(payload.error || "访问密码不正确。");
+      await withActivity("正在进入工作台", "正在验证访问权限并载入资料...", async () => {
+        const response = await apiFetch(API_STATE);
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.error || "访问密码不正确。");
+        await init();
+      });
       hideAccessGate();
-      await init();
     } catch (error) {
       sessionStorage.removeItem(STORAGE_ACCESS_PASSWORD);
       showAccessGate(error.message || "无法连接线上服务。");
@@ -4163,7 +4240,9 @@ async function start() {
       showAccessGate("访问密码不正确，请重新输入。");
       return;
     }
+    await withActivity("正在恢复工作台", "正在载入资料、设置与全球时间...", init);
     hideAccessGate();
+    return;
   }
   await init();
 }

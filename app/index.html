@@ -9,14 +9,48 @@
   </head>
   <body class="access-locked">
     <section class="access-gate hidden" id="accessGate" aria-labelledby="accessGateTitle">
-      <form class="access-card" id="accessForm">
-        <h1 id="accessGateTitle">开发资源库</h1>
-        <p>请输入访问密码</p>
-        <label for="accessPassword">访问密码</label>
-        <input id="accessPassword" type="password" autocomplete="current-password" required />
-        <button class="primary" type="submit">进入工作台</button>
-        <p class="access-status" id="accessStatus"></p>
-      </form>
+      <div class="access-layout">
+        <section class="access-intro" aria-label="开发资源库">
+          <div class="access-brand">
+            <img class="access-brand-mark" src="/favicon.png?v=20260820" alt="" />
+            <div>
+              <strong>开发资源库</strong>
+              <span>CREATOR RESOURCE LIBRARY</span>
+            </div>
+          </div>
+          <div class="access-visual" aria-hidden="true">
+            <span class="access-visual-line line-a"></span>
+            <span class="access-visual-line line-b"></span>
+            <span class="access-visual-node node-a"></span>
+            <span class="access-visual-node node-b"></span>
+            <span class="access-visual-node node-c"></span>
+          </div>
+          <div class="access-intro-copy">
+            <p class="access-kicker">PRIVATE WORKSPACE</p>
+            <h2>把分散的合作线索，沉淀成可复用的资源。</h2>
+            <p>统一管理达人、渠道、产品与开发节奏。</p>
+          </div>
+          <p class="access-version">RESOURCE OPERATIONS · 2026</p>
+        </section>
+        <form class="access-card" id="accessForm">
+          <p class="access-kicker">SECURE ACCESS</p>
+          <h1 id="accessGateTitle">欢迎回来</h1>
+          <p class="access-description">输入工作台访问密码后继续。</p>
+          <label for="accessPassword">访问密码</label>
+          <input id="accessPassword" type="password" autocomplete="current-password" placeholder="请输入访问密码" required />
+          <button class="primary" type="submit">进入工作台</button>
+          <p class="access-status" id="accessStatus"></p>
+          <p class="access-footnote">此工作台受访问密码保护。</p>
+        </form>
+      </div>
+    </section>
+    <section class="activity-overlay hidden" id="activityOverlay" aria-live="polite" aria-busy="true">
+      <div class="activity-scrim"></div>
+      <div class="activity-card" role="status">
+        <div class="activity-mark" aria-hidden="true"><span></span><span></span><span></span></div>
+        <strong id="activityTitle">正在处理</strong>
+        <p id="activityMessage">请稍候...</p>
+      </div>
     </section>
     <div class="app-shell">
       <header class="topbar">
