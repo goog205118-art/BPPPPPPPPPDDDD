@@ -211,34 +211,6 @@
           </div>
           <p class="settings-status" id="aiSettingsStatus"></p>
         </form>
-        <section class="mail-history-settings" aria-labelledby="mailHistoryTitle">
-          <div class="option-settings-head">
-            <div>
-              <h3 id="mailHistoryTitle">邮件往来入口</h3>
-              <p>“邮件客户端”用于写信并自动标记已联系；此处可设置一键查看该邮箱的历史往来。</p>
-            </div>
-          </div>
-          <div class="mail-history-controls">
-            <div class="field">
-              <label for="mailHistoryProvider">邮件服务</label>
-              <select id="mailHistoryProvider">
-                <option value="none">暂不设置</option>
-                <option value="gmail">Gmail 网页版</option>
-                <option value="outlook">Outlook 网页版</option>
-                <option value="custom">自定义跳转地址</option>
-              </select>
-            </div>
-            <div class="field field-wide mail-history-template hidden">
-              <label for="mailHistoryUrlTemplate">自定义地址模板</label>
-              <input id="mailHistoryUrlTemplate" type="url" placeholder="例如：https://mail.example.com/search?q={email}" />
-              <small>用 <code>{email}</code> 代表达人邮箱；适用于有专属搜索链接的邮件系统。</small>
-            </div>
-          </div>
-          <div class="settings-actions">
-            <button type="button" id="saveMailHistoryBtn" class="primary">保存邮件入口</button>
-          </div>
-          <p class="settings-status" id="mailHistoryStatus"></p>
-        </section>
         <section class="option-settings" aria-labelledby="optionSettingsTitle">
           <div class="option-settings-head">
             <div>

@@ -427,11 +427,6 @@ const defaultFilterPreferences = {
   cooperations: ["model", "result"],
 };
 
-const defaultMailHistorySettings = {
-  provider: "none",
-  urlTemplate: "",
-};
-
 const emptyState = {
   meta: { version: 1, updatedAt: new Date().toISOString() },
   creators: [],
@@ -507,10 +502,6 @@ const elements = {
   aiSettingsStatus: document.getElementById("aiSettingsStatus"),
   aiSettingsStatusBtn: document.getElementById("aiSettingsStatusBtn"),
   aiSettingsReloadBtn: document.getElementById("aiSettingsReloadBtn"),
-  mailHistoryProvider: document.getElementById("mailHistoryProvider"),
-  mailHistoryUrlTemplate: document.getElementById("mailHistoryUrlTemplate"),
-  saveMailHistoryBtn: document.getElementById("saveMailHistoryBtn"),
-  mailHistoryStatus: document.getElementById("mailHistoryStatus"),
   formTitle: document.getElementById("formTitle"),
   formHint: document.getElementById("formHint"),
   form: document.getElementById("recordForm"),
@@ -590,16 +581,6 @@ const formFocusFields = {
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
-}
-
-function normalizeMailHistorySettings(raw = {}) {
-  const provider = ["none", "gmail", "outlook", "custom"].includes(String(raw?.provider || ""))
-    ? String(raw.provider)
-    : defaultMailHistorySettings.provider;
-  return {
-    provider,
-    urlTemplate: String(raw?.urlTemplate || "").trim(),
-  };
 }
 
 function isOnlineDeployment() {
@@ -842,7 +823,6 @@ function ensureStateShape(nextState) {
     ...(nextState?.meta || {}),
     optionSets: { ...(nextState?.meta?.optionSets || {}) },
     filterPreferences: normalizeFilterPreferences(nextState?.meta?.filterPreferences),
-    mailHistory: normalizeMailHistorySettings(nextState?.meta?.mailHistory),
   };
   shaped.creators = Array.isArray(nextState?.creators) ? nextState.creators.map((row) => ({ ...row, country: normalizeCountry(row.country) })) : [];
   shaped.resources = Array.isArray(nextState?.resources) ? nextState.resources.map((row) => ({ ...row, country: normalizeCountry(row.country) })) : [];
@@ -1830,18 +1810,21 @@ function renderTable(visibleRows) {
 
       const transferAction =
         state.activeTab === "leads" && row.status !== "已转达人库"
-          ? `<button class="ghost" data-transfer-lead="${row.id}">转入达人库</button>`
+          ? `<button type="button" class="ghost icon-action icon-action-transfer" data-transfer-lead="${escapeHtml(row.id)}" aria-label="转入达人库" title="转入达人库">⇥</button>`
           : "";
       const emailAction =
         state.activeTab === "leads" && text(row.email)
-          ? `<button type="button" class="ghost mail-link" data-open-mail-client="${escapeHtml(row.id)}" title="打开默认邮件软件，并将该达人标记为已联系">邮件客户端</button><button type="button" class="ghost mail-link" data-open-mail-history="${escapeHtml(row.id)}" title="查看与该邮箱的历史邮件往来">邮件往来</button>`
+          ? `<button type="button" class="ghost icon-action icon-action-mail" data-open-mail-client="${escapeHtml(row.id)}" aria-label="联系邮件：打开默认邮件软件并标记已联系" title="联系邮件：打开默认邮件软件并标记已联系">✉</button><button type="button" class="ghost icon-action icon-action-history" data-open-mail-history="${escapeHtml(row.id)}" aria-label="邮件往来：复制邮箱并打开默认邮件软件" title="邮件往来：复制邮箱并打开默认邮件软件">⌕</button>`
           : "";
-      const outreachAction = state.activeTab === "leads" ? `<button class="ghost" data-outreach-lead="${row.id}">AI 邮件</button>` : "";
+      const outreachAction =
+        state.activeTab === "leads"
+          ? `<button type="button" class="ghost icon-action icon-action-ai" data-outreach-lead="${escapeHtml(row.id)}" aria-label="AI 开发邮件" title="AI 开发邮件">✦</button>`
+          : "";
       const selectCell = isLeadTable
         ? `<td class="lead-select-cell"><input type="checkbox" data-select-lead="${escapeHtml(row.id)}" aria-label="选择 ${escapeHtml(text(row.name) || "该达人")}" ${selectedIds.has(row.id) ? "checked" : ""} /></td>`
         : "";
       const creatorClick = state.activeTab === "creators" ? `data-open-creator="${escapeHtml(row.id)}"` : "";
-      return `<tr data-open-editor="${escapeHtml(row.id)}" ${creatorClick} title="${state.activeTab === "creators" ? "单击查看详情，双击编辑" : "双击任意资料内容可编辑"}">${selectCell}${cells}<td><div class="row-actions">${emailAction}${outreachAction}${transferAction}<button class="ghost" data-delete="${row.id}">删除</button></div></td></tr>`;
+      return `<tr data-open-editor="${escapeHtml(row.id)}" ${creatorClick} title="${state.activeTab === "creators" ? "单击查看详情，双击编辑" : "双击任意资料内容可编辑"}">${selectCell}${cells}<td><div class="row-actions">${emailAction}${outreachAction}${transferAction}<button type="button" class="ghost icon-action icon-action-delete" data-delete="${escapeHtml(row.id)}" aria-label="删除记录" title="删除记录">×</button></div></td></tr>`;
     })
     .join("");
 
@@ -1984,61 +1967,7 @@ function renderSettingsPage() {
   setEntityUiVisible(false);
   elements.matchingPage.classList.add("hidden");
   renderAiSettings();
-  renderMailHistorySettings();
   renderOptionSettings();
-}
-
-function getMailHistorySettings() {
-  return normalizeMailHistorySettings(state.data.meta?.mailHistory);
-}
-
-function syncMailHistorySettingsUi() {
-  const isCustom = elements.mailHistoryProvider.value === "custom";
-  elements.mailHistoryUrlTemplate.closest(".mail-history-template")?.classList.toggle("hidden", !isCustom);
-}
-
-function renderMailHistorySettings() {
-  const settings = getMailHistorySettings();
-  elements.mailHistoryProvider.value = settings.provider;
-  elements.mailHistoryUrlTemplate.value = settings.urlTemplate;
-  elements.mailHistoryStatus.textContent =
-    settings.provider === "none"
-      ? "未设置时，“邮件往来”会提示你选择 Gmail、Outlook 或自定义地址。"
-      : settings.provider === "custom"
-        ? "已使用自定义跳转地址。请确认地址中包含 {email}。"
-        : `已设置为 ${settings.provider === "gmail" ? "Gmail 网页版" : "Outlook 网页版"}。`;
-  syncMailHistorySettingsUi();
-}
-
-async function saveMailHistorySettings() {
-  const provider = elements.mailHistoryProvider.value;
-  const urlTemplate = text(elements.mailHistoryUrlTemplate.value);
-  if (provider === "custom" && !urlTemplate.includes("{email}")) {
-    elements.mailHistoryStatus.textContent = "自定义地址必须包含 {email}，系统才能替换为达人邮箱。";
-    elements.mailHistoryUrlTemplate.focus();
-    return;
-  }
-  state.data.meta.mailHistory = normalizeMailHistorySettings({ provider, urlTemplate });
-  try {
-    await persist();
-    renderMailHistorySettings();
-    elements.mailHistoryStatus.textContent = "邮件往来入口已保存。";
-  } catch (error) {
-    elements.mailHistoryStatus.textContent = error.message || "邮件往来入口保存失败。";
-  }
-}
-
-function buildMailHistoryUrl(email) {
-  const normalizedEmail = text(email);
-  if (!normalizedEmail) return "";
-  const settings = getMailHistorySettings();
-  const searchQuery = `from:${normalizedEmail} OR to:${normalizedEmail}`;
-  if (settings.provider === "gmail") return `https://mail.google.com/mail/u/0/#search/${encodeURIComponent(searchQuery)}`;
-  if (settings.provider === "outlook") return `https://outlook.office.com/mail/search?q=${encodeURIComponent(searchQuery)}`;
-  if (settings.provider === "custom" && settings.urlTemplate.includes("{email}")) {
-    return settings.urlTemplate.replaceAll("{email}", encodeURIComponent(normalizedEmail));
-  }
-  return "";
 }
 
 function markLeadAsContacted(leadId, channel) {
@@ -2078,20 +2007,23 @@ async function launchLeadMailClient(leadId) {
   window.location.href = `mailto:${encodeURIComponent(email)}`;
 }
 
-function openLeadMailHistory(leadId) {
+async function copyPlainText(value, promptMessage) {
+  try {
+    await navigator.clipboard.writeText(value);
+    return true;
+  } catch {
+    window.prompt(promptMessage, value);
+    return false;
+  }
+}
+
+async function openLeadMailHistory(leadId) {
   const lead = rows("leads").find((item) => item.id === leadId);
   const email = text(lead?.email);
   if (!email) return;
-  const url = buildMailHistoryUrl(email);
-  if (url) {
-    window.open(url, "_blank", "noopener,noreferrer");
-    return;
-  }
-  state.activeTab = SETTINGS_TAB.key;
-  resetEditorState();
-  render();
-  elements.mailHistoryStatus.textContent = "请先设置邮件服务；桌面邮件软件没有统一的“按邮箱打开历史对话”链接标准。";
-  elements.mailHistoryProvider.focus();
+  const copied = await copyPlainText(email, "复制以下达人邮箱后，请在邮件软件中搜索：");
+  elements.importStatus.textContent = copied ? `已复制邮箱：${email}。正在打开默认邮件软件，可直接粘贴后搜索往来。` : "请复制弹窗中的邮箱后，在邮件软件中搜索往来。";
+  window.location.href = "mailto:";
 }
 
 function setMatchingUiVisible(isVisible) {
@@ -3766,8 +3698,6 @@ function bindEvents() {
     await loadAiSettings();
     renderAiSettings();
   });
-  elements.mailHistoryProvider.addEventListener("change", syncMailHistorySettingsUi);
-  elements.saveMailHistoryBtn.addEventListener("click", saveMailHistorySettings);
   const bindKeySource = (source, keyInput) => {
     source.addEventListener("change", () => {
       const useEnvironment = source.value === "environment";

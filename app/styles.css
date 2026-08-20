@@ -683,32 +683,6 @@ h1 {
   padding: 12px;
 }
 
-.mail-history-settings {
-  display: grid;
-  gap: 10px;
-  margin-top: 14px;
-  border: 1px solid #e4eaf3;
-  border-radius: 8px;
-  background: #fbfdff;
-  padding: 12px;
-}
-
-.mail-history-controls {
-  display: grid;
-  grid-template-columns: minmax(180px, 0.7fr) minmax(0, 1.3fr);
-  gap: 10px 12px;
-  align-items: end;
-}
-
-.mail-history-template small {
-  color: var(--muted);
-  font-size: 0.76rem;
-}
-
-.mail-history-template code {
-  color: #274ba8;
-}
-
 .option-settings-head h3 {
   margin: 0 0 4px;
   font-size: 0.95rem;
@@ -2000,10 +1974,6 @@ tbody tr:hover {
     grid-template-columns: 1fr;
   }
 
-  .mail-history-controls {
-    grid-template-columns: 1fr;
-  }
-
   .form {
     grid-template-columns: 1fr;
   }
@@ -2393,6 +2363,40 @@ tbody tr[data-open-creator] {
   min-height: 26px;
   padding: 0.28rem 0.45rem;
   font-size: 0.74rem;
+}
+
+.row-actions .icon-action {
+  display: inline-flex;
+  width: 27px;
+  min-width: 27px;
+  min-height: 27px;
+  align-items: center;
+  justify-content: center;
+  padding: 0;
+  font-family: "Segoe UI Symbol", "Segoe UI", sans-serif;
+  font-size: 0.94rem;
+  font-weight: 600;
+  line-height: 1;
+}
+
+.row-actions .icon-action-mail {
+  color: #9cc7ff;
+}
+
+.row-actions .icon-action-history {
+  color: #c7d5e8;
+}
+
+.row-actions .icon-action-ai {
+  color: #9ee5cf;
+}
+
+.row-actions .icon-action-transfer {
+  color: #f0c77d;
+}
+
+.row-actions .icon-action-delete {
+  color: #f2a7af;
 }
 
 .link-cell a,
