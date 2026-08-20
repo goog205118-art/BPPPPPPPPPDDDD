@@ -1265,6 +1265,14 @@ function outreachProductPayload(product) {
 }
 
 function buildOutreachPrompt(leads, products, rules) {
+  const includeProductLinks = Boolean(rules?.includeProductLinks);
+  const targetWordLimit = Math.min(520, Math.max(190, 125 + products.length * 42));
+  const productChecklist = products
+    .map((product, index) => {
+      const item = outreachProductPayload(product);
+      return `${index + 1}. id=${item.id || "未提供"}；名称=${item.name || "未提供"}；链接=${item.product_url || "未提供"}`;
+    })
+    .join("\n");
   return `你是跨境品牌的达人合作开发专家。请只基于输入中给出的达人资料、产品资料和本次规则，为每位达人写一封自然、不模板化的英文开发邮件。
 
 达人资料：
@@ -1275,6 +1283,9 @@ ${JSON.stringify(products.map(outreachProductPayload), null, 2)}
 
 本次规则：
 ${JSON.stringify(rules || {}, null, 2)}
+
+本次用户实际勾选了 ${products.length} 个产品。以下是必须完整写入每封邮件的产品清单：
+${productChecklist}
 
 请只返回有效 JSON，不要 Markdown，不要说明文字：
 {
@@ -1293,26 +1304,64 @@ ${JSON.stringify(rules || {}, null, 2)}
 硬性规则：
 1. 每位输入达人必须只生成一份草稿，lead_id 必须与输入完全一致。正文使用英文；不要写假签名、虚构公司地址、具体报价或未经提供的折扣。
 2. 只能使用输入中提供的信息。不得声称看过某条视频、知道某个具体痛点、确认达人所在地、使用过竞品，除非输入资料明确写出。资料不足时，使用轻量且诚实的开场，例如欣赏其内容领域，而不是杜撰观看细节。
-3. 只能提及本次提供的产品；若产品卖点为空，不要发明材料、功能、兼容型号或性能。产品名称和链接仅在规则允许时使用。
+3. 本次勾选的 ${products.length} 个产品必须全部在每封正文中出现，不能只挑其中 1-2 个代表产品，不能用“以及其他产品”替代。每个产品至少准确写出输入中的产品名称一次；若产品卖点为空，不要发明材料、功能、兼容型号或性能。
 4. 合作方式要综合 followers、avg_views、engagement 判断：长尾或数据较小优先产品置换或置换 + CPS；中量级可建议置换 + CPS / 小预算可谈；头部或高播放可建议付费合作或先询价；数据不足时建议先询问合作偏好。必须尊重本次用户勾选的合作方式；不要承诺价格。
-5. 若规则中不提及合作方式，则不要在正文写明合作模式，但仍填写 recommended_cooperation 供内部参考。若不附产品链接，则正文不要出现 URL。
-6. 邮件控制在 110-180 英文词，语气遵循用户选择；不同达人使用不同的开场和产品匹配角度，避免完全相同的话术。
+5. ${includeProductLinks ? "必须把每个已选产品提供的 product_url 原样写入正文各一次。" : "规则未要求附产品链接，正文中不要出现 URL。"} 若规则中不提及合作方式，则不要在正文写明合作模式，但仍填写 recommended_cooperation 供内部参考。
+6. 邮件控制在 110-${targetWordLimit} 英文词，产品较多时优先用紧凑的产品清单或自然分句确保全部覆盖；语气遵循用户选择；不同达人使用不同的开场和产品匹配角度，避免完全相同的话术。
 7. email 字段只是寄送地址提示，不可写入邮件正文，也不可声称其来源。`;
 }
 
-function sanitizeOutreachDrafts(raw, leads) {
+function insertBeforeEmailSignoff(body, addition) {
+  const normalized = String(body || "").trim();
+  const signoff = normalized.match(/(?:^|\n)\s*(?:best|kind|warm) regards,?[\s\S]*$/i);
+  if (!signoff || signoff.index === undefined) return `${normalized}\n\n${addition}`.trim();
+  const before = normalized.slice(0, signoff.index).trimEnd();
+  const closing = normalized.slice(signoff.index).trimStart();
+  return `${before}\n\n${addition}\n\n${closing}`.trim();
+}
+
+function completeSelectedProductsInDraft(body, products, rules) {
+  const currentBody = String(body || "").trim();
+  const includeProductLinks = Boolean(rules?.includeProductLinks);
+  const missing = products.filter((product) => {
+    const name = String(product?.name || "").trim();
+    const url = String(product?.product_url || "").trim();
+    const includesName = !name || currentBody.toLowerCase().includes(name.toLowerCase());
+    const includesUrl = !includeProductLinks || !url || currentBody.includes(url);
+    return !includesName || !includesUrl;
+  });
+  if (!missing.length) return { body: currentBody, appendedCount: 0 };
+
+  const lines = missing.map((product) => {
+    const name = String(product?.name || product?.product_url || "Selected product").trim();
+    const url = String(product?.product_url || "").trim();
+    return includeProductLinks && url ? `- ${name}: ${url}` : `- ${name}`;
+  });
+  const heading = includeProductLinks
+    ? "For easy reference, here is the full selected product list:"
+    : "For this collaboration, the full selected product selection includes:";
+  return {
+    body: insertBeforeEmailSignoff(currentBody, `${heading}\n${lines.join("\n")}`),
+    appendedCount: missing.length,
+  };
+}
+
+function sanitizeOutreachDrafts(raw, leads, products, rules) {
   const allowedIds = new Set(leads.map((lead) => String(lead.id || "").trim()).filter(Boolean));
   const draftsById = new Map();
+  const completionWarnings = [];
   for (const draft of Array.isArray(raw?.drafts) ? raw.drafts : []) {
     const leadId = String(draft?.lead_id || "").trim();
     if (!allowedIds.has(leadId) || draftsById.has(leadId)) continue;
     const subject = String(draft?.subject || "").trim().slice(0, 220);
     const body = String(draft?.body || "").trim().slice(0, 5000);
     if (!subject || !body) continue;
+    const completed = completeSelectedProductsInDraft(body, products, rules);
+    if (completed.appendedCount) completionWarnings.push(`AI 漏写了 ${completed.appendedCount} 个已选产品，系统已在邮件落款前补全。`);
     draftsById.set(leadId, {
       lead_id: leadId,
       subject,
-      body,
+      body: completed.body.slice(0, 7000),
       recommended_cooperation: String(draft?.recommended_cooperation || "请人工确认合作方式").trim().slice(0, 180),
       reason: String(draft?.reason || "").trim().slice(0, 360),
     });
@@ -1320,7 +1369,7 @@ function sanitizeOutreachDrafts(raw, leads) {
   return {
     ok: true,
     drafts: leads.map((lead) => draftsById.get(String(lead.id || "").trim())).filter(Boolean),
-    warnings: Array.isArray(raw?.warnings) ? raw.warnings.map((item) => String(item).trim()).filter(Boolean).slice(0, 8) : [],
+    warnings: [...new Set([...(Array.isArray(raw?.warnings) ? raw.warnings.map((item) => String(item).trim()).filter(Boolean) : []), ...completionWarnings])].slice(0, 8),
   };
 }
 
@@ -1348,7 +1397,7 @@ async function generateOutreachWithAi(leads, products, rules) {
       { Authorization: `Bearer ${settings.apiKey}` },
     );
     if (response.statusCode >= 400) throw new Error(response.body?.error?.message || response.body?.raw || `OpenAI 兼容接口请求失败：HTTP ${response.statusCode}`);
-    return sanitizeOutreachDrafts(parseOpenAiJson(response.body), leads);
+    return sanitizeOutreachDrafts(parseOpenAiJson(response.body), leads, products, rules);
   }
 
   const response = await post(buildGeminiEndpoint(settings), {
@@ -1356,7 +1405,7 @@ async function generateOutreachWithAi(leads, products, rules) {
     generationConfig: { temperature: 0.72, responseMimeType: "application/json" },
   });
   if (response.statusCode >= 400) throw new Error(response.body?.error?.message || response.body?.raw || `Gemini API 请求失败：HTTP ${response.statusCode}`);
-  return sanitizeOutreachDrafts(parseGeminiJson(response.body), leads);
+  return sanitizeOutreachDrafts(parseGeminiJson(response.body), leads, products, rules);
 }
 
 function isSafePublicUrl(value) {

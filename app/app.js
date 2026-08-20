@@ -2444,7 +2444,7 @@ function renderOutreachModal() {
   elements.outreachHint.textContent = `已选择 ${leads.length} 位达人：${leads.map((lead) => lead.name || lead.social_url).join("、")}`;
   elements.outreachForm.innerHTML = `
     <section class="outreach-section">
-      <h3>选择产品 <span>至少 1 个</span></h3>
+      <h3>选择产品 <span>至少 1 个，可多选；邮件会包含全部已选产品</span></h3>
       ${
         products.length
           ? `<div class="outreach-product-list">${products
