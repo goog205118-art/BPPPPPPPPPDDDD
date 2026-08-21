@@ -1669,6 +1669,10 @@ function normalizeSocialIdentity(value) {
   }
 }
 
+function isTransferredLead(record) {
+  return text(record?.status) === "已转达人库";
+}
+
 function findIdentityConflicts(record, types = ["creators", "leads"]) {
   if (!["creators", "leads"].includes(state.activeTab)) return [];
   const socialUrl = normalizeSocialIdentity(record.social_url);
@@ -1677,7 +1681,11 @@ function findIdentityConflicts(record, types = ["creators", "leads"]) {
 
   return types.flatMap((type) =>
     rows(type)
-      .filter((row) => !(type === state.activeTab && row.id === record.id))
+      .filter((row) => {
+        if (type === state.activeTab && row.id === record.id) return false;
+        if (type === "leads" && isTransferredLead(row)) return false;
+        return true;
+      })
       .map((row) => {
         const matched = [];
         if (socialUrl && socialUrl === normalizeSocialIdentity(row.social_url)) matched.push("社媒地址");
