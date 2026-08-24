@@ -124,6 +124,51 @@
 
 `creator_id` 与 `resource_id` 是稳定关联字段；名称字段保留用于展示和兼容历史表格。保存时会尽量按已选 ID 或完全相同的名称自动关联。
 
+## followUps
+
+合作跟进主表，用于记录达人从初步沟通到发布、数据回收或终止的阶段进度。每条记录对应一个达人和一项具体合作，可选关联历史合作记录与产品。
+
+- `id`
+- `creator_id`（关联 `creators.id`，稳定关联）
+- `cooperation_id`（关联 `cooperations.id`，可选）
+- `brand`
+- `product_id`（关联 `products.id`，可选）
+- `stage`（初步沟通、已回复、谈合作方式 / 报价、条款确认、待寄样、运输中、已签收、待发布、已发布、数据回收、已结案、暂停跟进、未谈妥）
+- `priority`（高、中、低）
+- `cooperation_mode`（待确认、置换、付费、CPS、混合）
+- `next_action`
+- `next_follow_up_at`
+- `shipping_status`（未寄样、待揽收、运输中、已送达、异常）
+- `tracking_no`
+- `publish_due_at`
+- `publish_url`
+- `notes`
+- `createdAt`
+- `updatedAt`
+
+看板根据 `stage` 将记录分为初步沟通、合作协商、寄样、物流、待发布、发布与回收六列；已结案、暂停跟进和未谈妥会进入已结束 / 暂停区域。`creator_id`、`cooperation_id` 和 `product_id` 用于稳定追溯，展示名称仅作为冗余快照和兼容旧数据使用。
+
+## followUpEvents
+
+合作跟进事件表，用于保存从 Foxmail 导出的 `.eml` 邮件摘要，形成单条跟进的沟通时间线。
+
+- `id`
+- `follow_up_id`（关联 `followUps.id`）
+- `type`（当前为 `email`）
+- `occurred_at`
+- `direction`（`inbound` 达人来信，`outbound` 我方发信）
+- `subject`
+- `sender`
+- `recipients`
+- `excerpt`
+- `message_id`
+- `fingerprint`（无 Message-ID 时用于去重）
+- `source`（例如 `Foxmail .eml`）
+- `filename`
+- `createdAt`
+
+邮件导入只解析并保存标题、时间、收发方向、地址和正文摘要，不保存原始 `.eml` 文件、附件或完整邮件内容。相同 `Message-ID` 或相同指纹的邮件会跳过，避免重复导入。
+
 ## matches
 
 本周资源匹配任务表，用于把一次具体投放目标、推荐清单和执行结果保存为可追溯任务。

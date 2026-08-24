@@ -311,6 +311,7 @@
       </section>
 
       <section class="product-page panel hidden" id="productPage"></section>
+      <section class="followup-page panel hidden" id="followUpPage"></section>
 
       <main class="workspace">
         <section class="panel list-panel">
@@ -416,6 +417,32 @@
         <div class="creator-drawer-content" id="creatorDrawerContent"></div>
       </section>
     </aside>
+
+    <section class="mail-import-modal hidden" id="mailImportModal" aria-hidden="true">
+      <div class="mail-import-backdrop" id="mailImportBackdrop"></div>
+      <article class="mail-import-dialog" role="dialog" aria-modal="true" aria-labelledby="mailImportTitle">
+        <header class="editor-head">
+          <div>
+            <h2 id="mailImportTitle">导入 Foxmail 邮件</h2>
+            <p class="panel-hint" id="mailImportHint"></p>
+          </div>
+          <button type="button" class="close-editor" id="closeMailImportBtn" aria-label="关闭邮件导入窗口" title="关闭">×</button>
+        </header>
+        <section class="mail-import-body">
+          <label class="mail-file-drop" for="mailImportInput">
+            <strong>选择从 Foxmail 导出的 .eml 文件</strong>
+            <span>可一次选择多封；仅保存结构化信息和正文摘要，不保存附件或原始邮件文件。</span>
+            <input id="mailImportInput" type="file" accept=".eml,message/rfc822" multiple hidden />
+          </label>
+          <p class="mail-import-status" id="mailImportStatus"></p>
+          <section class="mail-import-preview" id="mailImportPreview"></section>
+        </section>
+        <div class="form-actions editor-actions">
+          <button type="button" class="primary" id="mailImportConfirmBtn" disabled>导入到邮件时间线</button>
+          <button type="button" class="ghost" id="mailImportCancelBtn">取消</button>
+        </div>
+      </article>
+    </section>
 
     <script type="module" src="./app.js"></script>
   </body>

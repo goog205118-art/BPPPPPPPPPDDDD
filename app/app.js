@@ -11,6 +11,16 @@ const API_PRODUCT_PREVIEW = "/api/products/preview";
 const STORAGE_ACCESS_PASSWORD = "resource-workbench-access-password";
 const SETTINGS_TAB = { key: "settings", title: "设置" };
 const MATCHING_TAB = { key: "matches", title: "本周资源匹配" };
+const FOLLOW_UP_STAGES = ["初步沟通", "已回复", "谈合作方式 / 报价", "条款确认", "待寄样", "运输中", "已签收", "待发布", "已发布", "数据回收", "已结案", "暂停跟进", "未谈妥"];
+const FOLLOW_UP_TERMINAL_STAGES = new Set(["已结案", "暂停跟进", "未谈妥"]);
+const FOLLOW_UP_BOARD_COLUMNS = [
+  { title: "初步沟通", stages: ["初步沟通", "已回复"] },
+  { title: "合作协商", stages: ["谈合作方式 / 报价", "条款确认"] },
+  { title: "寄样", stages: ["待寄样"] },
+  { title: "物流", stages: ["运输中", "已签收"] },
+  { title: "待发布", stages: ["待发布"] },
+  { title: "发布与回收", stages: ["已发布", "数据回收"] },
+];
 const defaultAiProfile = {
   protocol: "gemini",
   apiBaseUrl: "https://generativelanguage.googleapis.com/v1beta",
@@ -333,6 +343,31 @@ const entityConfig = {
       notes: ["备注", "说明", "notes"],
     },
   },
+  followups: {
+    title: "合作跟进",
+    formTitle: "新增合作跟进",
+    hint: "将具体合作推进、下一步动作、物流和邮件往来沉淀在同一张跟进卡中。",
+    prefix: "FU",
+    columns: [],
+    filters: [],
+    fields: [
+      { key: "creator_id", label: "关联达人", type: "reference", reference: "creators", required: true },
+      { key: "cooperation_id", label: "关联合作记录", type: "reference", reference: "cooperations" },
+      { key: "brand", label: "品牌", type: "brand", placeholder: "选择或输入品牌" },
+      { key: "product_id", label: "关联产品", type: "reference", reference: "products" },
+      { key: "stage", label: "当前阶段", type: "select", options: FOLLOW_UP_STAGES },
+      { key: "priority", label: "优先级", type: "select", options: ["高", "中", "低"] },
+      { key: "cooperation_mode", label: "合作方式", type: "select", options: ["待确认", "置换", "付费", "CPS", "混合"] },
+      { key: "next_action", label: "下一步动作", type: "text", required: true, placeholder: "例如：确认收件地址并安排寄样" },
+      { key: "next_follow_up_at", label: "下次跟进时间", type: "datetime-local" },
+      { key: "shipping_status", label: "寄样状态", type: "select", options: ["未寄样", "待揽收", "运输中", "已送达", "异常"] },
+      { key: "tracking_no", label: "物流单号", type: "text" },
+      { key: "publish_due_at", label: "预计发布时间", type: "date" },
+      { key: "publish_url", label: "发布链接", type: "text" },
+      { key: "notes", label: "内部备注", type: "textarea" },
+    ],
+    aliases: {},
+  },
 };
 
 const configurableOptionFields = {
@@ -418,6 +453,11 @@ const filterDefinitions = {
     { key: "product", label: "合作产品" },
     { key: "result", label: "复盘结论" },
   ],
+  followups: [
+    { key: "stage", label: "当前阶段" },
+    { key: "priority", label: "优先级" },
+    { key: "brand", label: "品牌" },
+  ],
 };
 
 const defaultFilterPreferences = {
@@ -426,6 +466,7 @@ const defaultFilterPreferences = {
   leads: ["brand", "country", "platform", "email"],
   products: ["brand", "country", "category", "store"],
   cooperations: ["model", "result"],
+  followups: [],
 };
 
 const pinnedFilterPreferences = {
@@ -434,6 +475,7 @@ const pinnedFilterPreferences = {
   leads: ["brand", "country"],
   products: ["brand", "country"],
   cooperations: [],
+  followups: [],
 };
 
 const timeZoneOptions = [
@@ -467,6 +509,8 @@ const emptyState = {
   products: [],
   cooperations: [],
   matches: [],
+  followUps: [],
+  followUpEvents: [],
   importHistory: [],
 };
 
@@ -490,6 +534,8 @@ const state = {
   outreach: { open: false, leadIds: [], result: null },
   globalSearch: { open: false, query: "" },
   creatorDrawer: { open: false, creatorId: null },
+  mailImport: { open: false, followUpId: null, messages: [], status: "" },
+  followUpBoardFilter: { query: "", stage: "", priority: "", overdueOnly: false },
 };
 
 let timeZoneTickerId = null;
@@ -510,6 +556,7 @@ const elements = {
   settingsPage: document.getElementById("settingsPage"),
   matchingPage: document.getElementById("matchingPage"),
   productPage: document.getElementById("productPage"),
+  followUpPage: document.getElementById("followUpPage"),
   matchForm: document.getElementById("matchForm"),
   matchFormTitle: document.getElementById("matchFormTitle"),
   matchingResults: document.getElementById("matchingResults"),
@@ -601,6 +648,15 @@ const elements = {
   creatorDrawerBackdrop: document.getElementById("creatorDrawerBackdrop"),
   creatorDrawerHead: document.getElementById("creatorDrawerHead"),
   creatorDrawerContent: document.getElementById("creatorDrawerContent"),
+  mailImportModal: document.getElementById("mailImportModal"),
+  mailImportBackdrop: document.getElementById("mailImportBackdrop"),
+  closeMailImportBtn: document.getElementById("closeMailImportBtn"),
+  mailImportTitle: document.getElementById("mailImportTitle"),
+  mailImportHint: document.getElementById("mailImportHint"),
+  mailImportInput: document.getElementById("mailImportInput"),
+  mailImportPreview: document.getElementById("mailImportPreview"),
+  mailImportStatus: document.getElementById("mailImportStatus"),
+  mailImportConfirmBtn: document.getElementById("mailImportConfirmBtn"),
 };
 
 const formSections = {
@@ -616,6 +672,7 @@ const formWideFields = {
   creators: new Set(["social_url", "email", "email_source", "audience", "content_types", "tags", "notes"]),
   leads: new Set(["social_url", "email", "email_source", "notes"]),
   products: new Set(["product_url", "image_url", "description", "tags", "notes"]),
+  followups: new Set(["next_action", "publish_url", "notes"]),
 };
 
 const formFocusFields = {
@@ -862,7 +919,15 @@ function config() {
 }
 
 function rows(type = state.activeTab) {
+  if (type === "followups") return state.data.followUps || [];
   return state.data[type] || [];
+}
+
+function referenceLabel(type, row) {
+  if (type === "cooperations") {
+    return [row.cooperation_no || row.no || row.id, row.creator_name, row.product].filter(Boolean).join(" · ");
+  }
+  return row.name || row.title || row.id;
 }
 
 function editableSnapshot(record, type = state.activeTab) {
@@ -981,6 +1046,8 @@ function ensureStateShape(nextState) {
   shaped.cooperations = Array.isArray(nextState?.cooperations)
     ? nextState.cooperations.map((row) => resolveCooperationLinks({ ...row }, shaped.creators, shaped.resources))
     : [];
+  shaped.followUps = Array.isArray(nextState?.followUps) ? nextState.followUps.map((row) => normalizeFollowUp({ ...row }, shaped.creators, shaped.cooperations)) : [];
+  shaped.followUpEvents = Array.isArray(nextState?.followUpEvents) ? nextState.followUpEvents : [];
   shaped.matches = Array.isArray(nextState?.matches)
     ? nextState.matches.map((row) => ({
         ...row,
@@ -1224,6 +1291,16 @@ function getMetrics(type, dataRows) {
     ];
   }
 
+  if (type === "followups") {
+    const now = Date.now();
+    return [
+      ["进行中跟进", dataRows.filter((row) => !FOLLOW_UP_TERMINAL_STAGES.has(text(row.stage))).length],
+      ["今天需跟进", dataRows.filter((row) => isSameLocalDay(row.next_follow_up_at, new Date())).length],
+      ["已逾期", dataRows.filter((row) => isFollowUpOverdue(row, now)).length],
+      ["已发布 / 结案", dataRows.filter((row) => ["已发布", "数据回收", "已结案"].includes(text(row.stage))).length],
+    ];
+  }
+
   return [
     ["合作记录", dataRows.length],
     ["累计订单", dataRows.reduce((sum, row) => sum + toNumber(row.orders), 0)],
@@ -1442,7 +1519,7 @@ function renderForm() {
         return [
           ...section,
           `<div class="${fieldClass}"><label for="${field.key}">${field.label}${mark}</label><select id="${field.key}" name="${field.key}" ${required}><option value="">不关联</option>${sourceRows
-            .map((row) => `<option value="${escapeHtml(row.id)}" ${selectedValue === row.id ? "selected" : ""}>${escapeHtml(row.name || row.title || row.id)}</option>`)
+            .map((row) => `<option value="${escapeHtml(row.id)}" ${selectedValue === row.id ? "selected" : ""}>${escapeHtml(referenceLabel(field.reference, row))}</option>`)
             .join("")}</select></div>`,
         ];
       }
@@ -1493,6 +1570,10 @@ function renderForm() {
     productReference.addEventListener("change", () => syncCooperationName("product"));
     bindProductReferencePicker();
   }
+  if (state.activeTab === "followups") {
+    elements.form.elements.creator_id?.addEventListener("change", syncFollowUpReferences);
+    elements.form.elements.cooperation_id?.addEventListener("change", syncFollowUpReferences);
+  }
 
   elements.form.querySelectorAll("input, select, textarea").forEach((control) => {
     control.addEventListener("input", renderAssistant);
@@ -1509,7 +1590,7 @@ function renderForm() {
       if (url && document.getElementById("creatorAiBtn")?.dataset.enrichedUrl !== url) handleCreatorAiEnrich();
     });
   }
-  elements.assistantPanel.classList.toggle("hidden", state.activeTab === "leads");
+  elements.assistantPanel.classList.toggle("hidden", ["leads", "followups"].includes(state.activeTab));
   renderIdentityCheck();
   renderAssistant();
 }
@@ -1636,7 +1717,7 @@ function renderEditor() {
 }
 
 function renderAssistant() {
-  if (state.activeTab === "leads") return;
+  if (["leads", "followups"].includes(state.activeTab)) return;
   const record = readFormRecord({ applyRecommendations: false });
   const recommendation = buildRecommendations(record, state.activeTab);
   const entries = Object.entries(recommendation.updates);
@@ -1889,6 +1970,14 @@ function renderCreatorDrawer() {
   const cooperations = creatorCooperations(creator);
   const logistics = creatorLogistics(cooperations);
   const products = creatorProducts(cooperations);
+  const creatorFollowUps = rows("followups")
+    .filter((row) => text(row.creator_id) === text(creator.id) || (text(row.creator_name) && text(row.creator_name) === text(creator.name)))
+    .sort((a, b) => new Date(b.updatedAt || 0) - new Date(a.updatedAt || 0));
+  const creatorMailEvents = creatorFollowUps
+    .flatMap((followUp) => followUpEventsFor(followUp.id))
+    .filter((event) => event.type === "email")
+    .sort((a, b) => new Date(b.occurred_at || 0) - new Date(a.occurred_at || 0))
+    .slice(0, 8);
   const profileUrl = safeExternalUrl(creator.social_url);
   elements.creatorDrawerHead.innerHTML = `
     <div class="creator-drawer-identity">
@@ -1918,6 +2007,41 @@ function renderCreatorDrawer() {
       <div><span>优先级</span>${statusBadge(creator.priority || creator.follow_up_priority, "未设置")}</div>
       <div><span>邮箱</span><strong>${creator.email ? escapeHtml(creator.email) : `<span class="muted">暂无</span>`}</strong>${creator.email_source ? `<small>来源：${escapeHtml(creator.email_source)}</small>` : ""}</div>
       <div><span>社媒地址</span>${profileUrl ? `<a class="drawer-link" href="${escapeHtml(profileUrl)}" target="_blank" rel="noopener noreferrer">${escapeHtml(creator.social_url)}</a>` : `<span class="muted">暂无</span>`}</div>
+    </section>
+    <section class="drawer-section">
+      <div class="drawer-section-head"><h3>合作跟进</h3><button type="button" class="ghost drawer-inline-action" data-drawer-new-followup="${escapeHtml(creator.id)}">新建跟进</button></div>
+      ${
+        creatorFollowUps.length
+          ? `<div class="drawer-record-list">${creatorFollowUps
+              .map(
+                (followUp) => `
+                  <article class="drawer-record">
+                    <div class="drawer-record-head"><strong>${escapeHtml(followUp.next_action || "下一步动作待补充")}</strong>${statusBadge(followUp.stage)} </div>
+                    <p>${escapeHtml([followUp.brand, followUp.cooperation_mode, followUp.next_follow_up_at ? `下次 ${formatDateTime(followUp.next_follow_up_at)}` : ""].filter(Boolean).join(" · "))}</p>
+                    <div class="drawer-record-stats"><span>物流 ${escapeHtml(followUp.shipping_status || "未寄样")}</span><span>${latestFollowUpEmail(followUp.id) ? `邮件 ${formatDateTime(latestFollowUpEmail(followUp.id).occurred_at)}` : "暂无邮件"}</span></div>
+                    <div class="drawer-record-actions"><button type="button" class="ghost" data-drawer-edit-followup="${escapeHtml(followUp.id)}">编辑</button><button type="button" class="ghost" data-drawer-import-followup="${escapeHtml(followUp.id)}">导入邮件</button></div>
+                  </article>`,
+              )
+              .join("")}</div>`
+          : `<p class="drawer-empty">暂无合作跟进，可从这里建立第一条阶段记录。</p>`
+      }
+    </section>
+    <section class="drawer-section">
+      <div class="drawer-section-head"><h3>邮件时间线</h3><span>${creatorMailEvents.length} 条</span></div>
+      ${
+        creatorMailEvents.length
+          ? `<div class="followup-timeline">${creatorMailEvents
+              .map(
+                (event) => `
+                  <article class="timeline-event">
+                    <div><strong>${escapeHtml(event.subject || "无主题")}</strong><time>${escapeHtml(formatDateTime(event.occurred_at))}</time></div>
+                    <span>${escapeHtml(event.direction === "inbound" ? "达人来信" : "我方发信")} · ${escapeHtml(event.source || "邮件导入")}</span>
+                    <p>${escapeHtml(event.excerpt || "无正文摘要")}</p>
+                  </article>`,
+              )
+              .join("")}</div>`
+          : `<p class="drawer-empty">尚未导入 Foxmail 邮件。请先在 Foxmail 中导出 .eml，再从合作跟进卡导入。</p>`
+      }
     </section>
     <section class="drawer-section">
       <div class="drawer-section-head"><h3>历史合作</h3><span>${cooperations.length} 条</span></div>
@@ -1971,6 +2095,19 @@ function renderCreatorDrawer() {
     state.activeTab = "creators";
     openEditor(id);
   });
+  elements.creatorDrawerContent.querySelector("[data-drawer-new-followup]")?.addEventListener("click", () => {
+    closeCreatorDrawer();
+    openFollowUpEditor({ creatorId: creator.id });
+  });
+  elements.creatorDrawerContent.querySelectorAll("[data-drawer-edit-followup]").forEach((button) => {
+    button.addEventListener("click", () => {
+      closeCreatorDrawer();
+      openFollowUpEditor({ id: button.dataset.drawerEditFollowup });
+    });
+  });
+  elements.creatorDrawerContent.querySelectorAll("[data-drawer-import-followup]").forEach((button) => {
+    button.addEventListener("click", () => openFollowUpMailImport(button.dataset.drawerImportFollowup));
+  });
 }
 
 function searchCatalog(query) {
@@ -1996,6 +2133,19 @@ function searchCatalog(query) {
   for (const resource of rows("resources")) {
     if (match(resource, ["id", "name", "brand", "country", "categories", "contact"])) {
       results.push({ type: "resource", label: "资源", title: resource.name || resource.id, meta: [resource.brand, normalizeCountry(resource.country), resource.categories].filter(Boolean).join(" · "), id: resource.id });
+    }
+  }
+  for (const followUp of rows("followups")) {
+    const creator = followUpCreator(followUp);
+    const searchable = [followUp.id, followUp.creator_name, creator?.name, followUp.brand, followUp.stage, followUp.priority, followUp.next_action, followUp.notes];
+    if (searchable.some((value) => text(value).toLowerCase().includes(needle))) {
+      results.push({
+        type: "followup",
+        label: "跟进",
+        title: `${creator?.name || followUp.creator_name || "未关联达人"} · ${followUp.stage || "未设置阶段"}`,
+        meta: [followUp.brand, followUp.next_action, followUp.next_follow_up_at ? formatDateTime(followUp.next_follow_up_at) : ""].filter(Boolean).join(" · "),
+        id: followUp.id,
+      });
     }
   }
   return results.slice(0, 24);
@@ -2050,6 +2200,12 @@ function handleGlobalSearchResult(result) {
     card?.scrollIntoView({ behavior: "smooth", block: "center" });
     card?.classList.add("search-target");
     window.setTimeout(() => card?.classList.remove("search-target"), 1400);
+    return;
+  }
+  if (type === "followup") {
+    state.activeTab = "followups";
+    state.followUpBoardFilter = { query: id, stage: "", priority: "", overdueOnly: false };
+    render();
     return;
   }
   state.activeTab = type === "resource" ? "resources" : "cooperations";
@@ -2162,7 +2318,12 @@ function renderTable(visibleRows) {
 
   elements.tableBody.querySelectorAll("[data-delete]").forEach((button) => {
     button.addEventListener("click", async () => {
-      state.data[state.activeTab] = rows().filter((row) => row.id !== button.dataset.delete);
+      if (state.activeTab === "followups") {
+        state.data.followUps = rows("followups").filter((row) => row.id !== button.dataset.delete);
+        state.data.followUpEvents = (state.data.followUpEvents || []).filter((event) => event.follow_up_id !== button.dataset.delete);
+      } else {
+        state.data[state.activeTab] = rows().filter((row) => row.id !== button.dataset.delete);
+      }
       state.selectedLeadIds.delete(button.dataset.delete);
       if (state.editingId === button.dataset.delete) state.editingId = null;
       await persist();
@@ -2177,6 +2338,7 @@ function setEntityUiVisible(isVisible) {
   elements.settingsPage.classList.toggle("hidden", isVisible);
   elements.matchingPage.classList.toggle("hidden", isVisible);
   elements.productPage.classList.add("hidden");
+  elements.followUpPage.classList.add("hidden");
 }
 
 function renderOptionSettings() {
@@ -2252,6 +2414,7 @@ async function removeCustomOption(fieldKey, value) {
 function renderSettingsPage() {
   setEntityUiVisible(false);
   elements.matchingPage.classList.add("hidden");
+  elements.followUpPage.classList.add("hidden");
   renderAiSettings();
   renderTimeZoneSettings();
   renderOptionSettings();
@@ -2384,6 +2547,8 @@ function setMatchingUiVisible(isVisible) {
   elements.summary.classList.toggle("hidden", isVisible);
   elements.workspace.classList.toggle("hidden", isVisible);
   elements.settingsPage.classList.add("hidden");
+  elements.productPage.classList.add("hidden");
+  elements.followUpPage.classList.add("hidden");
   elements.matchingPage.classList.toggle("hidden", !isVisible);
 }
 
@@ -2660,6 +2825,451 @@ async function handleMatchSubmit(event) {
   renderMatchingPage();
 }
 
+function isSameLocalDay(value, referenceDate = new Date()) {
+  if (!value) return false;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return false;
+  return date.toLocaleDateString("zh-CN") === referenceDate.toLocaleDateString("zh-CN");
+}
+
+function isFollowUpOverdue(row, now = Date.now()) {
+  if (FOLLOW_UP_TERMINAL_STAGES.has(text(row.stage)) || !text(row.next_follow_up_at)) return false;
+  const time = new Date(row.next_follow_up_at).getTime();
+  return Number.isFinite(time) && time < now;
+}
+
+function followUpCreator(row) {
+  return rows("creators").find((creator) => text(creator.id) === text(row.creator_id)) ||
+    rows("creators").find((creator) => text(creator.name) === text(row.creator_name));
+}
+
+function followUpProduct(row) {
+  return rows("products").find((product) => text(product.id) === text(row.product_id));
+}
+
+function followUpEventsFor(followUpId) {
+  return (state.data.followUpEvents || [])
+    .filter((event) => text(event.follow_up_id) === text(followUpId))
+    .sort((a, b) => new Date(b.occurred_at || b.createdAt || 0) - new Date(a.occurred_at || a.createdAt || 0));
+}
+
+function latestFollowUpEmail(followUpId) {
+  return followUpEventsFor(followUpId).find((event) => event.type === "email");
+}
+
+function decodeBytes(bytes, charset = "utf-8") {
+  const normalized = String(charset || "utf-8").toLowerCase().replace(/["']/g, "");
+  const aliases = { gb2312: "gb18030", gbk: "gb18030", "iso-8859-1": "windows-1252", latin1: "windows-1252" };
+  try {
+    return new TextDecoder(aliases[normalized] || normalized).decode(bytes);
+  } catch {
+    return new TextDecoder("utf-8").decode(bytes);
+  }
+}
+
+function base64ToBytes(value) {
+  const normalized = text(value).replace(/\s+/g, "");
+  if (!normalized) return new Uint8Array();
+  try {
+    const binary = atob(normalized);
+    return Uint8Array.from(binary, (char) => char.charCodeAt(0));
+  } catch {
+    return new Uint8Array();
+  }
+}
+
+function binaryStringToBytes(value) {
+  return Uint8Array.from(String(value || ""), (char) => char.charCodeAt(0) & 0xff);
+}
+
+async function readMailSource(file) {
+  const bytes = new Uint8Array(await file.arrayBuffer());
+  const chunkSize = 0x8000;
+  let output = "";
+  for (let offset = 0; offset < bytes.length; offset += chunkSize) {
+    output += String.fromCharCode(...bytes.subarray(offset, offset + chunkSize));
+  }
+  return output;
+}
+
+function quotedPrintableToBytes(value) {
+  const normalized = String(value || "").replace(/=(?:\r?\n)/g, "");
+  const bytes = [];
+  for (let index = 0; index < normalized.length; index += 1) {
+    if (normalized[index] === "=" && /^[0-9a-f]{2}$/i.test(normalized.slice(index + 1, index + 3))) {
+      bytes.push(Number.parseInt(normalized.slice(index + 1, index + 3), 16));
+      index += 2;
+    } else {
+      const code = normalized.charCodeAt(index);
+      bytes.push(code <= 255 ? code : 63);
+    }
+  }
+  return Uint8Array.from(bytes);
+}
+
+function unfoldMimeHeaders(raw) {
+  const output = {};
+  const lines = String(raw || "").split(/\r?\n/);
+  let current = "";
+  for (const line of lines) {
+    if (/^[ \t]/.test(line) && current) {
+      output[current] += ` ${line.trim()}`;
+      continue;
+    }
+    const separator = line.indexOf(":");
+    if (separator <= 0) continue;
+    current = line.slice(0, separator).trim().toLowerCase();
+    output[current] = line.slice(separator + 1).trim();
+  }
+  return output;
+}
+
+function decodeMimeHeader(value) {
+  return text(value).replace(/=\?([^?]+)\?([bqBQ])\?([^?]*)\?=/g, (_match, charset, encoding, payload) => {
+    if (String(encoding).toLowerCase() === "b") return decodeBytes(base64ToBytes(payload), charset);
+    return decodeBytes(quotedPrintableToBytes(String(payload).replace(/_/g, " ")), charset);
+  });
+}
+
+function splitMimeEntity(raw) {
+  const source = String(raw || "");
+  const separatorMatch = source.match(/\r?\n\r?\n/);
+  if (!separatorMatch) return { headers: {}, body: source };
+  const separatorIndex = separatorMatch.index;
+  return { headers: unfoldMimeHeaders(source.slice(0, separatorIndex)), body: source.slice(separatorIndex + separatorMatch[0].length) };
+}
+
+function mimeParameter(value, key) {
+  const match = String(value || "").match(new RegExp(`${key}\\s*=\\s*(?:"([^"]+)"|([^;\\s]+))`, "i"));
+  return match ? match[1] || match[2] || "" : "";
+}
+
+function decodeMimeBody(body, headers) {
+  const transfer = text(headers["content-transfer-encoding"]).toLowerCase();
+  const charset = mimeParameter(headers["content-type"], "charset") || "utf-8";
+  if (transfer === "base64") return decodeBytes(base64ToBytes(body), charset);
+  if (transfer === "quoted-printable") return decodeBytes(quotedPrintableToBytes(body), charset);
+  return decodeBytes(binaryStringToBytes(body), charset);
+}
+
+function htmlToText(value) {
+  const source = String(value || "");
+  if (!source) return "";
+  try {
+    const documentNode = new DOMParser().parseFromString(source, "text/html");
+    documentNode.querySelectorAll("script,style,noscript").forEach((node) => node.remove());
+    return documentNode.body?.textContent || documentNode.documentElement?.textContent || "";
+  } catch {
+    return source.replace(/<[^>]+>/g, " ");
+  }
+}
+
+function parseMimePart(raw, output = { plain: [], html: [] }) {
+  const { headers, body } = splitMimeEntity(raw);
+  const contentType = text(headers["content-type"]).toLowerCase();
+  if (contentType.startsWith("multipart/")) {
+    const boundary = mimeParameter(headers["content-type"], "boundary");
+    if (!boundary) return output;
+    body.split(`--${boundary}`).forEach((part) => {
+      if (!part || part.trim() === "--") return;
+      parseMimePart(part.replace(/^\r?\n/, "").replace(/\r?\n--$/, ""), output);
+    });
+    return output;
+  }
+  const decoded = decodeMimeBody(body, headers);
+  if (contentType.startsWith("text/html")) output.html.push(decoded);
+  else if (contentType.startsWith("text/plain") || !contentType) output.plain.push(decoded);
+  return output;
+}
+
+function cleanMailExcerpt(value) {
+  return String(value || "")
+    .replace(/\r/g, "")
+    .split("\n")
+    .filter((line) => !/^\s*(>|在.+写道：|On .+wrote:)/i.test(line))
+    .join("\n")
+    .replace(/[ \t]+\n/g, "\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+    .slice(0, 1600);
+}
+
+function firstEmail(value) {
+  return decodeMimeHeader(value).match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0]?.toLowerCase() || "";
+}
+
+function addressDisplay(value) {
+  return decodeMimeHeader(value).replace(/\s+/g, " ").trim();
+}
+
+function simpleMailHash(value) {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+async function parseEmlFile(file, followUpId, creator) {
+  const raw = await readMailSource(file);
+  const { headers } = splitMimeEntity(raw);
+  const parts = parseMimePart(raw);
+  const plainText = parts.plain.join("\n\n").trim();
+  const htmlText = parts.html.map(htmlToText).join("\n\n").trim();
+  const excerpt = cleanMailExcerpt(plainText || htmlText);
+  const sender = addressDisplay(headers.from);
+  const recipients = [headers.to, headers.cc].map(addressDisplay).filter(Boolean).join("；");
+  const senderEmail = firstEmail(sender);
+  const creatorEmail = firstEmail(creator?.email);
+  const occurred = new Date(headers.date || file.lastModified || Date.now());
+  const occurredAt = Number.isNaN(occurred.getTime()) ? new Date(file.lastModified || Date.now()).toISOString() : occurred.toISOString();
+  const subject = decodeMimeHeader(headers.subject || file.name.replace(/\.eml$/i, ""));
+  const messageId = decodeMimeHeader(headers["message-id"] || "").replace(/[<>]/g, "").trim();
+  const fingerprintSource = [occurredAt, sender, recipients, subject, excerpt].join("|").toLowerCase();
+  return {
+    id: uid("EM"),
+    follow_up_id: followUpId,
+    type: "email",
+    occurred_at: occurredAt,
+    direction: creatorEmail && senderEmail && creatorEmail === senderEmail ? "inbound" : "outbound",
+    subject,
+    sender,
+    recipients,
+    excerpt,
+    message_id: messageId,
+    fingerprint: simpleMailHash(fingerprintSource),
+    source: "Foxmail .eml",
+    filename: file.name,
+    createdAt: new Date().toISOString(),
+  };
+}
+
+function openFollowUpMailImport(followUpId) {
+  const followUp = rows("followups").find((row) => row.id === followUpId);
+  if (!followUp) return;
+  const creator = followUpCreator(followUp);
+  state.mailImport = { open: true, followUpId, messages: [], status: "" };
+  elements.mailImportTitle.textContent = "导入 Foxmail 邮件";
+  elements.mailImportHint.textContent = `${creator?.name || followUp.creator_name || "该达人"} · 选择从官邮 / Foxmail 导出的 .eml 文件，导入后只保留邮件摘要。`;
+  elements.mailImportInput.value = "";
+  elements.mailImportStatus.textContent = "尚未选择文件。";
+  elements.mailImportPreview.innerHTML = "";
+  elements.mailImportConfirmBtn.disabled = true;
+  elements.mailImportModal.classList.remove("hidden");
+  elements.mailImportModal.setAttribute("aria-hidden", "false");
+}
+
+function closeMailImport() {
+  state.mailImport = { open: false, followUpId: null, messages: [], status: "" };
+  elements.mailImportModal.classList.add("hidden");
+  elements.mailImportModal.setAttribute("aria-hidden", "true");
+  elements.mailImportInput.value = "";
+  elements.mailImportPreview.innerHTML = "";
+  elements.mailImportStatus.textContent = "";
+  elements.mailImportConfirmBtn.disabled = true;
+}
+
+async function previewMailImport(files) {
+  const followUp = rows("followups").find((row) => row.id === state.mailImport.followUpId);
+  if (!followUp || !files.length) return;
+  const creator = followUpCreator(followUp);
+  elements.mailImportStatus.textContent = `正在解析 ${files.length} 封邮件...`;
+  try {
+    const messages = [];
+    for (const file of files) messages.push(await parseEmlFile(file, followUp.id, creator));
+    state.mailImport.messages = messages;
+    const existingIds = new Set(followUpEventsFor(followUp.id).flatMap((event) => [text(event.message_id), text(event.fingerprint)]).filter(Boolean));
+    const newCount = messages.filter((message) => !existingIds.has(message.message_id) && !existingIds.has(message.fingerprint)).length;
+    elements.mailImportStatus.textContent = `已解析 ${messages.length} 封，预计新增 ${newCount} 封；重复邮件将在确认时自动跳过。`;
+    elements.mailImportPreview.innerHTML = messages
+      .map((message) => {
+        const duplicate = existingIds.has(message.message_id) || existingIds.has(message.fingerprint);
+        return `<article class="mail-import-row ${duplicate ? "is-duplicate" : ""}"><div><strong>${escapeHtml(message.subject || "无主题")}</strong><span>${escapeHtml([message.direction === "inbound" ? "达人来信" : "我方发信", message.sender || "未知发件人", formatDateTime(message.occurred_at)].join(" · "))}</span></div><p>${escapeHtml(message.excerpt || "没有可提取的正文摘要")}</p>${duplicate ? `<small>疑似已导入，将跳过</small>` : ""}</article>`;
+      })
+      .join("");
+    elements.mailImportConfirmBtn.disabled = !messages.length;
+  } catch (error) {
+    state.mailImport.messages = [];
+    elements.mailImportStatus.textContent = error.message || "邮件解析失败，请确认文件是 .eml 格式。";
+    elements.mailImportPreview.innerHTML = "";
+    elements.mailImportConfirmBtn.disabled = true;
+  }
+}
+
+async function confirmMailImport() {
+  const followUp = rows("followups").find((row) => row.id === state.mailImport.followUpId);
+  if (!followUp || !state.mailImport.messages.length) return;
+  const existingEvents = state.data.followUpEvents || [];
+  const knownKeys = new Set(existingEvents.flatMap((event) => [text(event.message_id), text(event.fingerprint)]).filter(Boolean));
+  const additions = state.mailImport.messages.filter((message) => {
+    const keys = [text(message.message_id), text(message.fingerprint)].filter(Boolean);
+    if (keys.some((key) => knownKeys.has(key))) return false;
+    keys.forEach((key) => knownKeys.add(key));
+    return true;
+  });
+  state.data.followUpEvents = [...additions, ...existingEvents];
+  const followUpIndex = state.data.followUps.findIndex((row) => row.id === followUp.id);
+  if (followUpIndex >= 0) {
+    state.data.followUps[followUpIndex] = {
+      ...state.data.followUps[followUpIndex],
+      last_email_at: additions.map((item) => item.occurred_at).sort().at(-1) || state.data.followUps[followUpIndex].last_email_at || "",
+      updatedAt: new Date().toISOString(),
+    };
+  }
+  try {
+    await withActivity("正在导入邮件", `正在写入 ${additions.length} 封邮件摘要...`, persist);
+    closeMailImport();
+    renderFollowUpPage();
+    renderCreatorDrawer();
+  } catch (error) {
+    elements.mailImportStatus.textContent = error.message || "邮件导入保存失败。";
+  }
+}
+
+function followUpCardMarkup(row) {
+  const creator = followUpCreator(row);
+  const product = followUpProduct(row);
+  const latestMail = latestFollowUpEmail(row.id);
+  const overdue = isFollowUpOverdue(row);
+  const creatorLabel = creator?.name || row.creator_name || "未关联达人";
+  const meta = [row.brand, product?.name, row.cooperation_mode].filter(Boolean).join(" · ");
+  const followUpAt = row.next_follow_up_at ? formatDateTime(row.next_follow_up_at) : "未设置";
+  return `
+    <article class="followup-card ${overdue ? "is-overdue" : ""}" data-followup-card="${escapeHtml(row.id)}">
+      <div class="followup-card-head">
+        <div class="followup-card-creator">
+          <span class="creator-avatar small">${escapeHtml((creatorLabel || "达").slice(0, 1).toUpperCase())}</span>
+          <div><strong>${escapeHtml(creatorLabel)}</strong><small>${escapeHtml([creator?.platform, normalizeCountry(creator?.country)].filter(Boolean).join(" · ") || "达人信息待补充")}</small></div>
+        </div>
+        <button type="button" class="icon-button" data-followup-edit="${escapeHtml(row.id)}" aria-label="编辑合作跟进" title="编辑合作跟进">✎</button>
+      </div>
+      <div class="followup-card-badges">${statusBadge(row.stage)}${statusBadge(row.priority, "中")}</div>
+      <p class="followup-card-meta">${escapeHtml(meta || "品牌 / 产品待补充")}</p>
+      <div class="followup-card-next">
+        <span>下一步</span><strong>${escapeHtml(row.next_action || "待补充动作")}</strong>
+        <time class="${overdue ? "is-overdue" : ""}">${overdue ? "已逾期 · " : ""}${escapeHtml(followUpAt)}</time>
+      </div>
+      <div class="followup-card-foot">
+        <span>${latestMail ? `最近邮件 ${escapeHtml(formatDateTime(latestMail.occurred_at))}` : "暂无邮件记录"}</span>
+        <div class="followup-card-actions">
+          <button type="button" class="ghost icon-action" data-followup-mail="${escapeHtml(row.id)}" aria-label="导入 Foxmail 邮件" title="导入 Foxmail 邮件">✉</button>
+          <button type="button" class="ghost icon-action" data-followup-delete="${escapeHtml(row.id)}" aria-label="删除合作跟进" title="删除合作跟进">×</button>
+        </div>
+      </div>
+    </article>`;
+}
+
+function openFollowUpEditor({ id = null, creatorId = "", cooperationId = "" } = {}) {
+  state.activeTab = "followups";
+  resetEditorState();
+  const existing = id ? rows("followups").find((row) => row.id === id) : null;
+  const draft = existing ? clone(existing) : defaultRecord("followups");
+  if (!existing) {
+    draft.creator_id = creatorId;
+    draft.cooperation_id = cooperationId;
+    resolveFollowUpLinks(draft);
+    draft.priority = "中";
+    draft.cooperation_mode = "待确认";
+    draft.next_action = "";
+  }
+  state.editingId = existing?.id || null;
+  state.editorDraft = draft;
+  state.editorBaseline = editableSnapshot(draft, "followups");
+  state.editorOpen = true;
+  render();
+}
+
+function renderFollowUpPage() {
+  setEntityUiVisible(false);
+  elements.settingsPage.classList.add("hidden");
+  elements.matchingPage.classList.add("hidden");
+  elements.productPage.classList.add("hidden");
+  elements.followUpPage.classList.remove("hidden");
+
+  const allRows = rows("followups").slice().sort((a, b) => new Date(a.next_follow_up_at || "2999-01-01") - new Date(b.next_follow_up_at || "2999-01-01"));
+  const boardFilter = state.followUpBoardFilter;
+  const query = text(boardFilter.query).toLowerCase();
+  const visibleRows = allRows.filter((row) => {
+    const creator = followUpCreator(row);
+    const haystack = [row.id, row.creator_name, creator?.name, row.brand, row.stage, row.priority, row.next_action, row.notes].map(text).join(" ").toLowerCase();
+    if (query && !haystack.includes(query)) return false;
+    if (boardFilter.stage && text(row.stage) !== boardFilter.stage) return false;
+    if (boardFilter.priority && text(row.priority) !== boardFilter.priority) return false;
+    if (boardFilter.overdueOnly && !isFollowUpOverdue(row)) return false;
+    return true;
+  });
+  const activeRows = visibleRows.filter((row) => !FOLLOW_UP_TERMINAL_STAGES.has(text(row.stage)));
+  const terminalRows = visibleRows.filter((row) => FOLLOW_UP_TERMINAL_STAGES.has(text(row.stage)));
+  const metrics = getMetrics("followups", allRows);
+  const todayCount = allRows.filter((row) => isSameLocalDay(row.next_follow_up_at, new Date())).length;
+  const overdueCount = allRows.filter((row) => isFollowUpOverdue(row)).length;
+
+  elements.followUpPage.innerHTML = `
+    <header class="followup-head">
+      <div>
+        <span class="eyebrow">PIPELINE</span>
+        <h2>合作跟进</h2>
+        <p class="panel-hint">按合作阶段集中查看沟通、寄样、物流和发布回收进度。Foxmail 邮件可通过导出 .eml 导入时间线。</p>
+      </div>
+      <div class="followup-head-actions">
+        <button type="button" class="ghost" data-followup-filter-overdue title="只看逾期跟进">${overdueCount ? `逾期 ${overdueCount}` : "逾期"}</button>
+        <button type="button" class="primary" data-followup-new>新增跟进</button>
+      </div>
+    </header>
+    <div class="followup-metrics">
+      ${metrics.map(([label, value]) => `<div class="followup-metric"><span>${escapeHtml(label)}</span><strong>${escapeHtml(value)}</strong></div>`).join("")}
+    </div>
+    <div class="followup-toolbar">
+      <input type="search" data-followup-filter="query" value="${escapeHtml(boardFilter.query)}" placeholder="搜索达人、品牌、动作、备注..." />
+      <select data-followup-filter="stage"><option value="">全部阶段</option>${FOLLOW_UP_STAGES.map((stage) => `<option value="${escapeHtml(stage)}" ${boardFilter.stage === stage ? "selected" : ""}>${escapeHtml(stage)}</option>`).join("")}</select>
+      <select data-followup-filter="priority"><option value="">全部优先级</option>${["高", "中", "低"].map((priority) => `<option value="${priority}" ${boardFilter.priority === priority ? "selected" : ""}>${priority}优先级</option>`).join("")}</select>
+      <span class="followup-toolbar-count">当前显示 ${visibleRows.length} / ${allRows.length} 条</span>
+    </div>
+    <div class="followup-board">
+      ${FOLLOW_UP_BOARD_COLUMNS.map((column) => {
+        const columnRows = activeRows.filter((row) => column.stages.includes(text(row.stage)));
+        return `
+          <section class="followup-column">
+            <header class="followup-column-head"><strong>${escapeHtml(column.title)}</strong><span>${columnRows.length}</span></header>
+            <div class="followup-column-body">${columnRows.length ? columnRows.map(followUpCardMarkup).join("") : `<p class="followup-column-empty">暂无跟进</p>`}</div>
+          </section>`;
+      }).join("")}
+    </div>
+    <section class="followup-closed">
+      <header class="followup-column-head"><strong>已结束 / 暂停</strong><span>${terminalRows.length}</span></header>
+      <div class="followup-closed-list">${terminalRows.length ? terminalRows.map(followUpCardMarkup).join("") : `<p class="followup-column-empty">暂无已结束记录</p>`}</div>
+    </section>
+    ${!allRows.length ? `<section class="followup-empty"><strong>还没有合作跟进</strong><p>把已进入达人库的达人按实际进度建立跟进记录，之后就能在看板上持续追踪。</p><button type="button" class="primary" data-followup-new>新增第一条跟进</button></section>` : ""}
+  `;
+
+  elements.followUpPage.querySelectorAll("[data-followup-new]").forEach((button) => button.addEventListener("click", () => openFollowUpEditor()));
+  elements.followUpPage.querySelectorAll("[data-followup-edit]").forEach((button) => button.addEventListener("click", () => openFollowUpEditor({ id: button.dataset.followupEdit })));
+  elements.followUpPage.querySelectorAll("[data-followup-mail]").forEach((button) => button.addEventListener("click", () => openFollowUpMailImport(button.dataset.followupMail)));
+  elements.followUpPage.querySelectorAll("[data-followup-delete]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const followUp = rows("followups").find((row) => row.id === button.dataset.followupDelete);
+      if (!followUp || !window.confirm(`确认删除「${followUp.creator_name || "该达人"}」的合作跟进？`)) return;
+      state.data.followUps = rows("followups").filter((row) => row.id !== followUp.id);
+      state.data.followUpEvents = (state.data.followUpEvents || []).filter((event) => event.follow_up_id !== followUp.id);
+      await persist();
+      renderFollowUpPage();
+      renderCreatorDrawer();
+    });
+  });
+  elements.followUpPage.querySelectorAll("[data-followup-filter]").forEach((control) => {
+    const eventName = control.tagName === "INPUT" ? "input" : "change";
+    control.addEventListener(eventName, () => {
+      state.followUpBoardFilter[control.dataset.followupFilter] = control.value;
+      renderFollowUpPage();
+    });
+  });
+  elements.followUpPage.querySelector("[data-followup-filter-overdue]")?.addEventListener("click", () => {
+    state.followUpBoardFilter.overdueOnly = !state.followUpBoardFilter.overdueOnly;
+    renderFollowUpPage();
+  });
+}
+
 function productFilterOptions(fieldKey) {
   return getOptionValues("products", fieldKey);
 }
@@ -2687,6 +3297,7 @@ function renderProductPage() {
   elements.workspace.classList.add("hidden");
   elements.settingsPage.classList.add("hidden");
   elements.matchingPage.classList.add("hidden");
+  elements.followUpPage.classList.add("hidden");
   elements.productPage.classList.remove("hidden");
 
   const products = filteredProducts();
@@ -3128,6 +3739,12 @@ function render() {
     renderProductPage();
     return;
   }
+  if (state.activeTab === "followups") {
+    elements.outreachBtn.classList.add("hidden");
+    renderFollowUpPage();
+    renderEditor();
+    return;
+  }
   renderEntityPage();
 }
 
@@ -3160,6 +3777,59 @@ function resolveCooperationLinks(record, creators = rows("creators"), resources 
     record.resource_name = text(record.resource_name);
   }
   return record;
+}
+
+function normalizeFollowUp(record, creators = rows("creators"), cooperations = rows("cooperations")) {
+  const creator = creators.find((row) => row.id === text(record.creator_id)) || creators.find((row) => text(row.name) === text(record.creator_name));
+  const cooperation = cooperations.find((row) => row.id === text(record.cooperation_id));
+  const now = new Date().toISOString();
+  const normalized = {
+    ...record,
+    createdAt: record.createdAt || now,
+    updatedAt: record.updatedAt || now,
+    stage: FOLLOW_UP_STAGES.includes(text(record.stage)) ? text(record.stage) : "初步沟通",
+    priority: ["高", "中", "低"].includes(text(record.priority)) ? text(record.priority) : "中",
+    cooperation_mode: ["待确认", "置换", "付费", "CPS", "混合"].includes(text(record.cooperation_mode)) ? text(record.cooperation_mode) : "待确认",
+    shipping_status: ["未寄样", "待揽收", "运输中", "已送达", "异常"].includes(text(record.shipping_status)) ? text(record.shipping_status) : "未寄样",
+  };
+  if (creator) {
+    normalized.creator_id = creator.id;
+    normalized.creator_name = creator.name;
+    if (!text(normalized.brand)) normalized.brand = text(creator.brand);
+  } else {
+    normalized.creator_id = text(normalized.creator_id);
+    normalized.creator_name = text(normalized.creator_name);
+  }
+  if (cooperation) {
+    normalized.cooperation_id = cooperation.id;
+    if (!text(normalized.product_id)) normalized.product_id = text(cooperation.product_id);
+    if (normalized.cooperation_mode === "待确认" && text(cooperation.model)) normalized.cooperation_mode = text(cooperation.model);
+    if (!text(normalized.tracking_no)) normalized.tracking_no = text(cooperation.tracking_no);
+    if (normalized.shipping_status === "未寄样" && text(cooperation.shipping_status)) normalized.shipping_status = text(cooperation.shipping_status);
+  } else {
+    normalized.cooperation_id = text(normalized.cooperation_id);
+  }
+  return normalized;
+}
+
+function resolveFollowUpLinks(record) {
+  return normalizeFollowUp(record, rows("creators"), rows("cooperations"));
+}
+
+function syncFollowUpReferences() {
+  if (state.activeTab !== "followups") return;
+  const creator = rows("creators").find((row) => row.id === text(elements.form.elements.creator_id?.value));
+  const cooperation = rows("cooperations").find((row) => row.id === text(elements.form.elements.cooperation_id?.value));
+  if (creator && !text(elements.form.elements.brand?.value)) elements.form.elements.brand.value = creator.brand || "";
+  if (cooperation) {
+    if (creator && cooperation.creator_id && cooperation.creator_id !== creator.id) {
+      elements.editorStatus.textContent = "提示：所选合作记录关联的是另一位达人，请确认关联关系。";
+    }
+    if (!text(elements.form.elements.product_id?.value) && elements.form.elements.product_id) elements.form.elements.product_id.value = cooperation.product_id || "";
+    if (elements.form.elements.cooperation_mode?.value === "待确认" && cooperation.model) elements.form.elements.cooperation_mode.value = cooperation.model;
+    if (!text(elements.form.elements.tracking_no?.value) && cooperation.tracking_no) elements.form.elements.tracking_no.value = cooperation.tracking_no;
+    if (elements.form.elements.shipping_status?.value === "未寄样" && cooperation.shipping_status) elements.form.elements.shipping_status.value = cooperation.shipping_status;
+  }
 }
 
 function syncCooperationName(kind) {
@@ -3278,6 +3948,7 @@ function readFormRecord(options = {}) {
   }
 
   if (state.activeTab === "cooperations") resolveCooperationLinks(record);
+  if (state.activeTab === "followups") resolveFollowUpLinks(record);
   record.updatedAt = new Date().toISOString();
   if (shouldApply) applyRecommendations(record, state.activeTab);
   return record;
@@ -3337,9 +4008,26 @@ async function commitEditor({ close = false, showError = false } = {}) {
   }
 
   const list = rows();
+  const previous = state.editingId ? list.find((row) => row.id === state.editingId) : null;
   const index = list.findIndex((row) => row.id === record.id);
   if (index >= 0) list[index] = record;
   else list.unshift(record);
+  if (state.activeTab === "followups") {
+    state.data.followUps = list;
+    if (previous && text(previous.stage) !== text(record.stage)) {
+      state.data.followUpEvents.unshift({
+        id: uid("EV"),
+        follow_up_id: record.id,
+        type: "stage",
+        occurred_at: new Date().toISOString(),
+        direction: "internal",
+        subject: `阶段更新为：${record.stage}`,
+        excerpt: `合作跟进阶段从“${previous.stage || "未填写"}”更新为“${record.stage}”。`,
+        source: "工作台",
+        createdAt: new Date().toISOString(),
+      });
+    }
+  }
 
   state.editorSaving = true;
   const title = state.editingId ? "正在保存资料" : "正在新增资料";
@@ -3803,6 +4491,8 @@ function snapshotBusinessState() {
     leads: clone(state.data.leads || []),
     cooperations: clone(state.data.cooperations || []),
     matches: clone(state.data.matches || []),
+    followUps: clone(state.data.followUps || []),
+    followUpEvents: clone(state.data.followUpEvents || []),
   };
 }
 
@@ -3833,6 +4523,8 @@ async function rollbackImport(historyId) {
   state.data.leads = Array.isArray(snapshot?.leads) ? snapshot.leads : [];
   state.data.cooperations = Array.isArray(snapshot?.cooperations) ? snapshot.cooperations : [];
   state.data.matches = Array.isArray(snapshot?.matches) ? snapshot.matches : state.data.matches;
+  state.data.followUps = Array.isArray(snapshot?.followUps) ? snapshot.followUps : state.data.followUps;
+  state.data.followUpEvents = Array.isArray(snapshot?.followUpEvents) ? snapshot.followUpEvents : state.data.followUpEvents;
   state.data.meta = { version: 1, ...(snapshot?.meta || {}), updatedAt: new Date().toISOString() };
   state.data.importHistory = history.filter((entry) => entry.id !== historyId);
   resetEditorState();
@@ -4117,6 +4809,16 @@ function bindEvents() {
   });
   elements.closeOutreachBtn.addEventListener("click", closeOutreachModal);
   elements.outreachForm.addEventListener("submit", submitOutreach);
+  elements.mailImportInput.addEventListener("change", async (event) => {
+    const files = [...(event.target.files || [])];
+    await previewMailImport(files);
+  });
+  elements.mailImportConfirmBtn.addEventListener("click", confirmMailImport);
+  elements.closeMailImportBtn.addEventListener("click", closeMailImport);
+  document.getElementById("mailImportCancelBtn")?.addEventListener("click", closeMailImport);
+  elements.mailImportBackdrop.addEventListener("click", (event) => {
+    if (event.target === elements.mailImportBackdrop) closeMailImport();
+  });
   elements.outreachResult.addEventListener("click", (event) => {
     const copyButton = event.target.closest("[data-copy-outreach]");
     if (copyButton) {
@@ -4179,6 +4881,11 @@ function bindEvents() {
     if (state.creatorDrawer.open) {
       event.preventDefault();
       closeCreatorDrawer();
+      return;
+    }
+    if (state.mailImport.open) {
+      event.preventDefault();
+      closeMailImport();
     }
   });
   elements.searchInput.addEventListener("input", () => {

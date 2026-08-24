@@ -15,6 +15,8 @@ const defaultState = {
   products: [],
   cooperations: [],
   matches: [],
+  followUps: [],
+  followUpEvents: [],
   importHistory: [],
 };
 
@@ -110,6 +112,20 @@ function normalizeBusinessState(rawState) {
         selected_resource_ids: Array.isArray(row.selected_resource_ids) ? row.selected_resource_ids : [],
       }))
     : [];
+  const followUps = Array.isArray(state.followUps)
+    ? state.followUps.map((row) => {
+        const creator = creators.find((item) => item.id === row.creator_id) || creatorByName.get(String(row.creator_name || "").trim());
+        const cooperation = cooperations.find((item) => item.id === row.cooperation_id);
+        return {
+          ...row,
+          creator_id: creator ? creator.id : String(row.creator_id || "").trim(),
+          creator_name: creator ? creator.name : String(row.creator_name || "").trim(),
+          cooperation_id: cooperation ? cooperation.id : String(row.cooperation_id || "").trim(),
+          brand: String(row.brand || creator?.brand || "").trim(),
+        };
+      })
+    : [];
+  const followUpEvents = Array.isArray(state.followUpEvents) ? state.followUpEvents : [];
 
   return {
     ...defaultState,
@@ -121,6 +137,8 @@ function normalizeBusinessState(rawState) {
     products,
     cooperations,
     matches,
+    followUps,
+    followUpEvents,
     importHistory: Array.isArray(state.importHistory) ? state.importHistory : [],
   };
 }
