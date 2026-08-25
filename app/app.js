@@ -3828,8 +3828,9 @@ function followUpManualContactMarkup() {
     <p class="followup-contact-note">仅记录当前达人处于“已联系待回复”，不代表系统已验证邮件已经实际发出。</p>`;
 }
 
-function mailInboxStatusLabel(status) {
+function mailInboxStatusLabel(status, message = {}) {
   if (status === "needs_brand_confirmation") return "需确认品牌归属";
+  if (status === "needs_followup" && !text(message.matched_creator_id)) return "待指定达人";
   if (status === "needs_followup") return "已匹配达人，缺少活跃跟进";
   if (status === "ambiguous_creator") return "匹配到多个达人";
   return "未匹配达人邮箱";
@@ -3844,12 +3845,12 @@ function pendingMailBlockedReason(message) {
     return "该官方邮箱服务多个品牌，或相同邮箱在多个品牌存在资料。请人工确认品牌归属后再创建或归档跟进，系统不会猜测。";
   }
   if (message.status === "ambiguous_creator") {
-    return "该邮箱匹配到多个达人。请先核对并整理达人邮箱，再归档到正确的合作跟进。";
+    return "自动匹配到多个或未能唯一确认达人。可补充正确邮箱后重新同步，也可以在下方直接指定已有达人；系统仍会校验品牌归属。";
   }
   if (message.status === "needs_followup" && !text(message.matched_creator_id)) {
-    return "系统未能确认唯一达人。请先在达人库补充或修正该邮箱。";
+    return "系统已识别到邮件，但还没有绑定到唯一达人。可在下方指定已有达人后继续。";
   }
-  return "该邮件尚未匹配唯一达人邮箱。请先在达人库或待开发达人中补充正确邮箱后重新同步。";
+  return "自动匹配未成功。可补充正确邮箱后重新同步，也可以在下方直接指定已有达人；系统仍会校验品牌归属。";
 }
 
 function isMailAlreadyArchived(message, followUp) {
@@ -3862,6 +3863,19 @@ function isMailAlreadyArchived(message, followUp) {
   });
 }
 
+function pendingMailCreatorOptions(message) {
+  const candidateIds = new Set((message.candidate_creator_ids || []).map(text).filter(Boolean));
+  return (state.data.creators || [])
+    .filter((creator) => belongsToActiveBrand(creator))
+    .slice()
+    .sort((a, b) => {
+      const aCandidate = candidateIds.has(text(a.id)) ? 0 : 1;
+      const bCandidate = candidateIds.has(text(b.id)) ? 0 : 1;
+      if (aCandidate !== bCandidate) return aCandidate - bCandidate;
+      return text(a.name || a.handle || a.email).localeCompare(text(b.name || b.handle || b.email), "zh-CN");
+    });
+}
+
 function mailInboxRowMarkup(message) {
   const direction = message.direction === "inbound" ? "收件" : message.direction === "outbound" ? "已发送" : "待判断";
   const creator = message.matched_creator_name ? ` · ${message.matched_creator_name}` : "";
@@ -3871,6 +3885,8 @@ function mailInboxRowMarkup(message) {
   const busy = Boolean(state.followUpInboxBusyId);
   const isCurrentBusy = text(state.followUpInboxBusyId) === text(message.id);
   let action = "";
+  const canManuallyAssignCreator = ["unmatched", "ambiguous_creator"].includes(text(message.status))
+    || (message.status === "needs_followup" && !text(message.matched_creator_id));
   if (message.status === "needs_brand_confirmation") {
     const candidateIds = [...new Set((message.candidate_brand_ids || []).map(text).filter(Boolean))];
     const candidateBrands = candidateIds.length ? candidateIds.map(brandById).filter(Boolean) : state.data.brands || [];
@@ -3889,13 +3905,28 @@ function mailInboxRowMarkup(message) {
           ${isCurrentBusy ? "正在新建..." : "新建跟进并归档"}
         </button>
       </div>`;
-  } else if (message.status === "needs_followup" && candidateFollowUps.length) {
+  } else if (message.status === "needs_followup" && text(message.matched_creator_id) && candidateFollowUps.length) {
     action = `
       <div class="mail-inbox-actions">
         <select data-mail-followup-select="${escapeHtml(message.id)}" aria-label="选择合作跟进" ${busy ? "disabled" : ""}>
           ${candidateFollowUps.map((followUp) => `<option value="${escapeHtml(followUp.id)}">${escapeHtml(`${followUp.creator_name || "未命名达人"} · ${followUp.stage || "初步沟通"} · ${followUp.next_action || "无下一步"}`)}</option>`).join("")}
         </select>
         <button type="button" class="ghost" data-mail-archive="${escapeHtml(message.id)}" ${busy ? "disabled" : ""}>${isCurrentBusy ? "正在归档..." : "归档到跟进"}</button>
+      </div>`;
+  } else if (canManuallyAssignCreator) {
+    const creators = pendingMailCreatorOptions(message);
+    action = `
+      <div class="mail-inbox-actions">
+        <select data-mail-creator-select="${escapeHtml(message.id)}" aria-label="指定邮件对应达人" ${busy ? "disabled" : ""}>
+          <option value="">选择已有达人${creators.length ? "" : "（当前品牌暂无达人）"}</option>
+          ${creators.map((item) => {
+            const detail = [item.name || item.handle || "未命名达人", item.email, item.platform, item.brand].filter(Boolean).join(" · ");
+            return `<option value="${escapeHtml(item.id)}">${escapeHtml(detail)}</option>`;
+          }).join("")}
+        </select>
+        <button type="button" class="ghost" data-mail-assign-creator="${escapeHtml(message.id)}" ${busy || !creators.length ? "disabled" : ""}>
+          ${isCurrentBusy ? "正在绑定..." : "绑定达人并继续"}
+        </button>
       </div>`;
   } else {
     action = `<p class="mail-inbox-blocked">${escapeHtml(pendingMailBlockedReason(message))}</p>`;
@@ -3904,7 +3935,7 @@ function mailInboxRowMarkup(message) {
     <article class="mail-inbox-row">
       <div class="mail-inbox-row-head">
         <strong>${escapeHtml(message.subject || "无主题")}</strong>
-        <span>${escapeHtml(mailInboxStatusLabel(message.status))}</span>
+        <span>${escapeHtml(mailInboxStatusLabel(message.status, message))}</span>
       </div>
       <small>${escapeHtml([direction, message.sender || "未知发件人", formatDateTime(message.occurred_at), message.mailbox].filter(Boolean).join(" · "))}${escapeHtml(creator)}</small>
       <p>${escapeHtml(message.excerpt || "没有可提取的正文摘要")}</p>
@@ -3928,6 +3959,8 @@ function archiveMailIntoFollowUp(message, followUp) {
   delete event.matched_creator_id;
   delete event.matched_creator_name;
   delete event.candidate_creator_ids;
+  delete event.candidate_lead_ids;
+  delete event.candidate_brand_ids;
   delete event.candidate_follow_up_ids;
 
   state.data.followUpEvents = [event, ...(state.data.followUpEvents || [])];
@@ -4051,10 +4084,102 @@ async function createFollowUpAndArchiveMail(mailId) {
   }
 }
 
+async function assignPendingMailCreator(mailId, creatorId) {
+  if (state.followUpInboxBusyId) return;
+  state.followUpInboxBusyId = text(mailId);
+  setFollowUpInboxNotice("正在绑定达人并判断合作跟进，请稍候...", "info");
+  renderFollowUpPage();
+  let snapshot = null;
+  try {
+    const message = (state.data.mailInbox || []).find((item) => text(item.id) === text(mailId));
+    const creator = (state.data.creators || []).find((item) => text(item.id) === text(creatorId));
+    if (!message) throw new Error("找不到这封待归档邮件，可能已被其他操作处理。");
+    if (!creator) throw new Error("请选择达人库中的有效达人后再继续。");
+    if (!belongsToActiveBrand(message) || !belongsToActiveBrand(creator)) {
+      throw new Error("当前工作区与所选邮件或达人不一致，请切换到对应品牌后处理。");
+    }
+    if (text(message.brand_id) && text(creator.brand_id) && text(message.brand_id) !== text(creator.brand_id)) {
+      throw new Error("邮件与所选达人不属于同一品牌，已阻止错误归档。");
+    }
+
+    const brandId = text(creator.brand_id || message.brand_id || state.activeBrandId);
+    const brand = brandById(brandId);
+    const activeFollowUps = allRows("followups").filter((followUp) => {
+      if (text(followUp.creator_id) !== text(creator.id)) return false;
+      if (FOLLOW_UP_TERMINAL_STAGES.has(text(followUp.stage))) return false;
+      if (brandId && text(followUp.brand_id) && text(followUp.brand_id) !== brandId) return false;
+      return true;
+    });
+    snapshot = clone(state.data);
+    Object.assign(message, {
+      brand_id: brandId,
+      brand: brand?.name || creator.brand || message.brand || "",
+      status: "needs_followup",
+      matched_creator_id: creator.id,
+      matched_creator_name: creator.name,
+      candidate_creator_ids: [creator.id],
+      candidate_lead_ids: [],
+      candidate_follow_up_ids: activeFollowUps.map((row) => row.id),
+      updatedAt: new Date().toISOString(),
+    });
+
+    if (activeFollowUps.length > 1) {
+      await persist();
+      setFollowUpInboxNotice(`已绑定「${creator.name || "未命名达人"}」，该达人有 ${activeFollowUps.length} 条活跃跟进，请选择邮件归档目标。`, "success");
+      return;
+    }
+
+    await withActivity(
+      activeFollowUps.length ? "正在归档邮件" : "正在新建跟进",
+      activeFollowUps.length ? "正在将邮件写入已有合作跟进时间线..." : "正在建立初步沟通跟进并归档邮件...",
+      async () => {
+        let followUp = activeFollowUps[0];
+        if (!followUp) {
+          const now = new Date().toISOString();
+          followUp = normalizeFollowUp({
+            id: uid("FU"),
+            creator_id: creator.id,
+            creator_name: creator.name,
+            brand_id: brandId,
+            brand: brand?.name || creator.brand || message.brand || "",
+            stage: "初步沟通",
+            priority: "中",
+            cooperation_mode: "待确认",
+            next_action: "查看已同步邮件并确认下一步",
+            shipping_status: "未寄样",
+            notes: "由官邮 IMAP 同步邮件手动绑定新建跟进。",
+            createdAt: now,
+            updatedAt: now,
+          });
+          state.data.followUps = [followUp, ...(state.data.followUps || [])];
+        }
+        if (isMailAlreadyArchived(message, followUp)) {
+          throw new Error("该邮件已存在于合作跟进时间线，未重复归档。");
+        }
+        archiveMailIntoFollowUp(message, followUp);
+        await persist();
+      },
+    );
+    setFollowUpInboxNotice(
+      activeFollowUps.length
+        ? `已绑定并归档到「${creator.name || "未命名达人"}」的现有合作跟进。`
+        : `已绑定「${creator.name || "未命名达人"}」并创建初步沟通跟进。`,
+      "success",
+    );
+    renderCreatorDrawer();
+  } catch (error) {
+    if (snapshot) state.data = snapshot;
+    setFollowUpInboxNotice(error.message || "绑定达人失败。", "error");
+  } finally {
+    state.followUpInboxBusyId = "";
+    renderFollowUpPage();
+  }
+}
+
 function handlePendingMailAction(event) {
-  const trigger = event.currentTarget?.matches?.("[data-mail-create-followup], [data-mail-archive], [data-mail-confirm-brand]")
+  const trigger = event.currentTarget?.matches?.("[data-mail-create-followup], [data-mail-archive], [data-mail-confirm-brand], [data-mail-assign-creator]")
     ? event.currentTarget
-    : event.target.closest("[data-mail-create-followup], [data-mail-archive], [data-mail-confirm-brand]");
+    : event.target.closest("[data-mail-create-followup], [data-mail-archive], [data-mail-confirm-brand], [data-mail-assign-creator]");
   if (!trigger) return;
 
   event.preventDefault();
@@ -4067,6 +4192,17 @@ function handlePendingMailAction(event) {
   }
   if (trigger.dataset.mailCreateFollowup) {
     void createFollowUpAndArchiveMail(trigger.dataset.mailCreateFollowup);
+    return;
+  }
+  if (trigger.dataset.mailAssignCreator) {
+    const row = trigger.closest(".mail-inbox-row");
+    const creatorId = text(row?.querySelector("[data-mail-creator-select]")?.value);
+    if (!creatorId) {
+      setFollowUpInboxNotice("请先选择要绑定的达人。", "error");
+      renderFollowUpPage();
+      return;
+    }
+    void assignPendingMailCreator(trigger.dataset.mailAssignCreator, creatorId);
     return;
   }
 
@@ -5311,7 +5447,7 @@ function renderFollowUpPage() {
   `;
 
   elements.followUpPage.querySelectorAll("[data-followup-new]").forEach((button) => button.addEventListener("click", () => openFollowUpEditor()));
-  elements.followUpPage.querySelectorAll("[data-mail-create-followup], [data-mail-archive], [data-mail-confirm-brand]").forEach((button) => {
+  elements.followUpPage.querySelectorAll("[data-mail-create-followup], [data-mail-archive], [data-mail-confirm-brand], [data-mail-assign-creator]").forEach((button) => {
     button.addEventListener("click", handlePendingMailAction);
   });
   elements.followUpPage.querySelector("[data-contact-track-form]")?.addEventListener("submit", (event) => {

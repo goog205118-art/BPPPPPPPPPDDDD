@@ -194,11 +194,13 @@
 - `matched_creator_id`
 - `matched_creator_name`
 - `candidate_creator_ids`
+- `candidate_lead_ids`
+- `candidate_brand_ids`
 - `candidate_follow_up_ids`
 - `createdAt`
 - `updatedAt`
 
-当 `status` 为 `needs_followup` 且没有活跃跟进时，可新建一条默认合作跟进后归档；当同一达人有多条活跃跟进时，必须先选择具体跟进。无法确认达人或匹配多个达人时，不提供自动归档。
+当 `status` 为 `needs_followup` 且没有活跃跟进时，可新建一条默认合作跟进后归档；当同一达人有多条活跃跟进时，必须先选择具体跟进。无法自动确认达人或匹配多个达人时，不提供自动归档，但前端可从当前品牌达人库人工绑定已有达人后继续处理；品牌不一致时始终阻止归档。
 
 ## matches
 
