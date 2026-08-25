@@ -9,12 +9,14 @@
   "scripts": {
     "start": "node tools/local-server.cjs",
     "dev": "node tools/local-server.cjs",
-    "check": "node --check tools/local-server.cjs && node --check \"api/[...route].mjs\" && node --check app/app.js"
+    "check": "node --check tools/local-server.cjs && node --check \"api/[...route].mjs\" && node --check app/app.js",
+    "test:followup-isolation": "node tools/followup-isolation-test.cjs"
   },
   "dependencies": {
     "@vercel/blob": "^2.8.0",
     "exceljs": "^4.4.0",
     "imapflow": "^1.7.2",
-    "mailparser": "^3.9.15"
+    "mailparser": "^3.9.15",
+    "nodemailer": "^6.9.16"
   }
 }

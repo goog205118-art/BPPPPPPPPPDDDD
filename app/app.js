@@ -11,6 +11,10 @@ const API_PRODUCT_PREVIEW = "/api/products/preview";
 const API_MAIL_SETTINGS = "/api/mail/settings";
 const API_MAIL_TEST = "/api/mail/test";
 const API_MAIL_SYNC = "/api/mail/sync";
+const API_MAIL_SMTP_TEST = "/api/mail/test-smtp";
+const API_MAIL_SEND = "/api/mail/send";
+const API_FOLLOWUP_ANALYZE = "/api/ai/followup-analyze";
+const API_FOLLOWUP_DRAFT = "/api/ai/followup-draft";
 const STORAGE_ACCESS_PASSWORD = "resource-workbench-access-password";
 const SETTINGS_TAB = { key: "settings", title: "设置" };
 const MATCHING_TAB = { key: "matches", title: "本周资源匹配" };
@@ -45,24 +49,11 @@ const defaultAiSettings = {
     lead: "standard",
     product: "standard",
     outreach: "special",
+    followup: "special",
   },
 };
 const defaultMailSettings = {
-  account: {
-    enabled: false,
-    label: "官邮 IMAP",
-    host: "",
-    port: 993,
-    secure: true,
-    user: "",
-    hasPassword: false,
-    inboxFolder: "INBOX",
-    sentFolder: "Sent",
-    syncDays: 30,
-  },
-  lastSyncAt: "",
-  lastSyncStatus: "",
-  lastSyncSummary: null,
+  accounts: [],
 };
 
 const yesNoOptions = ["否", "是"];
@@ -523,6 +514,7 @@ const defaultTimeZones = ["Asia/Shanghai", "America/Los_Angeles", "America/New_Y
 
 const emptyState = {
   meta: { version: 1, updatedAt: new Date().toISOString() },
+  brands: [],
   creators: [],
   resources: [],
   leads: [],
@@ -551,6 +543,8 @@ const state = {
   optionSettingsType: "creators",
   aiSettings: clone(defaultAiSettings),
   mailSettings: clone(defaultMailSettings),
+  mailAccountEditingId: null,
+  activeBrandId: "",
   selectedLeadIds: new Set(),
   productFilters: { query: "", brand: "", country: "", category: "", store: "" },
   outreach: { open: false, leadIds: [], result: null },
@@ -558,6 +552,7 @@ const state = {
   creatorDrawer: { open: false, creatorId: null },
   mailImport: { open: false, followUpId: null, messages: [], status: "" },
   followUpBoardFilter: { query: "", stage: "", priority: "", overdueOnly: false },
+  followUpDetail: { open: false, followUpId: null, analysis: null, draft: null },
 };
 
 let timeZoneTickerId = null;
@@ -608,12 +603,20 @@ const elements = {
   leadAiProfile: document.getElementById("leadAiProfile"),
   productAiProfile: document.getElementById("productAiProfile"),
   outreachAiProfile: document.getElementById("outreachAiProfile"),
+  followUpAiProfile: document.getElementById("followUpAiProfile"),
   aiSettingsStatus: document.getElementById("aiSettingsStatus"),
   aiSettingsStatusBtn: document.getElementById("aiSettingsStatusBtn"),
   aiSettingsReloadBtn: document.getElementById("aiSettingsReloadBtn"),
   mailSettingsForm: document.getElementById("mailSettingsForm"),
+  mailAccountList: document.getElementById("mailAccountList"),
+  mailNewAccountBtn: document.getElementById("mailNewAccountBtn"),
+  mailCancelEditBtn: document.getElementById("mailCancelEditBtn"),
+  mailEditorTitle: document.getElementById("mailEditorTitle"),
+  mailAccountId: document.getElementById("mailAccountId"),
+  mailBrandId: document.getElementById("mailBrandId"),
   mailEnabled: document.getElementById("mailEnabled"),
   mailLabel: document.getElementById("mailLabel"),
+  mailFromName: document.getElementById("mailFromName"),
   mailHost: document.getElementById("mailHost"),
   mailPort: document.getElementById("mailPort"),
   mailSecure: document.getElementById("mailSecure"),
@@ -623,9 +626,18 @@ const elements = {
   mailSentFolder: document.getElementById("mailSentFolder"),
   mailSyncDays: document.getElementById("mailSyncDays"),
   mailTestBtn: document.getElementById("mailTestBtn"),
+  mailSmtpEnabled: document.getElementById("mailSmtpEnabled"),
+  mailSmtpUseImapPassword: document.getElementById("mailSmtpUseImapPassword"),
+  mailSmtpHost: document.getElementById("mailSmtpHost"),
+  mailSmtpPort: document.getElementById("mailSmtpPort"),
+  mailSmtpSecure: document.getElementById("mailSmtpSecure"),
+  mailSmtpUser: document.getElementById("mailSmtpUser"),
+  mailSmtpPassword: document.getElementById("mailSmtpPassword"),
+  mailSmtpTestBtn: document.getElementById("mailSmtpTestBtn"),
   mailSyncBtn: document.getElementById("mailSyncBtn"),
   mailSettingsStatus: document.getElementById("mailSettingsStatus"),
   timezoneBar: document.getElementById("timezoneBar"),
+  brandWorkspaceSelect: document.getElementById("brandWorkspaceSelect"),
   timezoneSettingsFields: document.getElementById("timezoneSettingsFields"),
   saveTimezonesBtn: document.getElementById("saveTimezonesBtn"),
   timezoneSettingsStatus: document.getElementById("timezoneSettingsStatus"),
@@ -693,6 +705,12 @@ const elements = {
   mailImportPreview: document.getElementById("mailImportPreview"),
   mailImportStatus: document.getElementById("mailImportStatus"),
   mailImportConfirmBtn: document.getElementById("mailImportConfirmBtn"),
+  followUpDetailModal: document.getElementById("followUpDetailModal"),
+  followUpDetailBackdrop: document.getElementById("followUpDetailBackdrop"),
+  closeFollowUpDetailBtn: document.getElementById("closeFollowUpDetailBtn"),
+  followUpDetailTitle: document.getElementById("followUpDetailTitle"),
+  followUpDetailHint: document.getElementById("followUpDetailHint"),
+  followUpDetailBody: document.getElementById("followUpDetailBody"),
 };
 
 const formSections = {
@@ -954,9 +972,88 @@ function config() {
   return entityConfig[state.activeTab];
 }
 
-function rows(type = state.activeTab) {
+const BRANDED_TYPES = new Set(["creators", "resources", "leads", "products", "cooperations", "matches", "followups"]);
+
+function brandKey(value) {
+  return text(value).toLocaleLowerCase().replace(/\s+/g, " ");
+}
+
+function brandByName(name, data = state.data) {
+  const key = brandKey(name);
+  if (!key) return null;
+  return (data.brands || []).find((brand) => brandKey(brand.name) === key) || null;
+}
+
+function brandByIdFromData(id, data = state.data) {
+  const value = text(id);
+  if (!value) return null;
+  return (data.brands || []).find((brand) => text(brand.id) === value) || null;
+}
+
+function ensureBrand(data, name) {
+  const normalized = text(name);
+  if (!normalized) return null;
+  const existing = brandByName(normalized, data);
+  if (existing) return existing;
+  const now = new Date().toISOString();
+  const brand = {
+    id: uid("BR"),
+    name: normalized,
+    default_country: "",
+    default_language: "",
+    timezone: "",
+    createdAt: now,
+    updatedAt: now,
+  };
+  data.brands = [...(data.brands || []), brand].sort((a, b) => text(a.name).localeCompare(text(b.name), "zh-CN"));
+  return brand;
+}
+
+function currentBrand() {
+  return brandByIdFromData(state.activeBrandId);
+}
+
+function applyRecordBrand(record, data = state.data, inheritedBrand = null) {
+  const linked = brandByIdFromData(record?.brand_id, data);
+  const named = text(record?.brand) ? ensureBrand(data, record.brand) : null;
+  const inherited = inheritedBrand && (brandByIdFromData(inheritedBrand.id, data) || ensureBrand(data, inheritedBrand.name));
+  const brand = linked || named || inherited || null;
+  if (brand) {
+    record.brand_id = brand.id;
+    record.brand = brand.name;
+  } else {
+    record.brand_id = text(record?.brand_id);
+    record.brand = text(record?.brand);
+  }
+  return record;
+}
+
+function renderBrandWorkspace() {
+  const brands = state.data.brands || [];
+  if (state.activeBrandId && !brandByIdFromData(state.activeBrandId)) state.activeBrandId = "";
+  elements.brandWorkspaceSelect.innerHTML = [
+    `<option value="">全部品牌</option>`,
+    ...brands.map((brand) => `<option value="${escapeHtml(brand.id)}">${escapeHtml(brand.name)}</option>`),
+  ].join("");
+  elements.brandWorkspaceSelect.value = state.activeBrandId;
+  elements.brandWorkspaceSelect.title = state.activeBrandId
+    ? `当前工作区：${currentBrand()?.name || "未命名品牌"}`
+    : "当前查看全部品牌";
+}
+
+function allRows(type = state.activeTab) {
   if (type === "followups") return state.data.followUps || [];
   return state.data[type] || [];
+}
+
+function rows(type = state.activeTab) {
+  const source = allRows(type);
+  if (!state.activeBrandId || !BRANDED_TYPES.has(type)) return source;
+  return source.filter((row) => text(row.brand_id) === text(state.activeBrandId));
+}
+
+function belongsToActiveBrand(row) {
+  return !state.activeBrandId || text(row?.brand_id) === text(state.activeBrandId);
 }
 
 function referenceLabel(type, row) {
@@ -1063,6 +1160,12 @@ function defaultRecord(type) {
     else item[field.key] = "";
   }
 
+  const brand = currentBrand();
+  if (brand && BRANDED_TYPES.has(type)) {
+    item.brand_id = brand.id;
+    item.brand = brand.name;
+  }
+
   return item;
 }
 
@@ -1075,24 +1178,61 @@ function ensureStateShape(nextState) {
     filterPreferences: normalizeFilterPreferences(nextState?.meta?.filterPreferences),
     timeZones: normalizeTimeZones(nextState?.meta?.timeZones),
   };
-  shaped.creators = Array.isArray(nextState?.creators) ? nextState.creators.map((row) => ({ ...row, country: normalizeCountry(row.country) })) : [];
-  shaped.resources = Array.isArray(nextState?.resources) ? nextState.resources.map((row) => ({ ...row, country: normalizeCountry(row.country) })) : [];
-  shaped.leads = Array.isArray(nextState?.leads) ? nextState.leads.map((row) => ({ ...row, country: normalizeCountry(row.country) })) : [];
-  shaped.products = Array.isArray(nextState?.products) ? nextState.products.map((row) => ({ ...row, country: normalizeCountry(row.country) })) : [];
-  shaped.cooperations = Array.isArray(nextState?.cooperations)
-    ? nextState.cooperations.map((row) => resolveCooperationLinks({ ...row }, shaped.creators, shaped.resources))
+
+  shaped.brands = [];
+  for (const brand of Array.isArray(nextState?.brands) ? nextState.brands : []) {
+    const name = text(brand?.name || brand?.brand);
+    if (!name || brandByName(name, shaped)) continue;
+    shaped.brands.push({
+      id: text(brand?.id) || uid("BR"),
+      name,
+      default_country: normalizeCountry(brand?.default_country),
+      default_language: text(brand?.default_language),
+      timezone: text(brand?.timezone),
+      createdAt: text(brand?.createdAt) || new Date().toISOString(),
+      updatedAt: text(brand?.updatedAt) || new Date().toISOString(),
+    });
+  }
+  for (const type of ["creators", "resources", "leads", "products", "cooperations", "matches", "followUps"]) {
+    for (const row of Array.isArray(nextState?.[type]) ? nextState[type] : []) {
+      if (text(row?.brand)) ensureBrand(shaped, row.brand);
+    }
+  }
+
+  shaped.creators = Array.isArray(nextState?.creators)
+    ? nextState.creators.map((row) => applyRecordBrand({ ...row, country: normalizeCountry(row.country) }, shaped))
     : [];
-  shaped.followUps = Array.isArray(nextState?.followUps) ? nextState.followUps.map((row) => normalizeFollowUp({ ...row }, shaped.creators, shaped.cooperations)) : [];
-  shaped.followUpEvents = Array.isArray(nextState?.followUpEvents) ? nextState.followUpEvents : [];
-  shaped.mailInbox = Array.isArray(nextState?.mailInbox) ? nextState.mailInbox : [];
+  shaped.resources = Array.isArray(nextState?.resources)
+    ? nextState.resources.map((row) => applyRecordBrand({ ...row, country: normalizeCountry(row.country) }, shaped))
+    : [];
+  shaped.leads = Array.isArray(nextState?.leads)
+    ? nextState.leads.map((row) => applyRecordBrand({ ...row, country: normalizeCountry(row.country) }, shaped))
+    : [];
+  shaped.products = Array.isArray(nextState?.products)
+    ? nextState.products.map((row) => applyRecordBrand({ ...row, country: normalizeCountry(row.country) }, shaped))
+    : [];
+  shaped.cooperations = Array.isArray(nextState?.cooperations)
+    ? nextState.cooperations.map((row) => resolveCooperationLinks({ ...row }, shaped.creators, shaped.resources, shaped))
+    : [];
+  shaped.followUps = Array.isArray(nextState?.followUps)
+    ? nextState.followUps.map((row) => normalizeFollowUp({ ...row }, shaped.creators, shaped.cooperations, shaped))
+    : [];
+  const followUpById = new Map(shaped.followUps.map((row) => [text(row.id), row]));
+  shaped.followUpEvents = Array.isArray(nextState?.followUpEvents)
+    ? nextState.followUpEvents.map((row) => applyRecordBrand({ ...row }, shaped, followUpById.get(text(row.follow_up_id))))
+    : [];
+  shaped.mailInbox = Array.isArray(nextState?.mailInbox)
+    ? nextState.mailInbox.map((row) => applyRecordBrand({ ...row }, shaped))
+    : [];
   shaped.matches = Array.isArray(nextState?.matches)
-    ? nextState.matches.map((row) => ({
+    ? nextState.matches.map((row) => applyRecordBrand({
         ...row,
         country: normalizeCountry(row.country),
         selected_resource_ids: Array.isArray(row.selected_resource_ids) ? row.selected_resource_ids : [],
-      }))
+      }, shaped))
     : [];
   shaped.importHistory = Array.isArray(nextState?.importHistory) ? nextState.importHistory : [];
+  shaped.brands.sort((a, b) => text(a.name).localeCompare(text(b.name), "zh-CN"));
   return shaped;
 }
 
@@ -1151,18 +1291,44 @@ async function loadAiSettings() {
 function normalizeMailSettingsPayload(payload = {}) {
   const source = payload && typeof payload === "object" ? payload : {};
   const settings = source.settings && typeof source.settings === "object" ? source.settings : source;
-  const account = settings.account && typeof settings.account === "object" ? settings.account : {};
+  const rawAccounts = Array.isArray(settings.accounts)
+    ? settings.accounts
+    : settings.account && typeof settings.account === "object"
+      ? [settings.account]
+      : [];
+  const account = (raw = {}) => ({
+    id: text(raw.id),
+    brand_id: text(raw.brand_id),
+    brand_name: text(raw.brand_name),
+    enabled: raw.enabled !== false,
+    label: text(raw.label),
+    fromName: text(raw.fromName),
+    imap: {
+      host: text(raw.imap?.host ?? raw.host),
+      port: Number(raw.imap?.port ?? raw.port) || 993,
+      secure: raw.imap?.secure ?? raw.secure ?? true,
+      user: text(raw.imap?.user ?? raw.user),
+      hasPassword: Boolean(raw.imap?.hasPassword ?? raw.hasPassword),
+      inboxFolder: text(raw.imap?.inboxFolder ?? raw.inboxFolder) || "INBOX",
+      sentFolder: text(raw.imap?.sentFolder ?? raw.sentFolder) || "Sent",
+      syncDays: Number(raw.imap?.syncDays ?? raw.syncDays) || 30,
+    },
+    smtp: {
+      enabled: raw.smtp?.enabled !== false,
+      host: text(raw.smtp?.host),
+      port: Number(raw.smtp?.port) || 465,
+      secure: raw.smtp?.secure !== false,
+      user: text(raw.smtp?.user),
+      hasPassword: Boolean(raw.smtp?.hasPassword),
+      useImapPassword: raw.smtp?.useImapPassword !== false,
+    },
+    lastSyncAt: text(raw.lastSyncAt),
+    lastSyncStatus: text(raw.lastSyncStatus),
+    lastSyncSummary: raw.lastSyncSummary && typeof raw.lastSyncSummary === "object" ? raw.lastSyncSummary : null,
+  });
   return {
     ...clone(defaultMailSettings),
-    ...settings,
-    account: {
-      ...clone(defaultMailSettings.account),
-      ...account,
-      enabled: Boolean(account.enabled),
-      secure: account.secure !== false,
-      hasPassword: Boolean(account.hasPassword),
-    },
-    lastSyncSummary: settings.lastSyncSummary && typeof settings.lastSyncSummary === "object" ? settings.lastSyncSummary : null,
+    accounts: rawAccounts.map(account),
   };
 }
 
@@ -1204,6 +1370,7 @@ function normalizeAiSettingsPayload(payload = {}) {
       lead: assignment("lead"),
       product: assignment("product"),
       outreach: assignment("outreach"),
+      followup: assignment("followup"),
     },
   };
 }
@@ -1229,6 +1396,7 @@ function readAiSettingsForm() {
       lead: text(formData.get("assignments.lead")) || defaultAiSettings.assignments.lead,
       product: text(formData.get("assignments.product")) || defaultAiSettings.assignments.product,
       outreach: text(formData.get("assignments.outreach")) || defaultAiSettings.assignments.outreach,
+      followup: text(formData.get("assignments.followup")) || defaultAiSettings.assignments.followup,
     },
   };
 }
@@ -1278,81 +1446,201 @@ function renderAiSettings() {
   elements.leadAiProfile.value = assignments.lead;
   elements.productAiProfile.value = assignments.product;
   elements.outreachAiProfile.value = assignments.outreach;
+  elements.followUpAiProfile.value = assignments.followup;
   const describe = (settings, label) => `${label}${settings.hasApiKey ? "已配置" : "未配置"}${settings.model ? `（${settings.model}）` : ""}`;
   elements.aiSettingsStatus.textContent = `${describe(standard, "普通 AI ")}；${describe(advanced, "高能力 AI ")}；${describe(special, "特殊 AI ")}。`;
 }
 
 function formatMailSyncStatus(settings = state.mailSettings) {
-  const account = settings.account || {};
-  const summary = settings.lastSyncSummary || {};
-  if (!account.host || !account.user || !account.hasPassword) return "尚未完成邮箱配置。保存配置后可先测试连接。";
-  if (!settings.lastSyncAt) return `${account.label || account.user} 已配置，尚未同步。`;
-  const status = settings.lastSyncStatus || "已完成";
+  const accounts = Array.isArray(settings?.accounts) ? settings.accounts : [];
+  if (!accounts.length) return "尚未新增官方邮箱账户。";
+  return `${accounts.length} 个账户已保存。请选择一个账户后测试 IMAP / SMTP 或手动同步。`;
+}
+
+function formatMailAccountStatus(account = {}) {
+  const imap = account.imap || {};
+  const summary = account.lastSyncSummary || {};
+  if (!imap.host || !imap.user || !imap.hasPassword) return "IMAP 尚未完成配置";
+  if (!account.lastSyncAt) return "IMAP 已配置，尚未同步";
+  const status = account.lastSyncStatus || "已完成";
   const details = `扫描 ${Number(summary.scanned || 0)}，归档 ${Number(summary.matched || 0)}，待处理 ${Number(summary.pending || 0)}，跳过重复 ${Number(summary.skipped || 0)}`;
-  return `${status} · ${formatDateTime(settings.lastSyncAt)} · ${details}${summary.warnings?.length ? ` · ${summary.warnings.join("；")}` : ""}`;
+  return `${status} · ${formatDateTime(account.lastSyncAt)} · ${details}${summary.warnings?.length ? ` · ${summary.warnings.join("；")}` : ""}`;
+}
+
+function brandById(id) {
+  return (state.data.brands || []).find((brand) => text(brand.id) === text(id));
+}
+
+function emptyMailAccount(brandId = state.activeBrandId) {
+  const brand = brandById(brandId);
+  return {
+    id: "",
+    brand_id: text(brand?.id),
+    brand_name: text(brand?.name),
+    enabled: true,
+    label: "",
+    fromName: "",
+    imap: { host: "", port: 993, secure: true, user: "", hasPassword: false, inboxFolder: "INBOX", sentFolder: "Sent", syncDays: 30 },
+    smtp: { enabled: true, host: "", port: 465, secure: true, user: "", hasPassword: false, useImapPassword: true },
+    lastSyncAt: "",
+    lastSyncStatus: "",
+    lastSyncSummary: null,
+  };
+}
+
+function mailEditingAccount() {
+  const current = (state.mailSettings.accounts || []).find((account) => text(account.id) === text(state.mailAccountEditingId));
+  return current ? clone(current) : emptyMailAccount();
 }
 
 function readMailSettingsForm() {
   const form = new FormData(elements.mailSettingsForm);
-  return {
-    account: {
-      enabled: elements.mailEnabled.checked,
-      label: text(form.get("label")),
-      host: text(form.get("host")),
-      port: Number(form.get("port")) || 993,
+  const id = text(form.get("id")) || uid("MB");
+  const brand = brandById(form.get("brand_id"));
+  if (!brand) throw new Error("请先在资料中新增品牌，再为该品牌配置官方邮箱。");
+  const account = {
+    id,
+    brand_id: brand.id,
+    brand_name: brand.name,
+    enabled: elements.mailEnabled.checked,
+    label: text(form.get("label")),
+    fromName: text(form.get("fromName")),
+    imap: {
+      host: text(form.get("imap.host")),
+      port: Number(form.get("imap.port")) || 993,
       secure: elements.mailSecure.checked,
-      user: text(form.get("user")),
-      password: text(form.get("password")),
-      inboxFolder: text(form.get("inboxFolder")) || "INBOX",
-      sentFolder: text(form.get("sentFolder")) || "Sent",
-      syncDays: Number(form.get("syncDays")) || 30,
+      user: text(form.get("imap.user")),
+      password: text(form.get("imap.password")),
+      inboxFolder: text(form.get("imap.inboxFolder")) || "INBOX",
+      sentFolder: text(form.get("imap.sentFolder")) || "Sent",
+      syncDays: Number(form.get("imap.syncDays")) || 30,
+    },
+    smtp: {
+      enabled: elements.mailSmtpEnabled.checked,
+      host: text(form.get("smtp.host")),
+      port: Number(form.get("smtp.port")) || 465,
+      secure: elements.mailSmtpSecure.checked,
+      user: text(form.get("smtp.user")),
+      password: text(form.get("smtp.password")),
+      useImapPassword: elements.mailSmtpUseImapPassword.checked,
     },
   };
+  const accounts = (state.mailSettings.accounts || []).slice();
+  const index = accounts.findIndex((item) => text(item.id) === id);
+  if (index >= 0) accounts[index] = account;
+  else accounts.unshift(account);
+  return { accounts, editingId: id };
 }
 
 function renderMailSettings() {
-  const account = { ...clone(defaultMailSettings.account), ...(state.mailSettings?.account || {}) };
-  elements.mailEnabled.checked = Boolean(account.enabled);
+  const allAccounts = state.mailSettings.accounts || [];
+  const editingAccount = allAccounts.find((item) => text(item.id) === text(state.mailAccountEditingId));
+  if (state.activeBrandId && editingAccount && text(editingAccount.brand_id) !== text(state.activeBrandId)) {
+    state.mailAccountEditingId = null;
+  }
+  const accounts = state.activeBrandId
+    ? allAccounts.filter((item) => text(item.brand_id) === text(state.activeBrandId))
+    : allAccounts;
+  const account = mailEditingAccount();
+  const imap = account.imap || {};
+  const smtp = account.smtp || {};
+  const brands = state.data.brands || [];
+  elements.mailAccountList.innerHTML = accounts.length
+    ? accounts
+        .map((item) => {
+          const configured = item.imap?.host && item.imap?.user && item.imap?.hasPassword;
+          const smtpConfigured = item.smtp?.enabled && (item.smtp?.host || item.imap?.host) && (item.smtp?.user || item.imap?.user) && (item.smtp?.useImapPassword ? item.imap?.hasPassword : item.smtp?.hasPassword);
+          return `
+            <article class="mail-account-row ${text(item.id) === text(state.mailAccountEditingId) ? "is-editing" : ""}">
+              <div class="mail-account-row-main">
+                <strong>${escapeHtml(item.label || item.imap?.user || "未命名邮箱")}</strong>
+                <small>${escapeHtml([item.brand_name || brandById(item.brand_id)?.name || "未绑定品牌", item.imap?.user || "未填写邮箱", configured ? "IMAP 已配置" : "IMAP 待配置", smtpConfigured ? "SMTP 已配置" : "SMTP 待配置"].join(" · "))}</small>
+                <span>${escapeHtml(formatMailAccountStatus(item))}</span>
+              </div>
+              <div class="mail-account-row-actions">
+                <button type="button" class="ghost" data-mail-account-action="edit" data-mail-account-id="${escapeHtml(item.id)}">编辑</button>
+                <button type="button" class="ghost" data-mail-account-action="test" data-mail-account-id="${escapeHtml(item.id)}">IMAP</button>
+                <button type="button" class="ghost" data-mail-account-action="smtp" data-mail-account-id="${escapeHtml(item.id)}">SMTP</button>
+                <button type="button" class="ghost" data-mail-account-action="sync" data-mail-account-id="${escapeHtml(item.id)}">同步</button>
+                <button type="button" class="ghost danger-action" data-mail-account-action="delete" data-mail-account-id="${escapeHtml(item.id)}">删除</button>
+              </div>
+            </article>`;
+        })
+        .join("")
+    : `<p class="mail-account-empty">暂无官方邮箱账户。请先在已有品牌下新增一个账户。</p>`;
+  elements.mailEditorTitle.textContent = account.id ? `编辑账户：${account.label || imap.user || "未命名账户"}` : "新增官方邮箱账户";
+  elements.mailCancelEditBtn.classList.toggle("hidden", !account.id);
+  elements.mailAccountId.value = account.id || "";
+  elements.mailBrandId.innerHTML = [
+    `<option value="">选择品牌</option>`,
+    ...brands.map((brand) => `<option value="${escapeHtml(brand.id)}">${escapeHtml(brand.name)}</option>`),
+  ].join("");
+  elements.mailBrandId.value = account.brand_id || "";
+  elements.mailEnabled.checked = account.enabled !== false;
   elements.mailLabel.value = account.label || "";
-  elements.mailHost.value = account.host || "";
-  elements.mailPort.value = String(account.port || 993);
-  elements.mailSecure.checked = account.secure !== false;
-  elements.mailUser.value = account.user || "";
+  elements.mailFromName.value = account.fromName || "";
+  elements.mailHost.value = imap.host || "";
+  elements.mailPort.value = String(imap.port || 993);
+  elements.mailSecure.checked = imap.secure !== false;
+  elements.mailUser.value = imap.user || "";
   elements.mailPassword.value = "";
-  elements.mailPassword.placeholder = account.hasPassword ? "已保存，留空表示不修改" : "填写邮箱授权码或专用密码";
-  elements.mailInboxFolder.value = account.inboxFolder || "INBOX";
-  elements.mailSentFolder.value = account.sentFolder || "Sent";
-  elements.mailSyncDays.value = String(account.syncDays || 30);
+  elements.mailPassword.placeholder = imap.hasPassword ? "IMAP 授权码已保存，留空不修改" : "填写邮箱授权码或专用密码";
+  elements.mailInboxFolder.value = imap.inboxFolder || "INBOX";
+  elements.mailSentFolder.value = imap.sentFolder || "Sent";
+  elements.mailSyncDays.value = String(imap.syncDays || 30);
+  elements.mailSmtpEnabled.checked = smtp.enabled !== false;
+  elements.mailSmtpUseImapPassword.checked = smtp.useImapPassword !== false;
+  elements.mailSmtpHost.value = smtp.host || "";
+  elements.mailSmtpPort.value = String(smtp.port || 465);
+  elements.mailSmtpSecure.checked = smtp.secure !== false;
+  elements.mailSmtpUser.value = smtp.user || "";
+  elements.mailSmtpPassword.value = "";
+  elements.mailSmtpPassword.placeholder = smtp.hasPassword ? "SMTP 授权码已保存，留空不修改" : "复用 IMAP 授权码时无需填写";
   elements.mailSettingsStatus.textContent = formatMailSyncStatus();
 }
 
 async function saveMailSettings(event) {
-  event.preventDefault();
+  event?.preventDefault();
   elements.mailSettingsStatus.textContent = "正在保存邮箱配置...";
   try {
+    const formPayload = readMailSettingsForm();
     const payload = await withActivity("正在保存邮箱配置", "正在加密保存 IMAP 授权信息...", async () => {
       const response = await apiFetch(API_MAIL_SETTINGS, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(readMailSettingsForm()),
+        body: JSON.stringify({ accounts: formPayload.accounts }),
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || result.ok === false) throw new Error(result.error || "邮箱配置保存失败");
       return result;
     });
     state.mailSettings = normalizeMailSettingsPayload(payload);
+    state.mailAccountEditingId = formPayload.editingId;
     renderMailSettings();
-    elements.mailSettingsStatus.textContent = "邮箱配置已保存。授权码不会回显，后续可直接测试连接或立即同步。";
+    elements.mailSettingsStatus.textContent = "邮箱账户已保存。授权码不会回显，可直接测试或手动同步。";
   } catch (error) {
     elements.mailSettingsStatus.textContent = error.message || "邮箱配置保存失败";
   }
 }
 
-async function testMailSettings() {
+function mailAccountIdForAction(accountId = "") {
+  return text(accountId || state.mailAccountEditingId);
+}
+
+async function testMailSettings(accountId = "") {
+  const selectedId = mailAccountIdForAction(accountId);
+  if (!selectedId) {
+    elements.mailSettingsStatus.textContent = "请先保存当前邮箱账户，再测试 IMAP。";
+    return;
+  }
   elements.mailSettingsStatus.textContent = "正在测试 IMAP 连接...";
   try {
     const payload = await withActivity("正在测试邮箱连接", "正在验证服务器、端口、SSL 和授权码...", async () => {
-      const response = await apiFetch(API_MAIL_TEST, { method: "POST" });
+      const response = await apiFetch(API_MAIL_TEST, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId: selectedId }),
+      });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || result.ok === false) throw new Error(result.error || "邮箱连接失败");
       return result;
@@ -1363,11 +1651,51 @@ async function testMailSettings() {
   }
 }
 
-async function syncMailbox() {
-  if (!state.mailSettings.account?.enabled) {
+async function testSmtpSettings(accountId = "") {
+  const selectedId = mailAccountIdForAction(accountId);
+  if (!selectedId) {
+    elements.mailSettingsStatus.textContent = "请先保存当前邮箱账户，再测试 SMTP。";
+    return;
+  }
+  elements.mailSettingsStatus.textContent = "正在测试 SMTP 连接...";
+  try {
+    const payload = await withActivity("正在测试 SMTP", "正在验证发信服务器和授权码...", async () => {
+      const response = await apiFetch(API_MAIL_SMTP_TEST, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accountId: selectedId }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.ok === false) throw new Error(result.error || "SMTP 连接失败");
+      return result;
+    });
+    elements.mailSettingsStatus.textContent = `SMTP 连接成功：${payload.account} · ${payload.transport}。`;
+  } catch (error) {
+    elements.mailSettingsStatus.textContent = error.message || "SMTP 连接失败";
+  }
+}
+
+function availableMailAccount(brandId = state.activeBrandId) {
+  const accounts = state.mailSettings.accounts || [];
+  if (text(brandId)) {
+    return accounts.find((account) => account.enabled && text(account.brand_id) === text(brandId)) || null;
+  }
+  return accounts.find((account) => account.enabled) || null;
+}
+
+async function syncMailbox(accountId = "") {
+  const selected = (state.mailSettings.accounts || []).find((item) => text(item.id) === text(accountId));
+  const account = selected || availableMailAccount();
+  if (account && state.activeBrandId && text(account.brand_id) !== text(state.activeBrandId)) {
+    const error = "当前工作区只能使用绑定到同一品牌的官方邮箱。请切换工作区或在设置页配置该品牌邮箱。";
+    if (state.activeTab === "settings") elements.mailSettingsStatus.textContent = error;
+    else elements.importStatus.textContent = error;
+    return;
+  }
+  if (!account?.enabled) {
     state.activeTab = SETTINGS_TAB.key;
     render();
-    elements.mailSettingsStatus.textContent = "请先填写并启用 IMAP 邮箱，再执行同步。";
+    elements.mailSettingsStatus.textContent = "请先新增、保存并启用对应品牌的 IMAP 邮箱，再执行同步。";
     return;
   }
   try {
@@ -1375,7 +1703,7 @@ async function syncMailbox() {
       const response = await apiFetch(API_MAIL_SYNC, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ maxPerFolder: 120 }),
+        body: JSON.stringify({ accountId: account.id, maxPerFolder: 120 }),
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || result.ok === false) throw new Error(result.error || "邮箱同步失败");
@@ -1385,12 +1713,39 @@ async function syncMailbox() {
     state.mailSettings = normalizeMailSettingsPayload(payload.settings);
     render();
     renderCreatorDrawer();
+    if (state.followUpDetail.open) renderFollowUpDetail();
   } catch (error) {
     if (state.activeTab === "settings") {
       elements.mailSettingsStatus.textContent = error.message || "邮箱同步失败";
     } else {
       elements.importStatus.textContent = error.message || "邮箱同步失败";
     }
+  }
+}
+
+async function deleteMailAccount(accountId) {
+  const account = (state.mailSettings.accounts || []).find((item) => text(item.id) === text(accountId));
+  if (!account) return;
+  const label = account.label || account.imap?.user || "该官方邮箱";
+  if (!window.confirm(`确认删除「${label}」的邮箱配置？不会删除已归档邮件或合作资料。`)) return;
+  try {
+    const accounts = (state.mailSettings.accounts || []).filter((item) => text(item.id) !== text(accountId));
+    const payload = await withActivity("正在删除邮箱配置", "正在移除账户配置，不会改动业务资料...", async () => {
+      const response = await apiFetch(API_MAIL_SETTINGS, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ accounts }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.ok === false) throw new Error(result.error || "邮箱配置删除失败");
+      return result;
+    });
+    state.mailSettings = normalizeMailSettingsPayload(payload);
+    if (text(state.mailAccountEditingId) === text(accountId)) state.mailAccountEditingId = null;
+    renderMailSettings();
+    elements.mailSettingsStatus.textContent = "邮箱账户配置已删除，既有邮件时间线保留不变。";
+  } catch (error) {
+    elements.mailSettingsStatus.textContent = error.message || "邮箱配置删除失败";
   }
 }
 
@@ -1938,12 +2293,14 @@ function findIdentityConflicts(record, types = ["creators", "leads"]) {
   const socialUrl = normalizeSocialIdentity(record.social_url);
   const email = normalizeHeader(record.email);
   if (!socialUrl && !email) return [];
+  const brandId = text(record.brand_id);
 
   return types.flatMap((type) =>
-    rows(type)
+    allRows(type)
       .filter((row) => {
         if (type === state.activeTab && row.id === record.id) return false;
         if (type === "leads" && isTransferredLead(row)) return false;
+        if (brandId && text(row.brand_id) !== brandId) return false;
         return true;
       })
       .map((row) => {
@@ -2498,10 +2855,10 @@ function renderTable(visibleRows) {
   elements.tableBody.querySelectorAll("[data-delete]").forEach((button) => {
     button.addEventListener("click", async () => {
       if (state.activeTab === "followups") {
-        state.data.followUps = rows("followups").filter((row) => row.id !== button.dataset.delete);
+        state.data.followUps = allRows("followups").filter((row) => row.id !== button.dataset.delete);
         state.data.followUpEvents = (state.data.followUpEvents || []).filter((event) => event.follow_up_id !== button.dataset.delete);
       } else {
-        state.data[state.activeTab] = rows().filter((row) => row.id !== button.dataset.delete);
+        state.data[state.activeTab] = allRows().filter((row) => row.id !== button.dataset.delete);
       }
       state.selectedLeadIds.delete(button.dataset.delete);
       if (state.editingId === button.dataset.delete) state.editingId = null;
@@ -2976,7 +3333,7 @@ function renderMatchingHistory() {
   });
   elements.matchingHistory.querySelectorAll("[data-delete-match]").forEach((button) => {
     button.addEventListener("click", async () => {
-      state.data.matches = rows("matches").filter((item) => item.id !== button.dataset.deleteMatch);
+      state.data.matches = allRows("matches").filter((item) => item.id !== button.dataset.deleteMatch);
       if (state.matchingEditingId === button.dataset.deleteMatch) state.matchingEditingId = null;
       await persist();
       renderMatchingPage();
@@ -3029,12 +3386,16 @@ function followUpProduct(row) {
 
 function followUpEventsFor(followUpId) {
   return (state.data.followUpEvents || [])
-    .filter((event) => text(event.follow_up_id) === text(followUpId))
+    .filter((event) => text(event.follow_up_id) === text(followUpId) && belongsToActiveBrand(event))
     .sort((a, b) => new Date(b.occurred_at || b.createdAt || 0) - new Date(a.occurred_at || a.createdAt || 0));
 }
 
 function latestFollowUpEmail(followUpId) {
   return followUpEventsFor(followUpId).find((event) => event.type === "email");
+}
+
+function latestInboundFollowUpEmail(followUpId) {
+  return followUpEventsFor(followUpId).find((event) => event.direction === "inbound" && text(event.message_id));
 }
 
 function mailInboxStatusLabel(status) {
@@ -3074,10 +3435,15 @@ function mailInboxRowMarkup(message) {
 }
 
 function archiveMailIntoFollowUp(message, followUp) {
+  if (text(message.brand_id) && text(followUp.brand_id) && text(message.brand_id) !== text(followUp.brand_id)) {
+    throw new Error("邮件与合作跟进不属于同一品牌，已阻止归档。");
+  }
   const now = new Date().toISOString();
   const event = {
     ...message,
     follow_up_id: followUp.id,
+    brand_id: followUp.brand_id,
+    brand: followUp.brand,
     updatedAt: now,
   };
   delete event.status;
@@ -3105,8 +3471,13 @@ async function archivePendingMail(mailId, followUpId) {
   const message = (state.data.mailInbox || []).find((item) => text(item.id) === text(mailId));
   const followUp = rows("followups").find((item) => text(item.id) === text(followUpId));
   if (!message || !followUp) return;
+  if (text(message.brand_id) && text(message.brand_id) !== text(followUp.brand_id)) {
+    elements.importStatus.textContent = "邮件与所选合作跟进的品牌不一致，无法归档。";
+    return;
+  }
 
   const duplicate = (state.data.followUpEvents || []).some((event) => {
+    if (text(event.brand_id) !== text(followUp.brand_id)) return false;
     const sameMessage = text(message.message_id) && text(event.message_id) === text(message.message_id);
     const sameFingerprint = text(message.fingerprint) && text(event.fingerprint) === text(message.fingerprint);
     const sameServerKey = text(message.server_key) && text(event.server_key) === text(message.server_key);
@@ -3135,6 +3506,7 @@ async function createFollowUpAndArchiveMail(mailId) {
     id: uid("FU"),
     creator_id: creator.id,
     creator_name: creator.name,
+    brand_id: creator.brand_id || state.activeBrandId,
     brand: creator.brand || "",
     stage: "初步沟通",
     priority: "中",
@@ -3309,7 +3681,7 @@ function simpleMailHash(value) {
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
-async function parseEmlFile(file, followUpId, creator) {
+async function parseEmlFile(file, followUp, creator) {
   const raw = await readMailSource(file);
   const { headers } = splitMimeEntity(raw);
   const parts = parseMimePart(raw);
@@ -3327,7 +3699,10 @@ async function parseEmlFile(file, followUpId, creator) {
   const fingerprintSource = [occurredAt, sender, recipients, subject, excerpt].join("|").toLowerCase();
   return {
     id: uid("EM"),
-    follow_up_id: followUpId,
+    follow_up_id: followUp.id,
+    brand_id: followUp.brand_id,
+    brand: followUp.brand,
+    mailbox_account_id: "",
     type: "email",
     occurred_at: occurredAt,
     direction: creatorEmail && senderEmail && creatorEmail === senderEmail ? "inbound" : "outbound",
@@ -3375,7 +3750,7 @@ async function previewMailImport(files) {
   elements.mailImportStatus.textContent = `正在解析 ${files.length} 封邮件...`;
   try {
     const messages = [];
-    for (const file of files) messages.push(await parseEmlFile(file, followUp.id, creator));
+    for (const file of files) messages.push(await parseEmlFile(file, followUp, creator));
     state.mailImport.messages = messages;
     const existingIds = new Set(followUpEventsFor(followUp.id).flatMap((event) => [text(event.message_id), text(event.fingerprint)]).filter(Boolean));
     const newCount = messages.filter((message) => !existingIds.has(message.message_id) && !existingIds.has(message.fingerprint)).length;
@@ -3398,7 +3773,7 @@ async function previewMailImport(files) {
 async function confirmMailImport() {
   const followUp = rows("followups").find((row) => row.id === state.mailImport.followUpId);
   if (!followUp || !state.mailImport.messages.length) return;
-  const existingEvents = state.data.followUpEvents || [];
+  const existingEvents = (state.data.followUpEvents || []).filter((event) => text(event.brand_id) === text(followUp.brand_id));
   const knownKeys = new Set(existingEvents.flatMap((event) => [text(event.message_id), text(event.fingerprint)]).filter(Boolean));
   const additions = state.mailImport.messages.filter((message) => {
     const keys = [text(message.message_id), text(message.fingerprint)].filter(Boolean);
@@ -3434,7 +3809,7 @@ function followUpCardMarkup(row) {
   const meta = [row.brand, product?.name, row.cooperation_mode].filter(Boolean).join(" · ");
   const followUpAt = row.next_follow_up_at ? formatDateTime(row.next_follow_up_at) : "未设置";
   return `
-    <article class="followup-card ${overdue ? "is-overdue" : ""}" data-followup-card="${escapeHtml(row.id)}">
+    <article class="followup-card ${overdue ? "is-overdue" : ""}" data-followup-card="${escapeHtml(row.id)}" role="button" tabindex="0" aria-label="打开 ${escapeHtml(creatorLabel)} 的合作跟进详情">
       <div class="followup-card-head">
         <div class="followup-card-creator">
           <span class="creator-avatar small">${escapeHtml((creatorLabel || "达").slice(0, 1).toUpperCase())}</span>
@@ -3458,10 +3833,375 @@ function followUpCardMarkup(row) {
     </article>`;
 }
 
+function followUpSmtpAccounts(followUp) {
+  const brandId = text(followUp?.brand_id);
+  return (state.mailSettings.accounts || []).filter((account) => {
+    const imap = account.imap || {};
+    const smtp = account.smtp || {};
+    const passwordReady = smtp.useImapPassword !== false ? imap.hasPassword : smtp.hasPassword;
+    return (
+      account.enabled &&
+      smtp.enabled !== false &&
+      text(account.brand_id) === brandId &&
+      Boolean(smtp.host || imap.host) &&
+      Boolean(smtp.user || imap.user) &&
+      Boolean(passwordReady)
+    );
+  });
+}
+
+function followUpEventScopeLabel(event) {
+  return text(event?.body) ? "系统 SMTP 已发送正文" : "已归档邮件摘要";
+}
+
+function followUpEventDirectionLabel(event) {
+  if (event?.direction === "inbound") return "达人来信";
+  if (event?.direction === "outbound") return "我方发信";
+  if (event?.direction === "internal") return "内部更新";
+  return "收发方向待确认";
+}
+
+function followUpTimelineMarkup(events) {
+  if (!events.length) return `<p class="followup-detail-empty">暂无邮件或阶段事件。可手动同步官邮，或从 Foxmail 导入 .eml 摘要。</p>`;
+  return `
+    <div class="followup-detail-timeline">
+      ${events
+        .map((event) => {
+          const isMail = event.type === "email" || event.type === "mail_sent";
+          const scope = isMail ? followUpEventScopeLabel(event) : "工作台记录";
+          const content = text(event.body || event.excerpt);
+          return `
+            <article class="followup-detail-event ${event.direction === "inbound" ? "is-inbound" : event.direction === "outbound" ? "is-outbound" : "is-internal"}">
+              <header>
+                <div>
+                  <strong>${escapeHtml(event.subject || "无主题")}</strong>
+                  <span>${escapeHtml([followUpEventDirectionLabel(event), scope].join(" · "))}</span>
+                </div>
+                <time>${escapeHtml(formatDateTime(event.occurred_at || event.createdAt) || "时间未知")}</time>
+              </header>
+              ${event.sender || event.recipients ? `<small>${escapeHtml([event.sender ? `发件：${event.sender}` : "", event.recipients ? `收件：${event.recipients}` : ""].filter(Boolean).join(" · "))}</small>` : ""}
+              ${content ? `<p>${escapeHtml(content)}</p>` : `<p class="is-empty">未保存邮件正文。</p>`}
+              <footer>${escapeHtml(event.source || "工作台")}${event.mailbox ? ` · ${escapeHtml(event.mailbox)}` : ""}</footer>
+            </article>
+          `;
+        })
+        .join("")}
+    </div>
+  `;
+}
+
+function followUpAnalysisMarkup(analysis, selectedStrategy) {
+  if (!analysis) {
+    return `<p class="followup-detail-empty">先写下本次关注点后进行 AI 分析。AI 只给出建议，不会改动当前阶段或发送邮件。</p>`;
+  }
+  const confidence = { low: "低", medium: "中", high: "高" }[analysis.confidence] || "低";
+  const list = (items = [], className = "") => (items.length ? `<ul class="${className}">${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : `<p class="followup-detail-empty">暂无</p>`);
+  return `
+    <section class="followup-ai-analysis-result">
+      <div class="followup-ai-summary">
+        <span>AI 判断</span>
+        <strong>${escapeHtml(analysis.summary_cn || "暂无摘要")}</strong>
+      </div>
+      <div class="followup-ai-meta">
+        <span>建议阶段：<b>${escapeHtml(analysis.suggested_stage || "待人工确认")}</b></span>
+        <span>置信度：<b>${escapeHtml(confidence)}</b></span>
+        <span>建议间隔：<b>${escapeHtml(`${Number(analysis.recommended_follow_up_days || 0)} 天`)}</b></span>
+      </div>
+      <p class="followup-ai-notice">仅建议，不会自动修改当前阶段。${escapeHtml(analysis.context_notice || "")}</p>
+      <div class="followup-ai-grid">
+        <section><h4>关键事实</h4>${list(analysis.key_facts || [])}</section>
+        <section><h4>风险与待确认</h4>${list(analysis.risk_notes || [])}</section>
+      </div>
+      <section class="followup-ai-evidence"><h4>证据范围</h4>${list(analysis.evidence || [])}</section>
+      ${(analysis.warnings || []).length ? `<section class="followup-ai-warnings"><h4>提醒</h4>${list(analysis.warnings || [])}</section>` : ""}
+      <section class="followup-ai-strategies">
+        <h4>选择下一步策略</h4>
+        <div>
+          ${(analysis.recommended_options || [])
+            .map(
+              (option, index) => `
+                <label class="followup-ai-strategy">
+                  <input type="radio" name="followupStrategy" value="${escapeHtml(option.id)}" ${selectedStrategy === option.id || (!selectedStrategy && index === 0) ? "checked" : ""} />
+                  <span><strong>${escapeHtml(option.label)}</strong><small>${escapeHtml(option.description)}</small></span>
+                </label>
+              `,
+            )
+            .join("")}
+        </div>
+      </section>
+    </section>
+  `;
+}
+
+function followUpDraftMarkup(draft) {
+  if (!draft) return `<p class="followup-detail-empty">选择策略并填写中文回复思路后生成英文草稿。邮件不会自动发送。</p>`;
+  return `
+    <section class="followup-draft-result">
+      <label>邮件主题<input type="text" data-followup-email-subject value="${escapeHtml(draft.subject || "")}" maxlength="500" /></label>
+      <label>英文正文<textarea data-followup-email-body rows="12" maxlength="16000">${escapeHtml(draft.body || "")}</textarea></label>
+      ${(draft.warnings || []).length ? `<div class="followup-draft-warnings">${draft.warnings.map((warning) => `<span>${escapeHtml(warning)}</span>`).join("")}</div>` : ""}
+    </section>
+  `;
+}
+
+function openFollowUpDetail(followUpId) {
+  const followUp = rows("followups").find((row) => text(row.id) === text(followUpId));
+  if (!followUp) return;
+  state.followUpDetail = {
+    open: true,
+    followUpId: followUp.id,
+    analysis: null,
+    draft: null,
+    userNote: "",
+    customIntent: "",
+    strategyId: "",
+    status: "",
+  };
+  elements.followUpDetailModal.classList.remove("hidden");
+  elements.followUpDetailModal.setAttribute("aria-hidden", "false");
+  renderFollowUpDetail();
+}
+
+function closeFollowUpDetail() {
+  state.followUpDetail = { open: false, followUpId: null, analysis: null, draft: null, userNote: "", customIntent: "", strategyId: "", status: "" };
+  elements.followUpDetailModal.classList.add("hidden");
+  elements.followUpDetailModal.setAttribute("aria-hidden", "true");
+  elements.followUpDetailBody.innerHTML = "";
+}
+
+function renderFollowUpDetail() {
+  if (!state.followUpDetail.open) return;
+  const followUp = rows("followups").find((row) => text(row.id) === text(state.followUpDetail.followUpId));
+  if (!followUp) {
+    closeFollowUpDetail();
+    return;
+  }
+
+  const creator = followUpCreator(followUp);
+  const product = followUpProduct(followUp);
+  const events = followUpEventsFor(followUp.id);
+  const inbound = latestInboundFollowUpEmail(followUp.id);
+  const smtpAccounts = followUpSmtpAccounts(followUp);
+  const selectedStrategy = text(state.followUpDetail.strategyId) || text(state.followUpDetail.analysis?.recommended_options?.[0]?.id);
+  const productUrl = safeExternalUrl(product?.product_url);
+  const publishUrl = safeExternalUrl(followUp.publish_url);
+  const creatorUrl = safeExternalUrl(creator?.social_url);
+  const recipient = text(state.followUpDetail.recipient || creator?.email);
+
+  elements.followUpDetailTitle.textContent = creator?.name || followUp.creator_name || "合作跟进详情";
+  elements.followUpDetailHint.textContent = `${followUp.brand || "未绑定品牌"} · ${creator?.platform || "平台待补充"} · 当前阶段 ${followUp.stage || "待确认"}`;
+  elements.followUpDetailBody.innerHTML = `
+    <div class="followup-detail-layout">
+      <section class="followup-detail-main">
+        <section class="followup-detail-overview">
+          <div class="followup-detail-creator">
+            <span class="creator-avatar">${escapeHtml((creator?.name || followUp.creator_name || "达").slice(0, 1).toUpperCase())}</span>
+            <div>
+              <strong>${escapeHtml(creator?.name || followUp.creator_name || "未关联达人")}</strong>
+              <span>${escapeHtml([creator?.handle, creator?.platform, normalizeCountry(creator?.country)].filter(Boolean).join(" · ") || "达人信息待补充")}</span>
+              <small>${creator?.email ? escapeHtml(creator.email) : "达人邮箱待补充"}</small>
+            </div>
+            <div class="followup-detail-overview-actions">
+              ${creatorUrl ? `<a class="icon-button" href="${escapeHtml(creatorUrl)}" target="_blank" rel="noreferrer" aria-label="打开达人社媒主页" title="打开达人社媒主页">↗</a>` : ""}
+              <button type="button" class="icon-button" data-followup-detail-edit="${escapeHtml(followUp.id)}" aria-label="编辑合作跟进" title="编辑合作跟进">✎</button>
+              <button type="button" class="icon-button" data-followup-detail-import="${escapeHtml(followUp.id)}" aria-label="导入 Foxmail 邮件" title="导入 Foxmail 邮件">✉</button>
+            </div>
+          </div>
+          <div class="followup-detail-badges">${statusBadge(followUp.stage)}${statusBadge(followUp.priority, "中")}<span class="detail-brand-badge">${escapeHtml(followUp.brand || "未绑定品牌")}</span></div>
+          <dl class="followup-detail-facts">
+            <div><dt>合作方式</dt><dd>${escapeHtml(followUp.cooperation_mode || "待确认")}</dd></div>
+            <div><dt>下一步</dt><dd>${escapeHtml(followUp.next_action || "待补充")}</dd></div>
+            <div><dt>下次跟进</dt><dd>${escapeHtml(formatDateTime(followUp.next_follow_up_at) || "未设置")}</dd></div>
+            <div><dt>寄样物流</dt><dd>${escapeHtml([followUp.shipping_status || "未寄样", followUp.tracking_no].filter(Boolean).join(" · "))}</dd></div>
+            <div><dt>预计发布</dt><dd>${escapeHtml(followUp.publish_due_at || "未设置")}</dd></div>
+            <div><dt>发布链接</dt><dd>${publishUrl ? `<a href="${escapeHtml(publishUrl)}" target="_blank" rel="noreferrer">打开链接</a>` : "待补充"}</dd></div>
+          </dl>
+          ${text(followUp.notes) ? `<p class="followup-detail-notes"><b>内部备注</b>${escapeHtml(followUp.notes)}</p>` : ""}
+        </section>
+
+        <section class="followup-detail-section">
+          <header><div><span>PRODUCT</span><h3>关联产品</h3></div></header>
+          ${product ? `<article class="followup-detail-product">${productImageMarkup(product)}<div><strong>${escapeHtml(product.name || "未命名产品")}</strong><span>${escapeHtml([product.country, product.category, product.store].filter(Boolean).join(" · ") || "产品资料待补充")}</span>${productUrl ? `<a href="${escapeHtml(productUrl)}" target="_blank" rel="noreferrer">打开产品页面</a>` : ""}</div></article>` : `<p class="followup-detail-empty">尚未关联产品。</p>`}
+        </section>
+
+        <section class="followup-detail-section">
+          <header><div><span>MAIL TIMELINE</span><h3>邮件与推进记录</h3></div><small>${events.length} 条</small></header>
+          ${followUpTimelineMarkup(events)}
+        </section>
+      </section>
+
+      <aside class="followup-detail-side">
+        <section class="followup-detail-section followup-ai-panel">
+          <header><div><span>AI REVIEW</span><h3>沟通研判</h3></div></header>
+          <label class="followup-ai-note-label">本次关注点 / 人工备注<textarea data-followup-ai-note rows="4" maxlength="1600" placeholder="例如：确认对方是否接受置换，或说明我希望先确认报价。">${escapeHtml(state.followUpDetail.userNote || "")}</textarea></label>
+          <button type="button" class="primary" data-followup-ai-analyze>AI 分析沟通状态</button>
+          ${followUpAnalysisMarkup(state.followUpDetail.analysis, selectedStrategy)}
+        </section>
+
+        <section class="followup-detail-section followup-draft-panel">
+          <header><div><span>REPLY DRAFT</span><h3>生成回复草稿</h3></div></header>
+          <label class="followup-ai-note-label">中文回复思路<textarea data-followup-custom-intent rows="3" maxlength="1800" placeholder="补充你希望表达的内容；AI 会根据选中的策略生成英文草稿。">${escapeHtml(state.followUpDetail.customIntent || "")}</textarea></label>
+          <button type="button" class="ghost" data-followup-ai-draft ${state.followUpDetail.analysis ? "" : "disabled"}>生成可编辑英文草稿</button>
+          ${followUpDraftMarkup(state.followUpDetail.draft)}
+        </section>
+
+        <section class="followup-detail-section followup-send-panel">
+          <header><div><span>MANUAL SEND</span><h3>人工确认发信</h3></div></header>
+          ${smtpAccounts.length
+            ? `
+              <label>官方邮箱<select data-followup-send-account>${smtpAccounts.map((account) => `<option value="${escapeHtml(account.id)}">${escapeHtml(`${account.brand_name || followUp.brand} · ${account.label || account.smtp?.user || account.imap?.user}`)}</option>`).join("")}</select></label>
+              <label>收件人<input type="email" data-followup-send-to value="${escapeHtml(recipient)}" placeholder="creator@example.com" /></label>
+              <p class="followup-send-notice">发送前会再次确认；仅在本系统通过 SMTP 发出的正文才会保存在时间线。${inbound ? "将尝试关联最近一封达人来信。" : ""}</p>
+              <button type="button" class="primary" data-followup-send ${state.followUpDetail.draft ? "" : "disabled"}>确认并发送邮件</button>
+            `
+            : `<p class="followup-detail-empty">当前品牌没有已配置 SMTP 的官方邮箱。请到设置页保存并测试该品牌的 SMTP 账户。</p>`}
+        </section>
+        ${state.followUpDetail.status ? `<p class="followup-detail-status">${escapeHtml(state.followUpDetail.status)}</p>` : ""}
+      </aside>
+    </div>
+  `;
+
+  elements.followUpDetailBody.querySelector("[data-followup-detail-edit]")?.addEventListener("click", () => {
+    closeFollowUpDetail();
+    openFollowUpEditor({ id: followUp.id });
+  });
+  elements.followUpDetailBody.querySelector("[data-followup-detail-import]")?.addEventListener("click", () => openFollowUpMailImport(followUp.id));
+  elements.followUpDetailBody.querySelector("[data-followup-ai-analyze]")?.addEventListener("click", () => void analyzeFollowUpDetail());
+  elements.followUpDetailBody.querySelector("[data-followup-ai-draft]")?.addEventListener("click", () => void draftFollowUpReply());
+  elements.followUpDetailBody.querySelector("[data-followup-send]")?.addEventListener("click", () => void sendFollowUpReply(inbound?.id || ""));
+  elements.followUpDetailBody.querySelectorAll('input[name="followupStrategy"]').forEach((input) => {
+    input.addEventListener("change", () => {
+      state.followUpDetail.strategyId = input.value;
+    });
+  });
+}
+
+async function analyzeFollowUpDetail() {
+  const followUpId = state.followUpDetail.followUpId;
+  const note = text(elements.followUpDetailBody.querySelector("[data-followup-ai-note]")?.value);
+  state.followUpDetail.userNote = note;
+  state.followUpDetail.status = "正在读取已归档上下文并生成中文研判...";
+  renderFollowUpDetail();
+  try {
+    const payload = await withActivity("正在分析沟通状态", "AI 正在仅根据已归档邮件和合作资料生成建议...", async () => {
+      const response = await apiFetch(API_FOLLOWUP_ANALYZE, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ followUpId, userNote: note }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.ok === false) throw new Error(result.error || "AI 沟通分析失败");
+      return result;
+    });
+    state.followUpDetail.analysis = payload;
+    state.followUpDetail.strategyId = text(payload.recommended_options?.[0]?.id);
+    state.followUpDetail.draft = null;
+    state.followUpDetail.status = "AI 已完成研判。建议仅供人工决策，不会修改合作阶段。";
+  } catch (error) {
+    state.followUpDetail.status = error.message || "AI 沟通分析失败";
+  }
+  renderFollowUpDetail();
+}
+
+async function draftFollowUpReply() {
+  const detail = state.followUpDetail;
+  if (!detail.analysis) {
+    detail.status = "请先完成 AI 沟通研判，再选择策略生成草稿。";
+    renderFollowUpDetail();
+    return;
+  }
+  const selected = elements.followUpDetailBody.querySelector('input[name="followupStrategy"]:checked');
+  const note = text(elements.followUpDetailBody.querySelector("[data-followup-ai-note]")?.value);
+  const intent = text(elements.followUpDetailBody.querySelector("[data-followup-custom-intent]")?.value);
+  detail.userNote = note;
+  detail.customIntent = intent;
+  detail.strategyId = text(selected?.value) || text(detail.strategyId);
+  detail.status = "正在生成可编辑英文回复草稿...";
+  renderFollowUpDetail();
+  try {
+    const payload = await withActivity("正在生成回复草稿", "AI 正在根据选中策略和人工意图撰写草稿...", async () => {
+      const response = await apiFetch(API_FOLLOWUP_DRAFT, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          followUpId: detail.followUpId,
+          strategyId: detail.strategyId,
+          customIntent: intent,
+          userNote: note,
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.ok === false) throw new Error(result.error || "AI 回复草稿生成失败");
+      return result;
+    });
+    detail.draft = payload;
+    detail.status = "草稿已生成。请逐项核对收件人、主题和正文后再发送。";
+  } catch (error) {
+    detail.status = error.message || "AI 回复草稿生成失败";
+  }
+  renderFollowUpDetail();
+}
+
+async function sendFollowUpReply(replyToEventId = "") {
+  const detail = state.followUpDetail;
+  const followUp = rows("followups").find((row) => text(row.id) === text(detail.followUpId));
+  const accountId = text(elements.followUpDetailBody.querySelector("[data-followup-send-account]")?.value);
+  const to = text(elements.followUpDetailBody.querySelector("[data-followup-send-to]")?.value);
+  const subject = text(elements.followUpDetailBody.querySelector("[data-followup-email-subject]")?.value);
+  const body = text(elements.followUpDetailBody.querySelector("[data-followup-email-body]")?.value);
+  if (!followUp || !accountId || !to || !subject || !body) {
+    detail.status = "请先确认官方邮箱、收件人、邮件主题和正文均已填写。";
+    renderFollowUpDetail();
+    return;
+  }
+  const account = followUpSmtpAccounts(followUp).find((item) => text(item.id) === accountId);
+  if (!account) {
+    detail.status = "所选官方邮箱与当前品牌不匹配，已阻止发送。";
+    renderFollowUpDetail();
+    return;
+  }
+  if (!window.confirm(`即将使用「${account.label || account.smtp?.user || account.imap?.user}」向 ${to} 发送邮件。\n\n邮件发送后将记录在本地时间线，是否继续？`)) return;
+
+  detail.recipient = to;
+  detail.draft = { ...(detail.draft || {}), subject, body };
+  detail.status = "正在通过官方邮箱发送邮件...";
+  renderFollowUpDetail();
+  try {
+    const payload = await withActivity("正在发送邮件", "正在通过当前品牌的 SMTP 官方邮箱发送；发送后将写入时间线...", async () => {
+      const response = await apiFetch(API_MAIL_SEND, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          followUpId: followUp.id,
+          accountId,
+          to,
+          subject,
+          text: body,
+          replyToEventId,
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.ok === false) throw new Error(result.error || "邮件发送失败");
+      return result;
+    });
+    state.data = ensureStateShape(payload.state);
+    detail.status = "邮件已发送并写入时间线。合作阶段保持不变，请按实际沟通结果手动更新。";
+    renderFollowUpPage();
+    renderCreatorDrawer();
+  } catch (error) {
+    detail.status = error.message || "邮件发送失败";
+  }
+  renderFollowUpDetail();
+}
+
 function openFollowUpEditor({ id = null, creatorId = "", cooperationId = "" } = {}) {
   state.activeTab = "followups";
   resetEditorState();
   const existing = id ? rows("followups").find((row) => row.id === id) : null;
+  if (!existing && !state.activeBrandId) {
+    window.alert("请先在顶部选择一个品牌工作区，再新建合作跟进。");
+    return;
+  }
   const draft = existing ? clone(existing) : defaultRecord("followups");
   if (!existing) {
     draft.creator_id = creatorId;
@@ -3502,8 +4242,17 @@ function renderFollowUpPage() {
   const metrics = getMetrics("followups", allRows);
   const todayCount = allRows.filter((row) => isSameLocalDay(row.next_follow_up_at, new Date())).length;
   const overdueCount = allRows.filter((row) => isFollowUpOverdue(row)).length;
-  const pendingMail = (state.data.mailInbox || []).slice().sort((a, b) => new Date(b.occurred_at || b.createdAt || 0) - new Date(a.occurred_at || a.createdAt || 0));
-  const mailConfigured = Boolean(state.mailSettings.account?.enabled && state.mailSettings.account?.host && state.mailSettings.account?.hasPassword);
+  const pendingMail = (state.data.mailInbox || [])
+    .filter(belongsToActiveBrand)
+    .slice()
+    .sort((a, b) => new Date(b.occurred_at || b.createdAt || 0) - new Date(a.occurred_at || a.createdAt || 0));
+  const activeMailAccount = state.activeBrandId ? availableMailAccount(state.activeBrandId) : null;
+  const mailConfigured = Boolean(
+    activeMailAccount?.enabled &&
+      activeMailAccount.imap?.host &&
+      activeMailAccount.imap?.user &&
+      activeMailAccount.imap?.hasPassword,
+  );
 
   elements.followUpPage.innerHTML = `
     <header class="followup-head">
@@ -3514,7 +4263,7 @@ function renderFollowUpPage() {
       </div>
       <div class="followup-head-actions">
         <button type="button" class="ghost" data-followup-filter-overdue title="只看逾期跟进">${overdueCount ? `逾期 ${overdueCount}` : "逾期"}</button>
-        <button type="button" class="ghost" data-followup-sync title="${mailConfigured ? "同步官邮 IMAP" : "前往设置邮箱 IMAP"}">${mailConfigured ? "同步邮箱" : "配置邮箱"}</button>
+        <button type="button" class="ghost" data-followup-sync title="${mailConfigured ? "同步当前品牌官邮 IMAP" : state.activeBrandId ? "前往设置当前品牌邮箱 IMAP" : "请先选择品牌工作区"}">${mailConfigured ? "同步邮箱" : state.activeBrandId ? "配置邮箱" : "选择品牌"}</button>
         <button type="button" class="primary" data-followup-new>新增跟进</button>
       </div>
     </header>
@@ -3552,9 +4301,41 @@ function renderFollowUpPage() {
   `;
 
   elements.followUpPage.querySelectorAll("[data-followup-new]").forEach((button) => button.addEventListener("click", () => openFollowUpEditor()));
-  elements.followUpPage.querySelectorAll("[data-followup-edit]").forEach((button) => button.addEventListener("click", () => openFollowUpEditor({ id: button.dataset.followupEdit })));
-  elements.followUpPage.querySelectorAll("[data-followup-mail]").forEach((button) => button.addEventListener("click", () => openFollowUpMailImport(button.dataset.followupMail)));
-  elements.followUpPage.querySelector("[data-followup-sync]")?.addEventListener("click", syncMailbox);
+  elements.followUpPage.querySelectorAll("[data-followup-card]").forEach((card) => {
+    card.addEventListener("click", () => openFollowUpDetail(card.dataset.followupCard));
+    card.addEventListener("keydown", (event) => {
+      if (event.key !== "Enter" && event.key !== " ") return;
+      event.preventDefault();
+      openFollowUpDetail(card.dataset.followupCard);
+    });
+  });
+  elements.followUpPage.querySelectorAll("[data-followup-edit]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      openFollowUpEditor({ id: button.dataset.followupEdit });
+    });
+  });
+  elements.followUpPage.querySelectorAll("[data-followup-mail]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      openFollowUpMailImport(button.dataset.followupMail);
+    });
+  });
+  elements.followUpPage.querySelector("[data-followup-sync]")?.addEventListener("click", () => {
+    if (!state.activeBrandId) {
+      state.activeTab = SETTINGS_TAB.key;
+      render();
+      elements.mailSettingsStatus.textContent = "请先在顶部选择一个品牌工作区，再同步该品牌官方邮箱。";
+      return;
+    }
+    if (!mailConfigured) {
+      state.activeTab = SETTINGS_TAB.key;
+      render();
+      elements.mailSettingsStatus.textContent = "当前品牌还没有配置完成的 IMAP 邮箱。请先新增或编辑邮箱账户。";
+      return;
+    }
+    void syncMailbox(activeMailAccount.id);
+  });
   elements.followUpPage.querySelectorAll("[data-mail-create-followup]").forEach((button) => {
     button.addEventListener("click", () => createFollowUpAndArchiveMail(button.dataset.mailCreateFollowup));
   });
@@ -3566,10 +4347,11 @@ function renderFollowUpPage() {
     });
   });
   elements.followUpPage.querySelectorAll("[data-followup-delete]").forEach((button) => {
-    button.addEventListener("click", async () => {
+    button.addEventListener("click", async (event) => {
+      event.stopPropagation();
       const followUp = rows("followups").find((row) => row.id === button.dataset.followupDelete);
       if (!followUp || !window.confirm(`确认删除「${followUp.creator_name || "该达人"}」的合作跟进？`)) return;
-      state.data.followUps = rows("followups").filter((row) => row.id !== followUp.id);
+      state.data.followUps = allRows("followups").filter((row) => row.id !== followUp.id);
       state.data.followUpEvents = (state.data.followUpEvents || []).filter((event) => event.follow_up_id !== followUp.id);
       await persist();
       renderFollowUpPage();
@@ -3705,7 +4487,7 @@ function renderProductPage() {
   elements.productPage.querySelectorAll("[data-edit-product]").forEach((button) => button.addEventListener("click", () => openEditor(button.dataset.editProduct)));
   elements.productPage.querySelectorAll("[data-delete-product]").forEach((button) => {
     button.addEventListener("click", async () => {
-      state.data.products = rows("products").filter((product) => product.id !== button.dataset.deleteProduct);
+      state.data.products = allRows("products").filter((product) => product.id !== button.dataset.deleteProduct);
       await persist();
       renderProductPage();
     });
@@ -4035,6 +4817,7 @@ function renderEntityPage() {
 }
 
 function render() {
+  renderBrandWorkspace();
   renderTimeZoneBar();
   renderTabs();
   if (state.activeTab === SETTINGS_TAB.key) {
@@ -4073,7 +4856,7 @@ function fieldValue(field, rawValue) {
   return text(rawValue);
 }
 
-function resolveCooperationLinks(record, creators = rows("creators"), resources = rows("resources")) {
+function resolveCooperationLinks(record, creators = rows("creators"), resources = rows("resources"), data = state.data) {
   const creatorById = creators.find((row) => row.id === text(record.creator_id));
   const resourceById = resources.find((row) => row.id === text(record.resource_id));
   const creatorByName = creators.find((row) => text(row.name) === text(record.creator_name));
@@ -4095,10 +4878,10 @@ function resolveCooperationLinks(record, creators = rows("creators"), resources 
     record.resource_id = text(record.resource_id);
     record.resource_name = text(record.resource_name);
   }
-  return record;
+  return applyRecordBrand(record, data, creator || resource || null);
 }
 
-function normalizeFollowUp(record, creators = rows("creators"), cooperations = rows("cooperations")) {
+function normalizeFollowUp(record, creators = rows("creators"), cooperations = rows("cooperations"), data = state.data) {
   const creator = creators.find((row) => row.id === text(record.creator_id)) || creators.find((row) => text(row.name) === text(record.creator_name));
   const cooperation = cooperations.find((row) => row.id === text(record.cooperation_id));
   const now = new Date().toISOString();
@@ -4115,12 +4898,15 @@ function normalizeFollowUp(record, creators = rows("creators"), cooperations = r
     normalized.creator_id = creator.id;
     normalized.creator_name = creator.name;
     if (!text(normalized.brand)) normalized.brand = text(creator.brand);
+    if (!text(normalized.brand_id)) normalized.brand_id = text(creator.brand_id);
   } else {
     normalized.creator_id = text(normalized.creator_id);
     normalized.creator_name = text(normalized.creator_name);
   }
   if (cooperation) {
     normalized.cooperation_id = cooperation.id;
+    if (!text(normalized.brand)) normalized.brand = text(cooperation.brand);
+    if (!text(normalized.brand_id)) normalized.brand_id = text(cooperation.brand_id);
     if (!text(normalized.product_id)) normalized.product_id = text(cooperation.product_id);
     if (normalized.cooperation_mode === "待确认" && text(cooperation.model)) normalized.cooperation_mode = text(cooperation.model);
     if (!text(normalized.tracking_no)) normalized.tracking_no = text(cooperation.tracking_no);
@@ -4128,7 +4914,7 @@ function normalizeFollowUp(record, creators = rows("creators"), cooperations = r
   } else {
     normalized.cooperation_id = text(normalized.cooperation_id);
   }
-  return normalized;
+  return applyRecordBrand(normalized, data, creator || cooperation || null);
 }
 
 function resolveFollowUpLinks(record) {
@@ -4268,6 +5054,7 @@ function readFormRecord(options = {}) {
 
   if (state.activeTab === "cooperations") resolveCooperationLinks(record);
   if (state.activeTab === "followups") resolveFollowUpLinks(record);
+  if (BRANDED_TYPES.has(state.activeTab)) applyRecordBrand(record);
   record.updatedAt = new Date().toISOString();
   if (shouldApply) applyRecommendations(record, state.activeTab);
   return record;
@@ -4315,6 +5102,13 @@ async function commitEditor({ close = false, showError = false } = {}) {
     focusFirstMissingRequired(record);
     return false;
   }
+  if (BRANDED_TYPES.has(state.activeTab) && !text(record.brand_id)) {
+    const message = "请先选择或填写所属品牌，再保存资料。";
+    elements.editorStatus.textContent = message;
+    elements.form.elements.brand?.focus();
+    if (showError) window.alert(message);
+    return false;
+  }
 
   const identityConflicts = findIdentityConflicts(record);
   if (identityConflicts.length) {
@@ -4326,7 +5120,7 @@ async function commitEditor({ close = false, showError = false } = {}) {
     return false;
   }
 
-  const list = rows();
+  const list = allRows();
   const previous = state.editingId ? list.find((row) => row.id === state.editingId) : null;
   const index = list.findIndex((row) => row.id === record.id);
   if (index >= 0) list[index] = record;
@@ -4337,6 +5131,8 @@ async function commitEditor({ close = false, showError = false } = {}) {
       state.data.followUpEvents.unshift({
         id: uid("EV"),
         follow_up_id: record.id,
+        brand_id: record.brand_id,
+        brand: record.brand,
         type: "stage",
         occurred_at: new Date().toISOString(),
         direction: "internal",
@@ -4510,9 +5306,12 @@ function importRows(rawRows, type, mapping) {
     }
 
     if (type === "cooperations") resolveCooperationLinks(record);
+    if (type === "followups") resolveFollowUpLinks(record);
+    if (BRANDED_TYPES.has(type)) applyRecordBrand(record);
     const requiredOk = entityConfig[type].fields.filter((field) => field.required).every((field) => text(record[field.key]));
     const hasAny = entityConfig[type].fields.some((field) => text(record[field.key]));
-    if (requiredOk && hasAny) {
+    const branded = !BRANDED_TYPES.has(type) || Boolean(text(record.brand_id));
+    if (requiredOk && hasAny && branded) {
       applyRecommendations(record, type);
       imported.push(record);
     }
@@ -4791,23 +5590,26 @@ function renderDuplicatePanel() {
 }
 
 function dedupeKey(record, type) {
+  const brandPrefix = BRANDED_TYPES.has(type) ? `brand::${text(record.brand_id) || brandKey(record.brand)}::` : "";
   if (type === "creators" || type === "leads") {
     const socialUrl = normalizeSocialIdentity(record.social_url);
     const email = normalizeHeader(record.email);
-    if (socialUrl) return `social::${socialUrl}`;
-    if (email) return `email::${email}`;
-    return `${normalizeHeader(record.name)}::${normalizeHeader(record.platform)}`;
+    if (socialUrl) return `${brandPrefix}social::${socialUrl}`;
+    if (email) return `${brandPrefix}email::${email}`;
+    return `${brandPrefix}${normalizeHeader(record.name)}::${normalizeHeader(record.platform)}`;
   }
-  if (type === "resources") return `${normalizeHeader(record.name)}::${normalizeHeader(record.type)}`;
-  return `${normalizeHeader(record.creator_name)}::${normalizeHeader(record.product)}::${normalizeHeader(record.post_date)}`;
+  if (type === "resources") return `${brandPrefix}${normalizeHeader(record.name)}::${normalizeHeader(record.type)}`;
+  return `${brandPrefix}${normalizeHeader(record.creator_name)}::${normalizeHeader(record.product)}::${normalizeHeader(record.post_date)}`;
 }
 
 function snapshotBusinessState() {
   return {
     meta: clone(state.data.meta || { version: 1 }),
+    brands: clone(state.data.brands || []),
     creators: clone(state.data.creators || []),
     resources: clone(state.data.resources || []),
     leads: clone(state.data.leads || []),
+    products: clone(state.data.products || []),
     cooperations: clone(state.data.cooperations || []),
     matches: clone(state.data.matches || []),
     followUps: clone(state.data.followUps || []),
@@ -4838,9 +5640,11 @@ async function rollbackImport(historyId) {
   }
 
   const snapshot = typeof item.snapshot === "string" ? JSON.parse(item.snapshot) : item.snapshot;
+  state.data.brands = Array.isArray(snapshot?.brands) ? snapshot.brands : state.data.brands;
   state.data.creators = Array.isArray(snapshot?.creators) ? snapshot.creators : [];
   state.data.resources = Array.isArray(snapshot?.resources) ? snapshot.resources : [];
   state.data.leads = Array.isArray(snapshot?.leads) ? snapshot.leads : [];
+  state.data.products = Array.isArray(snapshot?.products) ? snapshot.products : [];
   state.data.cooperations = Array.isArray(snapshot?.cooperations) ? snapshot.cooperations : [];
   state.data.matches = Array.isArray(snapshot?.matches) ? snapshot.matches : state.data.matches;
   state.data.followUps = Array.isArray(snapshot?.followUps) ? snapshot.followUps : state.data.followUps;
@@ -4895,7 +5699,7 @@ async function mergeDuplicateGroup(ids) {
   const duplicates = selectedRows.filter((row) => row.id !== keeper.id);
   const merged = mergeRecords(keeper, duplicates);
   const duplicateIds = new Set(duplicates.map((row) => row.id));
-  const list = rows();
+  const list = allRows();
   const keeperIndex = list.findIndex((row) => row.id === keeper.id);
   if (keeperIndex < 0) return;
 
@@ -4947,7 +5751,7 @@ function getImportImpact(importableRows, type) {
 async function confirmImport() {
   const draft = state.importDraft;
   if (!draft) return;
-  const list = state.data[draft.type];
+  const list = allRows(draft.type);
   const beforeSnapshot = snapshotBusinessState();
   const beforeCounts = {
     creators: state.data.creators.length,
@@ -4963,6 +5767,11 @@ async function confirmImport() {
   const seenKeys = new Set();
 
   for (const record of importRows(draft.rawRows, draft.type, draft.mapping)) {
+    if (BRANDED_TYPES.has(draft.type)) applyRecordBrand(record);
+    if (BRANDED_TYPES.has(draft.type) && !text(record.brand_id)) {
+      skipped += 1;
+      continue;
+    }
     const key = dedupeKey(record, draft.type);
     if (seenKeys.has(key)) {
       skipped += 1;
@@ -5112,7 +5921,53 @@ function bindEvents() {
   });
   elements.mailSettingsForm.addEventListener("submit", saveMailSettings);
   elements.mailTestBtn.addEventListener("click", testMailSettings);
+  elements.mailSmtpTestBtn.addEventListener("click", testSmtpSettings);
   elements.mailSyncBtn.addEventListener("click", syncMailbox);
+  elements.mailNewAccountBtn.addEventListener("click", () => {
+    state.mailAccountEditingId = null;
+    renderMailSettings();
+  });
+  elements.mailCancelEditBtn.addEventListener("click", () => {
+    state.mailAccountEditingId = null;
+    renderMailSettings();
+  });
+  elements.mailAccountList.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-mail-account-action]");
+    if (!button) return;
+    const accountId = button.dataset.mailAccountId;
+    const action = button.dataset.mailAccountAction;
+    if (action === "edit") {
+      state.mailAccountEditingId = accountId;
+      renderMailSettings();
+      elements.mailAccountEditor.scrollIntoView({ behavior: "smooth", block: "start" });
+      return;
+    }
+    if (action === "test") {
+      void testMailSettings(accountId);
+      return;
+    }
+    if (action === "smtp") {
+      void testSmtpSettings(accountId);
+      return;
+    }
+    if (action === "sync") {
+      void syncMailbox(accountId);
+      return;
+    }
+    if (action === "delete") void deleteMailAccount(accountId);
+  });
+  elements.brandWorkspaceSelect.addEventListener("change", () => {
+    state.activeBrandId = elements.brandWorkspaceSelect.value;
+    state.selectedLeadIds.clear();
+    state.filters = createFilters(state.activeTab);
+    state.filterMenu = null;
+    state.productFilters = { query: "", brand: "", country: "", category: "", store: "" };
+    state.followUpBoardFilter = { query: "", stage: "", priority: "", overdueOnly: false };
+    resetEditorState();
+    closeCreatorDrawer();
+    closeFollowUpDetail();
+    render();
+  });
   elements.saveTimezonesBtn.addEventListener("click", saveTimeZones);
   const bindKeySource = (source, keyInput) => {
     source.addEventListener("change", () => {
@@ -5144,6 +5999,10 @@ function bindEvents() {
   document.getElementById("mailImportCancelBtn")?.addEventListener("click", closeMailImport);
   elements.mailImportBackdrop.addEventListener("click", (event) => {
     if (event.target === elements.mailImportBackdrop) closeMailImport();
+  });
+  elements.closeFollowUpDetailBtn.addEventListener("click", closeFollowUpDetail);
+  elements.followUpDetailBackdrop.addEventListener("click", (event) => {
+    if (event.target === elements.followUpDetailBackdrop) closeFollowUpDetail();
   });
   elements.outreachResult.addEventListener("click", (event) => {
     const copyButton = event.target.closest("[data-copy-outreach]");
@@ -5203,6 +6062,11 @@ function bindEvents() {
     if (state.globalSearch.open) {
       event.preventDefault();
       closeGlobalSearch();
+      return;
+    }
+    if (state.followUpDetail.open) {
+      event.preventDefault();
+      closeFollowUpDetail();
       return;
     }
     if (state.creatorDrawer.open) {

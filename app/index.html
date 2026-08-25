@@ -62,6 +62,10 @@
           </button>
         </div>
         <section class="timezone-bar" id="timezoneBar" aria-label="全球时区时间"></section>
+        <label class="brand-workspace" for="brandWorkspaceSelect">
+          <span>工作区</span>
+          <select id="brandWorkspaceSelect" aria-label="切换品牌工作区"></select>
+        </label>
         <div class="topbar-actions">
           <button class="ghost" id="refreshBtn">刷新</button>
           <button class="ghost" id="exportStateBtn">导出 JSON</button>
@@ -238,6 +242,14 @@
                   <option value="special">特殊 AI</option>
                 </select>
               </div>
+              <div class="field">
+                <label for="followUpAiProfile">邮件分析与跟进回复</label>
+                <select id="followUpAiProfile" name="assignments.followup">
+                  <option value="standard">普通 AI</option>
+                  <option value="advanced">高能力 AI</option>
+                  <option value="special">特殊 AI</option>
+                </select>
+              </div>
             </div>
           </section>
           <div class="settings-actions">
@@ -249,56 +261,111 @@
         <form id="mailSettingsForm" class="mail-settings" aria-labelledby="mailSettingsTitle">
           <div class="option-settings-head">
             <div>
-              <h3 id="mailSettingsTitle">官邮 IMAP 同步</h3>
-              <p>连接邮箱服务器读取最近收件与已发送邮件；仅归档主题、地址、时间和摘要，不读附件、不发送邮件，也不会改变合作阶段。</p>
+              <h3 id="mailSettingsTitle">品牌官方邮箱</h3>
+              <p>每个账户绑定一个品牌。可手动测试 IMAP / SMTP、同步近期邮件；不会读取附件、自动发送邮件或自动改变合作阶段。</p>
             </div>
-            <label class="switch-field" for="mailEnabled">
-              <span>启用同步</span>
-              <input id="mailEnabled" name="enabled" type="checkbox" />
-            </label>
+            <button type="button" class="ghost" id="mailNewAccountBtn">新增邮箱账户</button>
           </div>
-          <div class="settings-fields">
-            <div class="field">
-              <label for="mailLabel">账户名称</label>
-              <input id="mailLabel" name="label" type="text" maxlength="80" placeholder="例如：阿里官邮" />
+          <section class="mail-account-list" id="mailAccountList" aria-label="已保存官方邮箱账户"></section>
+          <section class="mail-account-editor" id="mailAccountEditor">
+            <div class="mail-account-editor-head">
+              <div>
+                <strong id="mailEditorTitle">新增官方邮箱账户</strong>
+                <small>授权码只在填写或变更时提交，保存后不会回显。</small>
+              </div>
+              <button type="button" class="ghost hidden" id="mailCancelEditBtn">取消编辑</button>
             </div>
-            <div class="field">
-              <label for="mailUser">邮箱账号</label>
-              <input id="mailUser" name="user" type="email" autocomplete="username" placeholder="name@yourdomain.com" />
+            <input id="mailAccountId" name="id" type="hidden" />
+            <div class="settings-fields">
+              <div class="field">
+                <label for="mailBrandId">所属品牌</label>
+                <select id="mailBrandId" name="brand_id"></select>
+              </div>
+              <div class="field">
+                <label for="mailLabel">账户名称</label>
+                <input id="mailLabel" name="label" type="text" maxlength="80" placeholder="例如：阿里官邮" />
+              </div>
+              <div class="field field-wide">
+                <label for="mailFromName">发件显示名称</label>
+                <input id="mailFromName" name="fromName" type="text" maxlength="120" placeholder="例如：Palficab Team（可选）" />
+              </div>
+              <label class="field checkbox-field" for="mailEnabled">
+                <span>同步开关</span>
+                <span><input id="mailEnabled" name="enabled" type="checkbox" checked /> 启用该账户的手动同步</span>
+              </label>
             </div>
-            <div class="field field-wide">
-              <label for="mailHost">IMAP 服务器</label>
-              <input id="mailHost" name="host" type="text" autocomplete="off" placeholder="例如：imap.qiye.aliyun.com 或你的 c2.icoremail 服务器地址" />
+            <div class="mail-protocol-title">IMAP 收取与归档</div>
+            <div class="settings-fields">
+              <div class="field field-wide">
+                <label for="mailHost">IMAP 服务器</label>
+                <input id="mailHost" name="imap.host" type="text" autocomplete="off" placeholder="例如：imap.qiye.aliyun.com 或 c2.icoremail 服务器地址" />
+              </div>
+              <div class="field">
+                <label for="mailPort">IMAP 端口</label>
+                <input id="mailPort" name="imap.port" type="number" min="1" max="65535" value="993" />
+              </div>
+              <label class="field checkbox-field" for="mailSecure">
+                <span>IMAP 安全</span>
+                <span><input id="mailSecure" name="imap.secure" type="checkbox" checked /> 使用 SSL / TLS</span>
+              </label>
+              <div class="field">
+                <label for="mailUser">IMAP 邮箱账号</label>
+                <input id="mailUser" name="imap.user" type="email" autocomplete="username" placeholder="name@yourdomain.com" />
+              </div>
+              <div class="field">
+                <label for="mailPassword">IMAP 授权码 / 专用密码</label>
+                <input id="mailPassword" name="imap.password" type="password" autocomplete="new-password" placeholder="保存后不回显；留空不修改" />
+              </div>
+              <div class="field">
+                <label for="mailInboxFolder">收件箱文件夹</label>
+                <input id="mailInboxFolder" name="imap.inboxFolder" type="text" value="INBOX" placeholder="INBOX" />
+              </div>
+              <div class="field">
+                <label for="mailSentFolder">已发送文件夹</label>
+                <input id="mailSentFolder" name="imap.sentFolder" type="text" value="Sent" placeholder="Sent 或 已发送" />
+              </div>
+              <div class="field">
+                <label for="mailSyncDays">同步范围（最近天数）</label>
+                <input id="mailSyncDays" name="imap.syncDays" type="number" min="1" max="90" value="30" />
+              </div>
             </div>
-            <div class="field">
-              <label for="mailPort">端口</label>
-              <input id="mailPort" name="port" type="number" min="1" max="65535" value="993" />
+            <div class="mail-protocol-title">SMTP 网页发信</div>
+            <div class="settings-fields">
+              <label class="field checkbox-field" for="mailSmtpEnabled">
+                <span>SMTP 发信</span>
+                <span><input id="mailSmtpEnabled" name="smtp.enabled" type="checkbox" checked /> 启用人工确认发信</span>
+              </label>
+              <label class="field checkbox-field" for="mailSmtpUseImapPassword">
+                <span>授权码方式</span>
+                <span><input id="mailSmtpUseImapPassword" name="smtp.useImapPassword" type="checkbox" checked /> 复用 IMAP 授权码</span>
+              </label>
+              <div class="field field-wide">
+                <label for="mailSmtpHost">SMTP 服务器</label>
+                <input id="mailSmtpHost" name="smtp.host" type="text" autocomplete="off" placeholder="例如：smtp.qiye.aliyun.com" />
+              </div>
+              <div class="field">
+                <label for="mailSmtpPort">SMTP 端口</label>
+                <input id="mailSmtpPort" name="smtp.port" type="number" min="1" max="65535" value="465" />
+              </div>
+              <label class="field checkbox-field" for="mailSmtpSecure">
+                <span>SMTP 安全</span>
+                <span><input id="mailSmtpSecure" name="smtp.secure" type="checkbox" checked /> 使用 SSL / TLS</span>
+              </label>
+              <div class="field">
+                <label for="mailSmtpUser">SMTP 邮箱账号</label>
+                <input id="mailSmtpUser" name="smtp.user" type="email" autocomplete="username" placeholder="留空则复用 IMAP 邮箱账号" />
+              </div>
+              <div class="field">
+                <label for="mailSmtpPassword">SMTP 独立授权码</label>
+                <input id="mailSmtpPassword" name="smtp.password" type="password" autocomplete="new-password" placeholder="复用 IMAP 授权码时无需填写" />
+              </div>
             </div>
-            <label class="field checkbox-field" for="mailSecure">
-              <span>连接安全</span>
-              <span><input id="mailSecure" name="secure" type="checkbox" checked /> 使用 SSL / TLS</span>
-            </label>
-            <div class="field">
-              <label for="mailInboxFolder">收件箱文件夹</label>
-              <input id="mailInboxFolder" name="inboxFolder" type="text" value="INBOX" placeholder="INBOX" />
-            </div>
-            <div class="field">
-              <label for="mailSentFolder">已发送文件夹</label>
-              <input id="mailSentFolder" name="sentFolder" type="text" value="Sent" placeholder="Sent 或 已发送" />
-            </div>
-            <div class="field">
-              <label for="mailSyncDays">同步范围（最近天数）</label>
-              <input id="mailSyncDays" name="syncDays" type="number" min="1" max="90" value="30" />
-            </div>
-            <div class="field">
-              <label for="mailPassword">授权码 / 专用密码</label>
-              <input id="mailPassword" name="password" type="password" autocomplete="new-password" placeholder="保存后不会回显；留空表示不修改" />
-            </div>
-          </div>
+          </section>
           <div class="settings-actions">
-            <button type="submit" class="primary">保存邮箱配置</button>
-            <button type="button" id="mailTestBtn" class="ghost">测试连接</button>
-            <button type="button" id="mailSyncBtn" class="ghost">立即同步</button>
+            <button type="submit" class="primary">保存当前账户</button>
+            <button type="button" id="mailTestBtn" class="ghost">测试 IMAP</button>
+            <button type="button" id="mailSmtpTestBtn" class="ghost">测试 SMTP</button>
+            <button type="button" id="mailSyncBtn" class="ghost">立即同步此账户</button>
           </div>
           <p class="settings-status" id="mailSettingsStatus"></p>
         </form>
@@ -497,6 +564,20 @@
           <button type="button" class="primary" id="mailImportConfirmBtn" disabled>导入到邮件时间线</button>
           <button type="button" class="ghost" id="mailImportCancelBtn">取消</button>
         </div>
+      </article>
+    </section>
+
+    <section class="followup-detail-modal hidden" id="followUpDetailModal" aria-hidden="true">
+      <div class="followup-detail-backdrop" id="followUpDetailBackdrop"></div>
+      <article class="followup-detail-dialog" role="dialog" aria-modal="true" aria-labelledby="followUpDetailTitle">
+        <header class="editor-head">
+          <div>
+            <h2 id="followUpDetailTitle">合作跟进详情</h2>
+            <p class="panel-hint" id="followUpDetailHint"></p>
+          </div>
+          <button type="button" class="close-editor" id="closeFollowUpDetailBtn" aria-label="关闭合作跟进详情" title="关闭">×</button>
+        </header>
+        <section class="followup-detail-body" id="followUpDetailBody"></section>
       </article>
     </section>
 

@@ -4650,3 +4650,809 @@ body.access-locked .app-shell {
     grid-template-columns: 1fr;
   }
 }
+
+/* Brand-bound mail accounts and the follow-up workspace share the compact dark surface. */
+.brand-workspace {
+  display: grid;
+  min-width: 142px;
+  gap: 2px;
+  color: #9eb2c4;
+  font-size: 0.62rem;
+  line-height: 1;
+}
+
+.brand-workspace select {
+  width: 100%;
+  min-height: 29px;
+  border: 1px solid #354a60;
+  border-radius: 5px;
+  background: #121c27;
+  color: #e0edf8;
+  font-size: 0.72rem;
+}
+
+.mail-account-list {
+  display: grid;
+  gap: 6px;
+}
+
+.mail-account-empty {
+  margin: 0;
+  padding: 10px;
+  border: 1px dashed #40566c;
+  border-radius: 5px;
+  color: #9db2c6;
+  font-size: 0.72rem;
+}
+
+.mail-account-row {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 8px 9px;
+  border: 1px solid #304256;
+  border-radius: 5px;
+  background: #172330;
+}
+
+.mail-account-row.is-editing {
+  border-color: #5d91c3;
+  background: #192a39;
+}
+
+.mail-account-row-main {
+  display: grid;
+  min-width: 0;
+  flex: 1 1 auto;
+  gap: 2px;
+}
+
+.mail-account-row-main strong {
+  overflow: hidden;
+  color: #e8f2fb;
+  font-size: 0.75rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mail-account-row-main small,
+.mail-account-row-main span {
+  overflow: hidden;
+  color: #9cb1c4;
+  font-size: 0.66rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mail-account-row-main span {
+  color: #b7c9d9;
+}
+
+.mail-account-row-actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 4px;
+}
+
+.mail-account-row-actions button {
+  min-height: 26px;
+  padding: 0.28rem 0.46rem;
+  border-radius: 4px;
+  font-size: 0.66rem;
+}
+
+.mail-account-editor {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #304256;
+  border-radius: 5px;
+  background: #172330;
+}
+
+.mail-account-editor-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.mail-account-editor-head > div {
+  display: grid;
+  gap: 2px;
+}
+
+.mail-account-editor-head strong {
+  color: #e8f2fb;
+  font-size: 0.79rem;
+}
+
+.mail-account-editor-head small {
+  color: #93a9bc;
+  font-size: 0.67rem;
+}
+
+.mail-protocol-title {
+  padding-top: 3px;
+  border-top: 1px solid #2c3d4f;
+  color: #b9cce0;
+  font-size: 0.68rem;
+  font-weight: 700;
+}
+
+.followup-detail-modal {
+  position: fixed;
+  z-index: 78;
+  inset: 0;
+  display: none;
+}
+
+.followup-detail-modal:not(.hidden) {
+  display: grid;
+  place-items: center;
+}
+
+.followup-detail-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(3, 8, 14, 0.78);
+  backdrop-filter: blur(2px);
+}
+
+.followup-detail-dialog {
+  position: relative;
+  display: grid;
+  width: min(1380px, calc(100vw - 28px));
+  max-height: min(860px, calc(100vh - 28px));
+  min-height: min(600px, calc(100vh - 28px));
+  overflow: hidden;
+  border: 1px solid #3a4e63;
+  border-radius: 6px;
+  background: #141f2a;
+  box-shadow: 0 28px 76px rgba(0, 0, 0, 0.56);
+}
+
+.followup-detail-dialog > .editor-head {
+  min-height: 52px;
+  padding: 9px 12px;
+  border-bottom: 1px solid #304256;
+  background: #182633;
+}
+
+.followup-detail-body {
+  min-height: 0;
+  overflow: auto;
+  padding: 10px;
+  scrollbar-color: #4a6278 #111a24;
+}
+
+.followup-detail-layout {
+  display: grid;
+  grid-template-columns: minmax(0, 1.42fr) minmax(330px, 0.88fr);
+  gap: 9px;
+  align-items: start;
+}
+
+.followup-detail-main,
+.followup-detail-side {
+  display: grid;
+  min-width: 0;
+  gap: 9px;
+}
+
+.followup-detail-side {
+  position: sticky;
+  top: 0;
+}
+
+.followup-detail-overview,
+.followup-detail-section {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #304256;
+  border-radius: 5px;
+  background: #182633;
+}
+
+.followup-detail-section > header {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid #2d4053;
+}
+
+.followup-detail-section > header > div {
+  display: grid;
+  gap: 1px;
+}
+
+.followup-detail-section > header span {
+  color: #78a7d2;
+  font-size: 0.6rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.followup-detail-section > header h3 {
+  margin: 0;
+  color: #ecf5fd;
+  font-size: 0.83rem;
+  line-height: 1.2;
+}
+
+.followup-detail-section > header small {
+  color: #8fa6ba;
+  font-size: 0.66rem;
+}
+
+.followup-detail-creator {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.followup-detail-creator > div:nth-child(2) {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.followup-detail-creator strong,
+.followup-detail-creator span,
+.followup-detail-creator small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.followup-detail-creator strong {
+  color: #ecf5fd;
+  font-size: 0.88rem;
+}
+
+.followup-detail-creator span,
+.followup-detail-creator small {
+  color: #9ab0c3;
+  font-size: 0.67rem;
+}
+
+.followup-detail-overview-actions {
+  display: flex;
+  gap: 4px;
+}
+
+.followup-detail-overview-actions .icon-button {
+  width: 27px;
+  min-width: 27px;
+  min-height: 27px;
+  padding: 0;
+}
+
+.followup-detail-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.detail-brand-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 21px;
+  max-width: 100%;
+  padding: 0.16rem 0.44rem;
+  overflow: hidden;
+  border: 1px solid #536f8d;
+  border-radius: 999px;
+  background: #1a3043;
+  color: #c5d9ec;
+  font-size: 0.65rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.followup-detail-facts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  margin: 0;
+}
+
+.followup-detail-facts > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  padding: 5px 6px;
+  border: 1px solid #2e4154;
+  border-radius: 4px;
+  background: #141f2a;
+}
+
+.followup-detail-facts dt {
+  color: #8ea5ba;
+  font-size: 0.6rem;
+}
+
+.followup-detail-facts dd {
+  min-width: 0;
+  margin: 0;
+  overflow: hidden;
+  color: #d9e7f3;
+  font-size: 0.68rem;
+  line-height: 1.4;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.followup-detail-facts a,
+.followup-detail-product a {
+  color: #85b9e8;
+  text-decoration: none;
+}
+
+.followup-detail-facts a:hover,
+.followup-detail-product a:hover {
+  color: #b8dcfc;
+  text-decoration: underline;
+}
+
+.followup-detail-notes {
+  display: grid;
+  gap: 3px;
+  margin: 0;
+  padding: 6px 7px;
+  border-left: 2px solid #608db8;
+  background: #142331;
+  color: #b9cada;
+  font-size: 0.69rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+}
+
+.followup-detail-notes b {
+  color: #d7e8f8;
+  font-size: 0.65rem;
+}
+
+.followup-detail-product {
+  display: grid;
+  grid-template-columns: 58px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.followup-detail-product .product-thumb,
+.followup-detail-product .product-thumb-placeholder {
+  width: 58px;
+  height: 58px;
+  border-radius: 4px;
+}
+
+.followup-detail-product > div {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.followup-detail-product strong,
+.followup-detail-product span,
+.followup-detail-product a {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.followup-detail-product strong {
+  color: #eaf4fc;
+  font-size: 0.75rem;
+}
+
+.followup-detail-product span,
+.followup-detail-product a {
+  color: #9bb2c5;
+  font-size: 0.67rem;
+}
+
+.followup-detail-timeline {
+  display: grid;
+  gap: 6px;
+}
+
+.followup-detail-event {
+  display: grid;
+  gap: 4px;
+  padding: 7px 8px;
+  border: 1px solid #304256;
+  border-left: 3px solid #58738c;
+  border-radius: 4px;
+  background: #141f2a;
+}
+
+.followup-detail-event.is-inbound {
+  border-left-color: #4db881;
+}
+
+.followup-detail-event.is-outbound {
+  border-left-color: #5797dc;
+}
+
+.followup-detail-event.is-internal {
+  border-left-color: #d9a95a;
+}
+
+.followup-detail-event header {
+  display: flex;
+  min-width: 0;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.followup-detail-event header > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.followup-detail-event strong {
+  overflow: hidden;
+  color: #e8f2fb;
+  font-size: 0.71rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.followup-detail-event header span,
+.followup-detail-event header time,
+.followup-detail-event small,
+.followup-detail-event footer {
+  color: #8fa6b9;
+  font-size: 0.62rem;
+}
+
+.followup-detail-event time {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.followup-detail-event p {
+  display: -webkit-box;
+  margin: 0;
+  overflow: hidden;
+  color: #c0d0df;
+  font-size: 0.68rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 8;
+}
+
+.followup-detail-event p.is-empty {
+  color: #8197aa;
+}
+
+.followup-detail-event footer {
+  padding-top: 2px;
+  border-top: 1px solid #27394b;
+}
+
+.followup-detail-empty {
+  margin: 0;
+  padding: 10px;
+  border: 1px dashed #40576d;
+  border-radius: 4px;
+  color: #9db2c5;
+  font-size: 0.69rem;
+  line-height: 1.5;
+}
+
+.followup-ai-panel,
+.followup-draft-panel,
+.followup-send-panel {
+  background: #172633;
+}
+
+.followup-ai-note-label,
+.followup-draft-result label,
+.followup-send-panel label {
+  display: grid;
+  gap: 4px;
+  color: #b9ccdd;
+  font-size: 0.67rem;
+  font-weight: 600;
+}
+
+.followup-ai-note-label textarea,
+.followup-draft-result input,
+.followup-draft-result textarea,
+.followup-send-panel input,
+.followup-send-panel select {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid #385067;
+  border-radius: 4px;
+  background: #111b25;
+  color: #e4eff8;
+  font-size: 0.7rem;
+}
+
+.followup-ai-note-label textarea,
+.followup-draft-result textarea {
+  resize: vertical;
+  line-height: 1.45;
+}
+
+.followup-ai-panel > button,
+.followup-draft-panel > button,
+.followup-send-panel > button {
+  justify-self: start;
+  min-height: 29px;
+  padding: 0.34rem 0.56rem;
+  border-radius: 4px;
+  font-size: 0.68rem;
+}
+
+.followup-ai-analysis-result,
+.followup-draft-result {
+  display: grid;
+  gap: 8px;
+}
+
+.followup-ai-summary {
+  display: grid;
+  gap: 3px;
+  padding: 7px;
+  border-left: 2px solid #67a5db;
+  background: #132433;
+}
+
+.followup-ai-summary span {
+  color: #8fb9dc;
+  font-size: 0.61rem;
+  font-weight: 700;
+}
+
+.followup-ai-summary strong {
+  color: #e6f1fa;
+  font-size: 0.72rem;
+  line-height: 1.45;
+}
+
+.followup-ai-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.followup-ai-meta span,
+.followup-ai-notice {
+  color: #a7bdcf;
+  font-size: 0.65rem;
+  line-height: 1.4;
+}
+
+.followup-ai-meta span {
+  padding: 3px 5px;
+  border: 1px solid #344b60;
+  border-radius: 4px;
+  background: #142230;
+}
+
+.followup-ai-meta b {
+  color: #dcebf8;
+  font-weight: 600;
+}
+
+.followup-ai-notice {
+  margin: 0;
+}
+
+.followup-ai-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.followup-ai-grid section,
+.followup-ai-evidence,
+.followup-ai-warnings,
+.followup-ai-strategies {
+  display: grid;
+  gap: 5px;
+  padding: 6px;
+  border: 1px solid #30465a;
+  border-radius: 4px;
+  background: #14212d;
+}
+
+.followup-ai-grid h4,
+.followup-ai-evidence h4,
+.followup-ai-warnings h4,
+.followup-ai-strategies h4 {
+  margin: 0;
+  color: #c8d9e7;
+  font-size: 0.66rem;
+}
+
+.followup-ai-grid ul,
+.followup-ai-evidence ul,
+.followup-ai-warnings ul {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 15px;
+  color: #aebfd0;
+  font-size: 0.65rem;
+  line-height: 1.45;
+}
+
+.followup-ai-warnings {
+  border-color: #6d5834;
+  background: #2b261d;
+}
+
+.followup-ai-warnings h4,
+.followup-ai-warnings ul {
+  color: #dbc89c;
+}
+
+.followup-ai-strategies > div {
+  display: grid;
+  gap: 4px;
+}
+
+.followup-ai-strategy {
+  display: flex;
+  gap: 6px;
+  align-items: flex-start;
+  padding: 5px;
+  border: 1px solid #334a60;
+  border-radius: 4px;
+  background: #111c27;
+  cursor: pointer;
+}
+
+.followup-ai-strategy:has(input:checked) {
+  border-color: #5d9bd1;
+  background: #173149;
+}
+
+.followup-ai-strategy input {
+  width: auto;
+  min-height: 0;
+  margin: 2px 0 0;
+}
+
+.followup-ai-strategy span {
+  display: grid;
+  gap: 1px;
+}
+
+.followup-ai-strategy strong {
+  color: #dbeaf6;
+  font-size: 0.67rem;
+}
+
+.followup-ai-strategy small {
+  color: #9cb2c4;
+  font-size: 0.63rem;
+  line-height: 1.35;
+}
+
+.followup-draft-result {
+  padding: 7px;
+  border: 1px solid #30465a;
+  border-radius: 4px;
+  background: #14212d;
+}
+
+.followup-draft-warnings {
+  display: grid;
+  gap: 3px;
+}
+
+.followup-draft-warnings span {
+  color: #cdbd8e;
+  font-size: 0.64rem;
+  line-height: 1.35;
+}
+
+.followup-send-notice {
+  margin: 0;
+  padding: 6px;
+  border-left: 2px solid #5b89b1;
+  background: #132333;
+  color: #abc0d1;
+  font-size: 0.65rem;
+  line-height: 1.45;
+}
+
+.followup-detail-status {
+  margin: 0;
+  padding: 7px 8px;
+  border: 1px solid #3c5871;
+  border-radius: 4px;
+  background: #182d3e;
+  color: #c6ddeb;
+  font-size: 0.68rem;
+  line-height: 1.4;
+}
+
+@media (max-width: 900px) {
+  .followup-detail-dialog {
+    width: min(980px, calc(100vw - 20px));
+    max-height: calc(100vh - 20px);
+    min-height: 0;
+  }
+
+  .followup-detail-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .followup-detail-side {
+    position: static;
+  }
+
+  .mail-account-row {
+    display: grid;
+  }
+
+  .mail-account-row-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 560px) {
+  .brand-workspace {
+    width: 100%;
+  }
+
+  .followup-detail-dialog {
+    width: calc(100vw - 12px);
+    max-height: calc(100vh - 12px);
+    border-radius: 5px;
+  }
+
+  .followup-detail-body {
+    padding: 7px;
+  }
+
+  .followup-detail-overview,
+  .followup-detail-section {
+    padding: 8px;
+  }
+
+  .followup-detail-creator {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .followup-detail-overview-actions {
+    grid-column: 2;
+    justify-content: flex-start;
+  }
+
+  .followup-detail-facts,
+  .followup-ai-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .followup-detail-event header {
+    display: grid;
+  }
+
+  .followup-detail-event time {
+    white-space: normal;
+  }
+
+  .mail-account-editor-head {
+    display: grid;
+  }
+}

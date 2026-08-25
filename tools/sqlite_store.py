@@ -5,8 +5,18 @@ from pathlib import Path
 
 
 SCHEMA = {
+    "brands": {
+        "id": "TEXT PRIMARY KEY",
+        "name": "TEXT",
+        "default_country": "TEXT",
+        "default_language": "TEXT",
+        "timezone": "TEXT",
+        "createdAt": "TEXT",
+        "updatedAt": "TEXT",
+    },
     "creators": {
         "id": "TEXT PRIMARY KEY",
+        "brand_id": "TEXT",
         "brand": "TEXT",
         "name": "TEXT",
         "handle": "TEXT",
@@ -37,6 +47,7 @@ SCHEMA = {
     },
     "resources": {
         "id": "TEXT PRIMARY KEY",
+        "brand_id": "TEXT",
         "brand": "TEXT",
         "name": "TEXT",
         "type": "TEXT",
@@ -60,6 +71,7 @@ SCHEMA = {
     },
     "leads": {
         "id": "TEXT PRIMARY KEY",
+        "brand_id": "TEXT",
         "brand": "TEXT",
         "social_url": "TEXT",
         "name": "TEXT",
@@ -80,6 +92,7 @@ SCHEMA = {
     },
     "products": {
         "id": "TEXT PRIMARY KEY",
+        "brand_id": "TEXT",
         "brand": "TEXT",
         "country": "TEXT",
         "category": "TEXT",
@@ -95,6 +108,8 @@ SCHEMA = {
     },
     "cooperations": {
         "id": "TEXT PRIMARY KEY",
+        "brand_id": "TEXT",
+        "brand": "TEXT",
         "cooperation_no": "TEXT",
         "creator_id": "TEXT",
         "resource_id": "TEXT",
@@ -118,6 +133,8 @@ SCHEMA = {
     },
     "matches": {
         "id": "TEXT PRIMARY KEY",
+        "brand_id": "TEXT",
+        "brand": "TEXT",
         "title": "TEXT",
         "country": "TEXT",
         "categories": "TEXT",
@@ -134,6 +151,7 @@ SCHEMA = {
     },
     "followUps": {
         "id": "TEXT PRIMARY KEY",
+        "brand_id": "TEXT",
         "creator_id": "TEXT",
         "creator_name": "TEXT",
         "cooperation_id": "TEXT",
@@ -155,6 +173,8 @@ SCHEMA = {
     },
     "followUpEvents": {
         "id": "TEXT PRIMARY KEY",
+        "brand_id": "TEXT",
+        "mailbox_account_id": "TEXT",
         "follow_up_id": "TEXT",
         "type": "TEXT",
         "occurred_at": "TEXT",
@@ -163,6 +183,7 @@ SCHEMA = {
         "sender": "TEXT",
         "recipients": "TEXT",
         "excerpt": "TEXT",
+        "body": "TEXT",
         "message_id": "TEXT",
         "fingerprint": "TEXT",
         "source": "TEXT",
@@ -175,6 +196,8 @@ SCHEMA = {
     },
     "mailInbox": {
         "id": "TEXT PRIMARY KEY",
+        "brand_id": "TEXT",
+        "mailbox_account_id": "TEXT",
         "type": "TEXT",
         "occurred_at": "TEXT",
         "direction": "TEXT",
@@ -182,6 +205,7 @@ SCHEMA = {
         "sender": "TEXT",
         "recipients": "TEXT",
         "excerpt": "TEXT",
+        "body": "TEXT",
         "message_id": "TEXT",
         "fingerprint": "TEXT",
         "source": "TEXT",
@@ -261,6 +285,7 @@ def rows_to_state(conn):
             "version": 1,
             "updatedAt": current_time_iso(),
         },
+        "brands": [],
         "creators": [],
         "resources": [],
         "leads": [],
