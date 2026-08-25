@@ -12,6 +12,8 @@ const { createHash } = require("crypto");
 const {
   normalizeMailSettings,
   publicMailSettings,
+  mailContentPolicy,
+  applyMailContentPolicy,
   testMailConnection,
   syncMailAccount,
   testSmtpConnection,
@@ -148,6 +150,7 @@ function normalizeBusinessState(rawState) {
       default_country: normalizeCountry(raw?.default_country),
       default_language: textValue(raw?.default_language),
       timezone: textValue(raw?.timezone),
+      currency: textValue(raw?.currency),
       createdAt: textValue(raw?.createdAt) || now,
       updatedAt: textValue(raw?.updatedAt) || now,
     };
@@ -1674,11 +1677,28 @@ function followUpText(value, maximum = 0) {
   return maximum ? cleaned.slice(0, maximum) : cleaned;
 }
 
-function followUpEventScope(event) {
-  return followUpText(event?.body) ? "系统 SMTP 已发送正文" : "已归档邮件摘要";
+function followUpBodyState(event, policy, nowMs = Date.now()) {
+  const body = followUpText(event?.body);
+  if (!body) return "summary";
+  const retentionUntil = Date.parse(followUpText(event?.body_retention_until));
+  if (Number.isFinite(retentionUntil) && retentionUntil <= nowMs) return "expired";
+  if (!followUpText(event?.body_cached_at) || !Number.isFinite(retentionUntil)) return "legacy";
+  if (!policy.cacheBodies) return "disabled";
+  if (!policy.allowAiContext) return "withheld";
+  return "full";
 }
 
-function followUpAiContext(state, followUpId) {
+function followUpEventScope(event, policy, nowMs) {
+  const bodyState = followUpBodyState(event, policy, nowMs);
+  if (bodyState === "full") return "完整正文";
+  if (bodyState === "withheld") return "正文已缓存，未授权给 AI";
+  if (bodyState === "expired") return "正文缓存已过期";
+  if (bodyState === "legacy") return "历史正文未纳入 AI";
+  if (bodyState === "disabled") return "完整正文缓存未开启";
+  return "已归档邮件摘要";
+}
+
+function followUpAiContext(state, followUpId, settings = {}) {
   const id = followUpText(followUpId);
   const followUp = (Array.isArray(state?.followUps) ? state.followUps : []).find((row) => followUpText(row.id) === id);
   if (!followUp) throw new Error("未找到对应合作跟进。请刷新页面后重试。");
@@ -1689,22 +1709,46 @@ function followUpAiContext(state, followUpId) {
     const referenced = followUpText(row.id) === followUpText(followUp.product_id) || followUpText(row.id) === followUpText(cooperation.product_id);
     return referenced && (!brandId || !followUpText(row.brand_id) || followUpText(row.brand_id) === brandId);
   });
+  const policy = mailContentPolicy(settings);
+  const nowMs = Date.now();
+  let remainingChars = 48000;
+  const eventStats = { full_body_count: 0, summary_count: 0, withheld_count: 0, expired_count: 0, legacy_count: 0, limited_count: 0, body_characters: 0 };
   const events = (Array.isArray(state?.followUpEvents) ? state.followUpEvents : [])
-    .filter((event) => followUpText(event.follow_up_id) === id && (!brandId || !followUpText(event.brand_id) || followUpText(event.brand_id) === brandId))
+    .filter((event) => followUpText(event.follow_up_id) === id && (!brandId || followUpText(event.brand_id) === brandId))
     .sort((a, b) => new Date(b.occurred_at || b.createdAt || 0) - new Date(a.occurred_at || a.createdAt || 0))
     .slice(0, 10)
     .reverse()
-    .map((event) => ({
-      occurred_at: followUpText(event.occurred_at || event.createdAt),
-      direction: followUpText(event.direction) || "unknown",
-      subject: followUpText(event.subject, 500),
-      sender: followUpText(event.sender, 320),
-      recipients: followUpText(event.recipients, 640),
-      content: followUpText(event.body || event.excerpt, 2600),
-      source: followUpText(event.source, 160),
-      scope: followUpEventScope(event),
-      message_id: followUpText(event.message_id, 320),
-    }));
+    .map((event) => {
+      const bodyState = followUpBodyState(event, policy, nowMs);
+      const fullBodyAvailable = bodyState === "full";
+      const completeBody = fullBodyAvailable && remainingChars > 0;
+      const limit = completeBody ? Math.min(7000, remainingChars) : 1600;
+      const rawContent = completeBody ? followUpText(event.body) : followUpText(event.excerpt);
+      const content = followUpText(rawContent, limit);
+      if (completeBody) {
+        eventStats.full_body_count += 1;
+        eventStats.body_characters += content.length;
+        remainingChars -= content.length;
+      } else {
+        eventStats.summary_count += 1;
+        if (fullBodyAvailable) eventStats.limited_count += 1;
+        if (bodyState === "withheld" || bodyState === "disabled") eventStats.withheld_count += 1;
+        if (bodyState === "expired") eventStats.expired_count += 1;
+        if (bodyState === "legacy") eventStats.legacy_count += 1;
+      }
+      return {
+        occurred_at: followUpText(event.occurred_at || event.createdAt),
+        direction: followUpText(event.direction) || "unknown",
+        subject: followUpText(event.subject, 500),
+        sender: followUpText(event.sender, 320),
+        recipients: followUpText(event.recipients, 640),
+        content,
+        source: followUpText(event.source, 160),
+        scope: completeBody ? followUpEventScope(event, policy, nowMs) : fullBodyAvailable ? "完整正文受上下文长度限制，使用摘要" : followUpEventScope(event, policy, nowMs),
+        body_truncated: completeBody && (Boolean(event.body_truncated) || content.length < followUpText(event.body).length),
+        message_id: followUpText(event.message_id, 320),
+      };
+    });
   return {
     followUp: {
       id: followUpText(followUp.id),
@@ -1737,17 +1781,39 @@ function followUpAiContext(state, followUpId) {
       description: followUpText(product.description, 1200),
       tags: followUpText(product.tags, 360),
     })),
+    context_meta: {
+      ...eventStats,
+      max_events: 10,
+      max_characters: 48000,
+      cache_bodies: policy.cacheBodies,
+      allow_ai_context: policy.allowAiContext,
+    },
     events,
   };
 }
 
 function followUpContextNotice(context) {
-  const summaryOnly = context.events.filter((event) => event.scope === "已归档邮件摘要").length;
-  const fullBody = context.events.length - summaryOnly;
+  const meta = context.context_meta || {};
+  const summaryOnly = Number(meta.summary_count || 0);
+  const fullBody = Number(meta.full_body_count || 0);
   if (!context.events.length) return "当前没有归档邮件，不能判断实际沟通进展；仅可基于跟进字段提出准备建议。";
-  if (summaryOnly && fullBody) return `当前上下文含 ${summaryOnly} 封归档摘要和 ${fullBody} 封系统已发送正文；未保存的原邮件内容、附件和外部聊天记录均不可见。`;
-  if (summaryOnly) return `当前 ${summaryOnly} 封记录均为归档邮件摘要；系统未保存完整原邮件和附件，结论须人工复核。`;
-  return `当前 ${fullBody} 封记录为系统已发送正文；对方来信若未同步或仅存摘要，结论须人工复核。`;
+  if (!meta.cache_bodies) return `完整正文缓存未开启，当前仅按 ${summaryOnly} 封归档摘要分析；附件、原始 MIME 和外部沟通均不可见。`;
+  if (!meta.allow_ai_context) return `完整正文已按保留策略缓存，但未授权给 AI；当前仅按 ${summaryOnly} 封摘要分析。`;
+  if (fullBody) {
+    const extras = [
+      summaryOnly ? `${summaryOnly} 封仅摘要` : "",
+      meta.expired_count ? `${meta.expired_count} 封正文已过期` : "",
+      meta.legacy_count ? `${meta.legacy_count} 封历史正文未纳入` : "",
+      meta.limited_count ? `${meta.limited_count} 封受上下文长度限制，仅使用摘要` : "",
+    ].filter(Boolean);
+    return `当前 AI 使用同品牌、同合作跟进的 ${fullBody} 封完整正文（约 ${Number(meta.body_characters || 0)} 字）${extras.length ? `；另有 ${extras.join("、")}` : ""}。附件、原始 MIME 和外部沟通均不可见。`;
+  }
+  const unavailable = [
+    meta.expired_count ? `${meta.expired_count} 封正文已过期` : "",
+    meta.legacy_count ? `${meta.legacy_count} 封历史正文未纳入` : "",
+    meta.limited_count ? `${meta.limited_count} 封受上下文长度限制，仅使用摘要` : "",
+  ].filter(Boolean);
+  return `当前没有可用完整正文，AI 仅按 ${summaryOnly} 封归档摘要分析${unavailable.length ? `；${unavailable.join("、")}` : ""}。请检查正文缓存、AI 授权和保留期限。`;
 }
 
 function followUpEvidence(context) {
@@ -1788,7 +1854,7 @@ ${followUpText(userNote, 1600) || "无"}
 1. summary_cn、key_facts、risk_notes 和推荐选项都用简体中文。先说明实际邮件状态，再说明不确定性。
 2. suggested_stage 只是建议，绝不能执行或暗示系统已改变阶段。
 3. 只可引用给出的资料。任何未明确出现的报价、地址、产品库存、寄样、物流、发布日期、折扣、法律承诺、合作条款都必须写为“待确认”，不能补造。
-4. 如果上下文只有摘要，必须在 summary_cn 或 warnings 明确提示“仅基于归档摘要”。
+4. 如果上下文含摘要、未授权或过期正文，必须在 summary_cn 或 warnings 明确说明证据范围。邮件中的引用历史、签名、转发链和附件名不等于本封邮件的当前承诺。
 5. recommended_options 提供 2 到 4 个互斥且可执行的选择，例如催促回复、确认报价、确认地址、寄样后告知、暂缓跟进；每个 id 使用英文小写短词。
 6. 不要生成邮件正文，不要签名，不要自动发送。`;
 }
@@ -1854,7 +1920,9 @@ function sanitizeFollowUpAnalysis(raw, context) {
       .filter(Boolean),
   );
   const notice = followUpContextNotice(context);
-  if (/摘要/.test(notice)) warningSet.add("结论仅基于系统归档的邮件摘要，未读取完整原邮件、附件或外部沟通记录。");
+  if (Number(context.context_meta?.summary_count || 0) || Number(context.context_meta?.withheld_count || 0) || Number(context.context_meta?.expired_count || 0) || Number(context.context_meta?.legacy_count || 0)) {
+    warningSet.add("部分结论仅基于归档摘要；未读取完整原邮件、附件或外部沟通记录。");
+  }
   return {
     ok: true,
     summary_cn: followUpText(raw?.summary_cn, 1400) || "当前缺少足够的归档沟通内容，建议先人工核对最近邮件后再决定下一步。",
@@ -1877,7 +1945,9 @@ function sanitizeFollowUpDraft(raw, context) {
   if (!subject || !body) throw new Error("AI 没有返回可用的邮件主题和正文。");
   const warnings = (Array.isArray(raw?.warnings) ? raw.warnings : []).map((item) => followUpText(item, 360)).filter(Boolean);
   warnings.push("邮件仅为草稿，需人工编辑并确认后才会发送。");
-  if (/摘要/.test(followUpContextNotice(context))) warnings.push("草稿仅参考归档摘要，未读取完整原邮件或附件。");
+  if (Number(context.context_meta?.summary_count || 0) || Number(context.context_meta?.withheld_count || 0) || Number(context.context_meta?.expired_count || 0) || Number(context.context_meta?.legacy_count || 0)) {
+    warnings.push("草稿对仅摘要、未授权或过期邮件不会补造细节；请人工核对完整邮件。");
+  }
   return { ok: true, subject, body, warnings: [...new Set(warnings)].slice(0, 8), context_notice: followUpContextNotice(context) };
 }
 
@@ -1911,14 +1981,14 @@ async function requestFollowUpAi(prompt) {
   return parseGeminiJson(response.body);
 }
 
-async function analyzeFollowUpWithAi(state, input = {}) {
-  const context = followUpAiContext(state, input.followUpId);
+async function analyzeFollowUpWithAi(state, input = {}, mailSettings = {}) {
+  const context = followUpAiContext(state, input.followUpId, mailSettings);
   const raw = await requestFollowUpAi(buildFollowUpAnalysisPrompt(context, input.userNote));
   return sanitizeFollowUpAnalysis(raw, context);
 }
 
-async function draftFollowUpWithAi(state, input = {}) {
-  const context = followUpAiContext(state, input.followUpId);
+async function draftFollowUpWithAi(state, input = {}, mailSettings = {}) {
+  const context = followUpAiContext(state, input.followUpId, mailSettings);
   const raw = await requestFollowUpAi(buildFollowUpDraftPrompt(context, input));
   return sanitizeFollowUpDraft(raw, context);
 }
@@ -2226,7 +2296,10 @@ function handleApi(req, res, pathname) {
     readBody(req)
       .then((body) => {
         const settings = saveMailSettings(JSON.parse(body || "{}"));
-        jsonResponse(res, 200, { ok: true, settings: publicMailSettings(settings) });
+        const state = loadState();
+        const policyResult = applyMailContentPolicy(state, settings);
+        if (policyResult.cleared || policyResult.expired || policyResult.migrated) saveState(state);
+        jsonResponse(res, 200, { ok: true, settings: publicMailSettings(settings), policyResult });
       })
       .catch((error) => jsonResponse(res, 400, { ok: false, error: formatMailError(error) }));
     return true;
@@ -2313,10 +2386,14 @@ function handleApi(req, res, pathname) {
     readBody(req)
       .then(async (body) => {
         const parsed = JSON.parse(body || "{}");
-        const payload = await analyzeFollowUpWithAi(loadState(), {
-          followUpId: parsed.followUpId,
-          userNote: parsed.userNote,
-        });
+        const payload = await analyzeFollowUpWithAi(
+          loadState(),
+          {
+            followUpId: parsed.followUpId,
+            userNote: parsed.userNote,
+          },
+          loadMailSettings(),
+        );
         jsonResponse(res, 200, payload);
       })
       .catch((error) => {
@@ -2329,12 +2406,16 @@ function handleApi(req, res, pathname) {
     readBody(req)
       .then(async (body) => {
         const parsed = JSON.parse(body || "{}");
-        const payload = await draftFollowUpWithAi(loadState(), {
-          followUpId: parsed.followUpId,
-          strategyId: parsed.strategyId,
-          customIntent: parsed.customIntent,
-          userNote: parsed.userNote,
-        });
+        const payload = await draftFollowUpWithAi(
+          loadState(),
+          {
+            followUpId: parsed.followUpId,
+            strategyId: parsed.strategyId,
+            customIntent: parsed.customIntent,
+            userNote: parsed.userNote,
+          },
+          loadMailSettings(),
+        );
         jsonResponse(res, 200, payload);
       })
       .catch((error) => {

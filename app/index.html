@@ -66,6 +66,7 @@
           <span>工作区</span>
           <select id="brandWorkspaceSelect" aria-label="切换品牌工作区"></select>
         </label>
+        <button class="ghost brand-manage-trigger" id="brandManageBtn" type="button" title="新增、编辑或删除品牌工作区">管理品牌</button>
         <div class="topbar-actions">
           <button class="ghost" id="refreshBtn">刷新</button>
           <button class="ghost" id="exportStateBtn">导出 JSON</button>
@@ -258,6 +259,52 @@
           </div>
           <p class="settings-status" id="aiSettingsStatus"></p>
         </form>
+        <section class="brand-settings" aria-labelledby="brandSettingsTitle">
+          <div class="option-settings-head">
+            <div>
+              <h3 id="brandSettingsTitle">品牌工作区</h3>
+              <p>新增品牌后，资料、产品、合作跟进和官方邮箱会按工作区隔离。只有没有关联资料和邮箱的空品牌才能删除。</p>
+            </div>
+            <button type="button" class="ghost" id="brandNewBtn">新增品牌</button>
+          </div>
+          <section class="brand-list" id="brandList" aria-label="已保存品牌工作区"></section>
+          <form id="brandForm" class="brand-editor">
+            <div class="mail-account-editor-head">
+              <div>
+                <strong id="brandEditorTitle">新增品牌工作区</strong>
+                <small>主要市场、语言和时区会作为新资料的默认参考，不会覆盖已有资料。</small>
+              </div>
+              <button type="button" class="ghost hidden" id="brandCancelEditBtn">取消编辑</button>
+            </div>
+            <input id="brandId" name="id" type="hidden" />
+            <div class="settings-fields">
+              <div class="field">
+                <label for="brandName">品牌名称</label>
+                <input id="brandName" name="name" type="text" maxlength="80" required placeholder="例如：HSU Shop" />
+              </div>
+              <div class="field">
+                <label for="brandCountry">主要市场</label>
+                <input id="brandCountry" name="default_country" type="text" maxlength="60" placeholder="例如：美国" />
+              </div>
+              <div class="field">
+                <label for="brandLanguage">默认语言</label>
+                <input id="brandLanguage" name="default_language" type="text" maxlength="40" placeholder="例如：English" />
+              </div>
+              <div class="field">
+                <label for="brandCurrency">默认币种</label>
+                <input id="brandCurrency" name="currency" type="text" maxlength="12" placeholder="例如：USD" />
+              </div>
+              <div class="field field-wide">
+                <label for="brandTimezone">主要时区</label>
+                <select id="brandTimezone" name="timezone"></select>
+              </div>
+            </div>
+            <div class="settings-actions">
+              <button type="submit" class="primary">保存品牌</button>
+            </div>
+            <p class="settings-status" id="brandSettingsStatus"></p>
+          </form>
+        </section>
         <form id="mailSettingsForm" class="mail-settings" aria-labelledby="mailSettingsTitle">
           <div class="option-settings-head">
             <div>
@@ -267,6 +314,35 @@
             <button type="button" class="ghost" id="mailNewAccountBtn">新增邮箱账户</button>
           </div>
           <section class="mail-account-list" id="mailAccountList" aria-label="已保存官方邮箱账户"></section>
+          <section class="mail-content-policy" aria-labelledby="mailContentPolicyTitle">
+            <div>
+              <strong id="mailContentPolicyTitle">邮件正文与 AI 上下文</strong>
+              <small>不保存附件、图片或原始 MIME 文件；只处理当前品牌、当前合作跟进且未过期的纯文本正文。</small>
+            </div>
+            <div class="mail-content-policy-grid">
+              <label class="field checkbox-field" for="mailCacheBodies">
+                <span>缓存完整正文</span>
+                <span><input id="mailCacheBodies" type="checkbox" /> 同步和重新同步时保存纯文本正文</span>
+              </label>
+              <label class="field checkbox-field" for="mailAllowAiContext">
+                <span>授权 AI 使用正文</span>
+                <span><input id="mailAllowAiContext" type="checkbox" /> 仅发送当前跟进的未过期正文</span>
+              </label>
+              <div class="field">
+                <label for="mailBodyRetentionDays">正文保留期限</label>
+                <select id="mailBodyRetentionDays">
+                  <option value="30">30 天</option>
+                  <option value="90">90 天</option>
+                  <option value="180">180 天</option>
+                  <option value="365">365 天</option>
+                </select>
+              </div>
+              <div class="mail-content-policy-action">
+                <button type="button" id="mailSaveContentPolicyBtn" class="ghost">保存正文策略</button>
+              </div>
+            </div>
+            <p>关闭正文缓存会立即清除已缓存正文。未授权 AI 时，沟通研判只使用邮件摘要。</p>
+          </section>
           <section class="mail-account-editor" id="mailAccountEditor">
             <div class="mail-account-editor-head">
               <div>
@@ -554,7 +630,7 @@
         <section class="mail-import-body">
           <label class="mail-file-drop" for="mailImportInput">
             <strong>选择从 Foxmail 导出的 .eml 文件</strong>
-            <span>可一次选择多封；仅保存结构化信息和正文摘要，不保存附件或原始邮件文件。</span>
+            <span>可一次选择多封；按当前正文策略保存纯文本正文或摘要，不保存附件或原始邮件文件。</span>
             <input id="mailImportInput" type="file" accept=".eml,message/rfc822" multiple hidden />
           </label>
           <p class="mail-import-status" id="mailImportStatus"></p>

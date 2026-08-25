@@ -37,6 +37,11 @@ const DEFAULT_MAIL_ACCOUNT = {
 };
 const DEFAULT_MAIL_SETTINGS = {
   accounts: [],
+  contentPolicy: {
+    cacheBodies: false,
+    allowAiContext: false,
+    retentionDays: 90,
+  },
 };
 
 function text(value) {
@@ -47,6 +52,27 @@ function clampNumber(value, fallback, minimum, maximum) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return fallback;
   return Math.min(maximum, Math.max(minimum, Math.round(parsed)));
+}
+
+function normalizeContentPolicy(input = {}, previous = {}) {
+  const source = input && typeof input === "object" ? input : {};
+  const old = previous && typeof previous === "object" ? previous : {};
+  const cacheBodies = source.cacheBodies === undefined ? Boolean(old.cacheBodies) : Boolean(source.cacheBodies);
+  return {
+    ...DEFAULT_MAIL_SETTINGS.contentPolicy,
+    cacheBodies,
+    allowAiContext: cacheBodies && (source.allowAiContext === undefined ? Boolean(old.allowAiContext) : Boolean(source.allowAiContext)),
+    retentionDays: clampNumber(
+      source.retentionDays ?? old.retentionDays,
+      DEFAULT_MAIL_SETTINGS.contentPolicy.retentionDays,
+      1,
+      365,
+    ),
+  };
+}
+
+function mailContentPolicy(settings = {}) {
+  return normalizeContentPolicy(settings?.contentPolicy, DEFAULT_MAIL_SETTINGS.contentPolicy);
 }
 
 function normalizeEmail(value) {
@@ -208,7 +234,11 @@ function normalizeMailSettings(raw = {}, existing = {}, keyMaterial) {
     .slice(0, 24)
     .map((account) => normalizeAccount(account, previousById.get(text(account.id)) || {}, keyMaterial));
 
-  return { ...DEFAULT_MAIL_SETTINGS, accounts };
+  return {
+    ...DEFAULT_MAIL_SETTINGS,
+    accounts,
+    contentPolicy: normalizeContentPolicy(source.contentPolicy, existing?.contentPolicy),
+  };
 }
 
 function publicMailSettings(settings = {}) {
@@ -245,7 +275,10 @@ function publicMailSettings(settings = {}) {
       lastSyncSummary: account.lastSyncSummary && typeof account.lastSyncSummary === "object" ? account.lastSyncSummary : null,
     };
   });
-  return { accounts };
+  return {
+    accounts,
+    contentPolicy: mailContentPolicy(settings),
+  };
 }
 
 function selectedAccount(settings, accountId) {
@@ -324,6 +357,76 @@ function cleanExcerpt(value) {
     .slice(0, 1600);
 }
 
+function cleanMailBody(value, maxChars = 12000) {
+  const normalized = String(value || "")
+    .replace(/\r/g, "")
+    .replace(/<style[\s\S]*?<\/style>|<script[\s\S]*?<\/script>/gi, " ")
+    .replace(/<[^>]+>/g, " ")
+    .replace(/\u00a0/g, " ")
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+/g, " ").trimEnd())
+    .filter((line) => !/^\s*(?:View in browser|Unsubscribe|Manage preferences)\s*$/i.test(line))
+    .join("\n")
+    .replace(/\n{4,}/g, "\n\n\n")
+    .trim();
+  const limit = clampNumber(maxChars, 12000, 1000, 24000);
+  return {
+    body: normalized.slice(0, limit),
+    truncated: normalized.length > limit,
+  };
+}
+
+function retentionUntil(now, retentionDays) {
+  const until = new Date(now.getTime() + retentionDays * 24 * 60 * 60 * 1000);
+  return until.toISOString();
+}
+
+function clearCachedMailBody(event) {
+  const hadBody = Boolean(text(event?.body));
+  event.body = "";
+  event.body_cached_at = "";
+  event.body_retention_until = "";
+  event.body_truncated = false;
+  return hadBody;
+}
+
+function isExpiredMailBody(event, nowMs) {
+  const retentionUntil = Date.parse(text(event?.body_retention_until));
+  return Number.isFinite(retentionUntil) && retentionUntil <= nowMs;
+}
+
+function applyMailContentPolicy(state, settings, now = new Date()) {
+  const policy = mailContentPolicy(settings);
+  const nowMs = now.getTime();
+  const nowIso = now.toISOString();
+  const collections = ["followUpEvents", "mailInbox"];
+  const result = { cleared: 0, expired: 0, migrated: 0, policy };
+
+  collections.forEach((key) => {
+    if (!Array.isArray(state?.[key])) return;
+    state[key].forEach((event) => {
+      if (!text(event?.body)) return;
+      if (!policy.cacheBodies) {
+        if (clearCachedMailBody(event)) result.cleared += 1;
+        return;
+      }
+      if (isExpiredMailBody(event, nowMs)) {
+        if (clearCachedMailBody(event)) result.expired += 1;
+        return;
+      }
+      if (!text(event.body_retention_until)) {
+        event.body_cached_at = text(event.body_cached_at) || nowIso;
+        event.body_retention_until = retentionUntil(now, policy.retentionDays);
+        event.body_truncated = Boolean(event.body_truncated);
+        event.updatedAt = nowIso;
+        result.migrated += 1;
+      }
+    });
+  });
+
+  return result;
+}
+
 function addressText(addresses) {
   return text(addresses?.text);
 }
@@ -373,7 +476,7 @@ function knownMessageKeys(state, brandId = "") {
   );
 }
 
-function makeMailRecord(parsed, message, mailbox, account, creator, now) {
+function makeMailRecord(parsed, message, mailbox, account, creator, now, policy = mailContentPolicy()) {
   const sender = addressText(parsed.from);
   const recipients = [addressText(parsed.to), addressText(parsed.cc)].filter(Boolean).join("；");
   const senderEmails = addressEmails(parsed.from);
@@ -383,6 +486,7 @@ function makeMailRecord(parsed, message, mailbox, account, creator, now) {
   const subject = text(parsed.subject).slice(0, 500);
   const messageId = text(parsed.messageId).replace(/[<>]/g, "");
   const excerpt = cleanExcerpt(parsed.text || parsed.html || "");
+  const bodyResult = policy.cacheBodies ? cleanMailBody(parsed.text || parsed.html || "") : { body: "", truncated: false };
   const uid = text(message.uid || message.seq || "");
   const serverKey = `${account.imap.host}|${account.imap.user}|${mailbox}|${uid}`;
   const fingerprint = stableFingerprint([occurredAt, sender, recipients, subject, excerpt]);
@@ -401,11 +505,32 @@ function makeMailRecord(parsed, message, mailbox, account, creator, now) {
     mailbox,
     brand_id: text(account.brand_id),
     mailbox_account_id: text(account.id),
-    body: "",
+    body: bodyResult.body,
+    body_cached_at: bodyResult.body ? now.toISOString() : "",
+    body_retention_until: bodyResult.body ? retentionUntil(now, policy.retentionDays) : "",
+    body_truncated: bodyResult.truncated,
     server_key: serverKey,
     imap_uid: uid,
     createdAt: now.toISOString(),
   };
+}
+
+function findKnownMailRecord(state, keys, brandId = "") {
+  const candidates = [...(Array.isArray(state?.followUpEvents) ? state.followUpEvents : []), ...(Array.isArray(state?.mailInbox) ? state.mailInbox : [])];
+  return candidates.find((event) => {
+    if (text(brandId) && text(event?.brand_id) !== text(brandId)) return false;
+    return [text(event?.message_id), text(event?.fingerprint), text(event?.server_key)].some((key) => key && keys.includes(key));
+  });
+}
+
+function cacheBodyOnExistingRecord(existing, record, now) {
+  if (!existing || !text(record?.body) || text(existing.body)) return false;
+  existing.body = record.body;
+  existing.body_cached_at = record.body_cached_at || now.toISOString();
+  existing.body_retention_until = record.body_retention_until;
+  existing.body_truncated = Boolean(record.body_truncated);
+  existing.updatedAt = now.toISOString();
+  return true;
 }
 
 async function syncMailAccount(settings, state, keyMaterial, options = {}) {
@@ -421,9 +546,17 @@ async function syncMailAccount(settings, state, keyMaterial, options = {}) {
     matched: 0,
     pending: 0,
     skipped: 0,
+    cachedBodies: 0,
+    refreshedBodies: 0,
+    clearedBodies: 0,
+    expiredBodies: 0,
     warnings: [],
     folders: {},
   };
+  const policy = mailContentPolicy(settings);
+  const policyResult = applyMailContentPolicy(state, settings, now);
+  summary.clearedBodies = policyResult.cleared;
+  summary.expiredBodies = policyResult.expired;
   const knownKeys = knownMessageKeys(state, account.brand_id);
   state.followUpEvents = Array.isArray(state.followUpEvents) ? state.followUpEvents : [];
   state.mailInbox = Array.isArray(state.mailInbox) ? state.mailInbox : [];
@@ -442,9 +575,11 @@ async function syncMailAccount(settings, state, keyMaterial, options = {}) {
           const allEmails = [...addressEmails(parsed.from), ...addressEmails(parsed.to), ...addressEmails(parsed.cc)];
           const candidates = findCreatorMatches(state, allEmails, account.brand_id);
           const creator = candidates.length === 1 ? candidates[0] : null;
-          const record = makeMailRecord(parsed, message, folder, account, creator, now);
+          const record = makeMailRecord(parsed, message, folder, account, creator, now, policy);
           const keys = [record.message_id, record.fingerprint, record.server_key].filter(Boolean);
           if (keys.some((key) => knownKeys.has(key))) {
+            const existing = findKnownMailRecord(state, keys, account.brand_id);
+            if (cacheBodyOnExistingRecord(existing, record, now)) summary.refreshedBodies += 1;
             summary.skipped += 1;
             continue;
           }
@@ -459,6 +594,7 @@ async function syncMailAccount(settings, state, keyMaterial, options = {}) {
               followUp.updatedAt = now.toISOString();
               summary.added += 1;
               summary.matched += 1;
+              if (record.body) summary.cachedBodies += 1;
               summary.folders[folder].added += 1;
               continue;
             }
@@ -476,6 +612,7 @@ async function syncMailAccount(settings, state, keyMaterial, options = {}) {
           });
           summary.added += 1;
           summary.pending += 1;
+          if (record.body) summary.cachedBodies += 1;
           summary.folders[folder].added += 1;
         }
       } catch (error) {
@@ -535,6 +672,9 @@ async function sendMailAccount(settings, state, keyMaterial, input = {}) {
   const followUpId = text(input.followUpId);
   if (!subject) throw new Error("请填写邮件主题。");
   if (!body) throw new Error("请填写邮件正文。");
+  const nowDate = new Date();
+  const policy = mailContentPolicy(settings);
+  applyMailContentPolicy(state, settings, nowDate);
 
   const followUp = (Array.isArray(state.followUps) ? state.followUps : []).find((item) => text(item.id) === followUpId);
   if (!followUp) throw new Error("未找到对应合作跟进，无法保存发信记录。");
@@ -556,7 +696,7 @@ async function sendMailAccount(settings, state, keyMaterial, input = {}) {
     references: referenceId || undefined,
   });
 
-  const now = new Date().toISOString();
+  const now = nowDate.toISOString();
   const event = {
     id: `SMTP-${randomBytes(6).toString("hex").toUpperCase()}`,
     follow_up_id: followUp.id,
@@ -567,7 +707,10 @@ async function sendMailAccount(settings, state, keyMaterial, input = {}) {
     sender: from,
     recipients: to.join("; "),
     excerpt: cleanExcerpt(body).slice(0, 1600),
-    body,
+    body: policy.cacheBodies ? body : "",
+    body_cached_at: policy.cacheBodies ? now : "",
+    body_retention_until: policy.cacheBodies ? retentionUntil(nowDate, policy.retentionDays) : "",
+    body_truncated: false,
     message_id: text(result.messageId).replace(/[<>]/g, ""),
     fingerprint: stableFingerprint([now, from, to.join(";"), subject, body]),
     source: `SMTP · ${account.label || account.smtp.user}`,
@@ -587,6 +730,8 @@ module.exports = {
   DEFAULT_MAIL_SETTINGS,
   normalizeMailSettings,
   publicMailSettings,
+  mailContentPolicy,
+  applyMailContentPolicy,
   testMailConnection,
   syncMailAccount,
   testSmtpConnection,
