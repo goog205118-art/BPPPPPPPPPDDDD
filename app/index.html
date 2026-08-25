@@ -309,7 +309,7 @@
           <div class="option-settings-head">
             <div>
               <h3 id="mailSettingsTitle">品牌官方邮箱</h3>
-              <p>每个账户绑定一个品牌。可手动测试 IMAP / SMTP、同步近期邮件；不会读取附件、自动发送邮件或自动改变合作阶段。</p>
+              <p>一个官方邮箱可服务多个品牌。同步时会优先依据会话和联系记录归属；无法唯一判断的邮件会留待人工确认，不会猜测品牌或自动推进阶段。</p>
             </div>
             <button type="button" class="ghost" id="mailNewAccountBtn">新增邮箱账户</button>
           </div>
@@ -354,8 +354,8 @@
             <input id="mailAccountId" name="id" type="hidden" />
             <div class="settings-fields">
               <div class="field">
-                <label for="mailBrandId">所属品牌</label>
-                <select id="mailBrandId" name="brand_id"></select>
+                <label for="mailBrandId">可服务品牌</label>
+                <select id="mailBrandId" name="brand_ids" multiple size="4"></select>
               </div>
               <div class="field">
                 <label for="mailLabel">账户名称</label>
@@ -654,6 +654,20 @@
           <button type="button" class="close-editor" id="closeFollowUpDetailBtn" aria-label="关闭合作跟进详情" title="关闭">×</button>
         </header>
         <section class="followup-detail-body" id="followUpDetailBody"></section>
+      </article>
+    </section>
+
+    <section class="followup-batch-modal hidden" id="followUpBatchModal" aria-hidden="true">
+      <div class="followup-batch-backdrop" id="followUpBatchBackdrop"></div>
+      <article class="followup-batch-dialog" role="dialog" aria-modal="true" aria-labelledby="followUpBatchTitle">
+        <header class="editor-head">
+          <div>
+            <h2 id="followUpBatchTitle">批量 AI 沟通研判</h2>
+            <p class="panel-hint" id="followUpBatchHint">每位达人将独立分析；不会混合不同达人的邮件上下文，也不会自动推进阶段或发送邮件。</p>
+          </div>
+          <button type="button" class="close-editor" id="closeFollowUpBatchBtn" aria-label="关闭批量 AI 沟通研判窗口" title="关闭">×</button>
+        </header>
+        <section class="followup-batch-body" id="followUpBatchBody"></section>
       </article>
     </section>
 

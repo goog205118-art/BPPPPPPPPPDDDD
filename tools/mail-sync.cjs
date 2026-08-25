@@ -7,6 +7,7 @@ const DEFAULT_MAIL_ACCOUNT = {
   id: "",
   brand_id: "",
   brand_name: "",
+  brand_ids: [],
   enabled: false,
   label: "官方邮箱",
   fromName: "",
@@ -79,6 +80,17 @@ function normalizeEmail(value) {
   return text(value).toLowerCase();
 }
 
+function uniqueTextList(value) {
+  const values = Array.isArray(value) ? value : typeof value === "string" ? value.split(/[,;；\n]/) : [];
+  return [...new Set(values.map(text).filter(Boolean))];
+}
+
+function accountBrandIds(account = {}) {
+  const ids = uniqueTextList(account.brand_ids);
+  const legacy = text(account.brand_id);
+  return legacy && !ids.includes(legacy) ? [legacy, ...ids] : ids;
+}
+
 function emailsIn(value) {
   return [...new Set(String(value || "").match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)?.map(normalizeEmail) || [])];
 }
@@ -125,6 +137,7 @@ function legacyAccountToModern(account = {}, settings = {}) {
     fromName: text(source.fromName).slice(0, 120),
     brand_id: text(source.brand_id),
     brand_name: text(source.brand_name),
+    brand_ids: uniqueTextList(source.brand_ids || source.brand_id),
     imap: {
       ...DEFAULT_MAIL_ACCOUNT.imap,
       host: text(source.host).replace(/^imap:\/\//i, "").replace(/\/.*$/, "").slice(0, 255),
@@ -174,7 +187,8 @@ function normalizeAccount(input = {}, previous = {}, keyMaterial) {
     ...DEFAULT_MAIL_ACCOUNT,
     ...old,
     id: text(source.id || old.id) || makeAccountId(),
-    brand_id: text(source.brand_id ?? old.brand_id),
+    brand_ids: uniqueTextList(source.brand_ids ?? old.brand_ids ?? source.brand_id ?? old.brand_id),
+    brand_id: "",
     brand_name: text(source.brand_name ?? old.brand_name).slice(0, 120),
     enabled: source.enabled === undefined ? Boolean(old.enabled) : Boolean(source.enabled),
     label: text(source.label || old.label || DEFAULT_MAIL_ACCOUNT.label).slice(0, 80),
@@ -244,10 +258,12 @@ function normalizeMailSettings(raw = {}, existing = {}, keyMaterial) {
 function publicMailSettings(settings = {}) {
   const accounts = existingAccounts(settings).map((raw) => {
     const account = normalizeAccount(raw, raw, "__public_mail_settings__");
+    const brandIds = accountBrandIds(account);
     return {
       id: account.id,
-      brand_id: text(account.brand_id),
+      brand_id: brandIds[0] || "",
       brand_name: text(account.brand_name),
+      brand_ids: brandIds,
       enabled: Boolean(account.enabled),
       label: text(account.label),
       fromName: text(account.fromName),
@@ -453,6 +469,25 @@ function findCreatorMatches(state, emailAddresses, brandId = "") {
   });
 }
 
+function findLeadMatches(state, emailAddresses, brandId = "") {
+  const all = new Set(emailAddresses.map(normalizeEmail).filter(Boolean));
+  if (!all.size) return [];
+  return (Array.isArray(state.leads) ? state.leads : []).filter((lead) => {
+    if (text(brandId) && text(lead.brand_id) !== text(brandId)) return false;
+    return emailsIn(lead.email).some((email) => all.has(email));
+  });
+}
+
+function findPeopleMatches(state, emailAddresses, brandIds = []) {
+  const scope = uniqueTextList(brandIds);
+  const people = [];
+  for (const brandId of scope) {
+    findCreatorMatches(state, emailAddresses, brandId).forEach((person) => people.push({ ...person, person_type: "creator" }));
+    findLeadMatches(state, emailAddresses, brandId).forEach((person) => people.push({ ...person, person_type: "lead" }));
+  }
+  return people;
+}
+
 function activeFollowUps(state, creatorId) {
   const terminal = new Set(["已结案", "暂停跟进", "未谈妥"]);
   return (Array.isArray(state.followUps) ? state.followUps : [])
@@ -467,12 +502,36 @@ function directionFor(creator, senderEmails, recipientEmails) {
   return "unknown";
 }
 
-function knownMessageKeys(state, brandId = "") {
+function messageReferences(value) {
+  if (Array.isArray(value)) {
+    return [...new Set(value.flatMap((item) => messageReferences(item)))];
+  }
+  return [...new Set(
+    String(value || "")
+      .match(/<([^>]+)>/g)
+      ?.map((item) => item.slice(1, -1).trim())
+      .filter(Boolean) || [],
+  )];
+}
+
+function recordDedupKeys(record = {}, accountId = "") {
+  const keys = [];
+  const serverKey = text(record.server_key);
+  const mailboxAccountId = text(record.mailbox_account_id);
+  if (serverKey) keys.push(`server:${serverKey}`);
+  if (!accountId || mailboxAccountId === text(accountId)) {
+    const messageId = text(record.message_id);
+    const fingerprint = text(record.fingerprint);
+    if (messageId) keys.push(`message:${messageId}`);
+    if (fingerprint) keys.push(`fingerprint:${fingerprint}`);
+  }
+  return keys;
+}
+
+function knownMessageKeys(state, accountId = "") {
   return new Set(
     [...(Array.isArray(state.followUpEvents) ? state.followUpEvents : []), ...(Array.isArray(state.mailInbox) ? state.mailInbox : [])]
-      .filter((event) => !text(brandId) || text(event.brand_id) === text(brandId))
-      .flatMap((event) => [text(event.message_id), text(event.fingerprint), text(event.server_key)])
-      .filter(Boolean),
+      .flatMap((event) => recordDedupKeys(event, accountId)),
   );
 }
 
@@ -503,8 +562,11 @@ function makeMailRecord(parsed, message, mailbox, account, creator, now, policy 
     fingerprint,
     source: `IMAP · ${account.label || account.imap.user}`,
     mailbox,
-    brand_id: text(account.brand_id),
+    brand_id: "",
+    candidate_brand_ids: accountBrandIds(account),
     mailbox_account_id: text(account.id),
+    in_reply_to: text(parsed.inReplyTo).replace(/[<>]/g, ""),
+    references: messageReferences(parsed.references),
     body: bodyResult.body,
     body_cached_at: bodyResult.body ? now.toISOString() : "",
     body_retention_until: bodyResult.body ? retentionUntil(now, policy.retentionDays) : "",
@@ -515,12 +577,197 @@ function makeMailRecord(parsed, message, mailbox, account, creator, now, policy 
   };
 }
 
-function findKnownMailRecord(state, keys, brandId = "") {
+function findContactTrackMatches(state, emailAddresses, account, direction) {
+  const scope = new Set(accountBrandIds(account));
+  const addresses = new Set(emailAddresses.map(normalizeEmail).filter(Boolean));
+  if (!addresses.size) return [];
+  return (Array.isArray(state.contactTracks) ? state.contactTracks : [])
+    .filter((track) => {
+      if (!scope.has(text(track.brand_id))) return false;
+      if (text(track.mailbox_account_id) && text(track.mailbox_account_id) !== text(account.id)) return false;
+      if (direction === "inbound" && !["waiting_reply", "replied"].includes(text(track.status))) return false;
+      return emailsIn(track.email).some((email) => addresses.has(email));
+    })
+    .sort((a, b) => new Date(b.last_outbound_at || b.updatedAt || 0) - new Date(a.last_outbound_at || a.updatedAt || 0));
+}
+
+function createId(prefix) {
+  return `${prefix}-${randomBytes(6).toString("hex").toUpperCase()}`;
+}
+
+function ensureCreatorForContactTrack(state, track, now) {
+  const existing = (Array.isArray(state.creators) ? state.creators : []).find((row) => text(row.id) === text(track.person_id));
+  if (existing) return existing;
+  const lead = (Array.isArray(state.leads) ? state.leads : []).find((row) => text(row.id) === text(track.person_id));
+  if (!lead) return null;
+  const creator = {
+    ...lead,
+    id: createId("CR"),
+    name: text(lead.name || track.person_name || lead.handle || "未命名达人"),
+    email: text(lead.email || track.email),
+    brand_id: text(track.brand_id || lead.brand_id),
+    brand: text(track.brand || lead.brand),
+    source_lead_id: lead.id,
+    createdAt: now,
+    updatedAt: now,
+  };
+  state.creators = [creator, ...(Array.isArray(state.creators) ? state.creators : [])];
+  lead.status = "已转达人库";
+  lead.updatedAt = now;
+  track.person_type = "creator";
+  track.person_id = creator.id;
+  track.person_name = creator.name;
+  return creator;
+}
+
+function createFollowUpForTrack(state, track, record, now) {
+  const creator = ensureCreatorForContactTrack(state, track, now);
+  if (!creator) return null;
+  const existing = activeFollowUps(state, creator.id)[0];
+  if (existing) return { followUp: existing, created: false };
+  const followUp = {
+    id: createId("FU"),
+    brand_id: text(track.brand_id || creator.brand_id),
+    brand: text(track.brand || creator.brand),
+    creator_id: creator.id,
+    creator_name: creator.name,
+    stage: "初步沟通",
+    priority: "中",
+    cooperation_mode: "待确认",
+    next_action: "阅读最新回复并确认合作方向",
+    shipping_status: "未寄样",
+    last_email_at: record.occurred_at,
+    notes: "由官邮同步的已联系达人回复自动创建。",
+    createdAt: now,
+    updatedAt: now,
+  };
+  state.followUps = [followUp, ...(Array.isArray(state.followUps) ? state.followUps : [])];
+  return { followUp, created: true };
+}
+
+function upsertContactTrack(state, input = {}, now = new Date().toISOString()) {
+  state.contactTracks = Array.isArray(state.contactTracks) ? state.contactTracks : [];
+  const email = normalizeEmail(input.email);
+  if (!email || !text(input.brand_id)) return null;
+  const found = state.contactTracks.find((track) =>
+    text(track.brand_id) === text(input.brand_id) &&
+    text(track.person_type) === text(input.person_type) &&
+    text(track.person_id) === text(input.person_id) &&
+    normalizeEmail(track.email) === email &&
+    text(track.mailbox_account_id) === text(input.mailbox_account_id),
+  );
+  const next = {
+    id: found?.id || createId("CT"),
+    brand_id: text(input.brand_id),
+    brand: text(input.brand),
+    person_type: text(input.person_type) || "creator",
+    person_id: text(input.person_id),
+    person_name: text(input.person_name),
+    email,
+    mailbox_account_id: text(input.mailbox_account_id),
+    last_outbound_at: text(input.last_outbound_at || found?.last_outbound_at || now),
+    last_outbound_subject: text(input.last_outbound_subject || found?.last_outbound_subject),
+    status: text(input.status || found?.status || "waiting_reply"),
+    follow_up_id: text(input.follow_up_id || found?.follow_up_id),
+    source: text(input.source || found?.source || "smtp"),
+    createdAt: text(found?.createdAt || now),
+    updatedAt: now,
+  };
+  if (found) Object.assign(found, next);
+  else state.contactTracks.unshift(next);
+  return found || next;
+}
+
+function routeMailRecord(state, record, account, now = new Date().toISOString()) {
+  const scope = accountBrandIds(account);
+  const senderEmails = emailsIn(record.sender);
+  const recipientEmails = emailsIn(record.recipients);
+  const directions = [];
+  const people = findPeopleMatches(state, [...senderEmails, ...recipientEmails], scope);
+  const inboundPeople = people.filter((person) => emailsIn(person.email).some((email) => senderEmails.includes(email)));
+  const outboundPeople = people.filter((person) => emailsIn(person.email).some((email) => recipientEmails.includes(email)));
+  const inboundTracks = findContactTrackMatches(state, senderEmails, account, "inbound");
+  const threadEvent = text(record.in_reply_to)
+    ? (Array.isArray(state.followUpEvents) ? state.followUpEvents : []).find((event) => text(event.message_id) === text(record.in_reply_to) && scope.includes(text(event.brand_id)))
+    : null;
+
+  if (threadEvent?.follow_up_id) {
+    const followUp = (Array.isArray(state.followUps) ? state.followUps : []).find((item) => text(item.id) === text(threadEvent.follow_up_id));
+    if (followUp) {
+      return { kind: "followup", followUp, record: { ...record, direction: "inbound", brand_id: followUp.brand_id, brand: followUp.brand }, matched: "thread" };
+    }
+  }
+
+  if (inboundTracks.length === 1) {
+    const track = inboundTracks[0];
+    const existingFollowUp = text(track.follow_up_id)
+      ? (Array.isArray(state.followUps) ? state.followUps : []).find((item) => text(item.id) === text(track.follow_up_id))
+      : null;
+    const followUpResult = existingFollowUp
+      ? { followUp: existingFollowUp, created: false }
+      : createFollowUpForTrack(state, track, record, now);
+    const followUp = followUpResult?.followUp;
+    if (followUp) {
+      track.status = "replied";
+      track.follow_up_id = followUp.id;
+      track.replied_at = now;
+      track.updatedAt = now;
+      return {
+        kind: "followup",
+        followUp,
+        autoCreated: Boolean(followUpResult.created),
+        record: { ...record, direction: "inbound", brand_id: followUp.brand_id, brand: followUp.brand },
+        matched: "contact_track",
+      };
+    }
+  }
+
+  if (inboundTracks.length > 1) directions.push("contact_track");
+  if (inboundPeople.length === 1) {
+    const person = inboundPeople[0];
+    return {
+      kind: "inbox",
+      status: "needs_followup",
+      record: { ...record, direction: "inbound", brand_id: person.brand_id, brand: person.brand },
+      people: [person],
+    };
+  }
+
+  if (outboundPeople.length === 1) {
+    const person = outboundPeople[0];
+    const track = upsertContactTrack(state, {
+      brand_id: person.brand_id,
+      brand: person.brand,
+      person_type: person.person_type,
+      person_id: person.id,
+      person_name: person.name,
+      email: emailsIn(person.email)[0],
+      mailbox_account_id: account.id,
+      last_outbound_at: record.occurred_at,
+      last_outbound_subject: record.subject,
+      status: "waiting_reply",
+      source: "imap_sent",
+    }, now);
+    return { kind: "tracked_outbound", track, record: { ...record, direction: "outbound", brand_id: person.brand_id, brand: person.brand }, people: [person] };
+  }
+
+  const candidates = inboundPeople.length ? inboundPeople : outboundPeople;
+  const candidateBrandIds = [...new Set(candidates.map((person) => text(person.brand_id)).filter(Boolean))];
+  return {
+    kind: "inbox",
+    status: candidateBrandIds.length > 1 || scope.length > 1 && candidates.length ? "needs_brand_confirmation" : candidates.length > 1 ? "ambiguous_creator" : "unmatched",
+    record: { ...record, direction: inboundPeople.length ? "inbound" : outboundPeople.length ? "outbound" : record.direction, brand_id: candidateBrandIds.length === 1 ? candidateBrandIds[0] : "" },
+    people: candidates,
+    candidateBrandIds: candidateBrandIds.length ? candidateBrandIds : scope,
+    reason: directions.join(","),
+  };
+}
+
+function findKnownMailRecord(state, record, accountId = "") {
+  const keys = new Set(recordDedupKeys(record, accountId));
+  if (!keys.size) return null;
   const candidates = [...(Array.isArray(state?.followUpEvents) ? state.followUpEvents : []), ...(Array.isArray(state?.mailInbox) ? state.mailInbox : [])];
-  return candidates.find((event) => {
-    if (text(brandId) && text(event?.brand_id) !== text(brandId)) return false;
-    return [text(event?.message_id), text(event?.fingerprint), text(event?.server_key)].some((key) => key && keys.includes(key));
-  });
+  return candidates.find((event) => recordDedupKeys(event, accountId).some((key) => keys.has(key))) || null;
 }
 
 function cacheBodyOnExistingRecord(existing, record, now) {
@@ -545,6 +792,10 @@ async function syncMailAccount(settings, state, keyMaterial, options = {}) {
     added: 0,
     matched: 0,
     pending: 0,
+    waitingReplyMatched: 0,
+    routedToFollowUps: 0,
+    autoCreatedFollowUps: 0,
+    needsBrandConfirmation: 0,
     skipped: 0,
     cachedBodies: 0,
     refreshedBodies: 0,
@@ -557,9 +808,10 @@ async function syncMailAccount(settings, state, keyMaterial, options = {}) {
   const policyResult = applyMailContentPolicy(state, settings, now);
   summary.clearedBodies = policyResult.cleared;
   summary.expiredBodies = policyResult.expired;
-  const knownKeys = knownMessageKeys(state, account.brand_id);
+  const knownKeys = knownMessageKeys(state, account.id);
   state.followUpEvents = Array.isArray(state.followUpEvents) ? state.followUpEvents : [];
   state.mailInbox = Array.isArray(state.mailInbox) ? state.mailInbox : [];
+  state.contactTracks = Array.isArray(state.contactTracks) ? state.contactTracks : [];
 
   try {
     await client.connect();
@@ -573,45 +825,59 @@ async function syncMailAccount(settings, state, keyMaterial, options = {}) {
           summary.scanned += 1;
           const parsed = await simpleParser(message.source);
           const allEmails = [...addressEmails(parsed.from), ...addressEmails(parsed.to), ...addressEmails(parsed.cc)];
-          const candidates = findCreatorMatches(state, allEmails, account.brand_id);
-          const creator = candidates.length === 1 ? candidates[0] : null;
-          const record = makeMailRecord(parsed, message, folder, account, creator, now, policy);
-          const keys = [record.message_id, record.fingerprint, record.server_key].filter(Boolean);
+          const people = findPeopleMatches(state, allEmails, accountBrandIds(account));
+          const likelyCreator = people.length === 1 && people[0].person_type === "creator" ? people[0] : null;
+          const record = makeMailRecord(parsed, message, folder, account, likelyCreator, now, policy);
+          const keys = recordDedupKeys(record, account.id);
           if (keys.some((key) => knownKeys.has(key))) {
-            const existing = findKnownMailRecord(state, keys, account.brand_id);
+            const existing = findKnownMailRecord(state, record, account.id);
             if (cacheBodyOnExistingRecord(existing, record, now)) summary.refreshedBodies += 1;
             summary.skipped += 1;
             continue;
           }
           keys.forEach((key) => knownKeys.add(key));
-          if (creator) {
-            const followUps = activeFollowUps(state, creator.id);
-            if (followUps.length === 1) {
-              const followUp = followUps[0];
-              const event = { ...record, follow_up_id: followUp.id, brand_id: text(followUp.brand_id || account.brand_id) };
-              state.followUpEvents.unshift(event);
-              followUp.last_email_at = record.occurred_at;
-              followUp.updatedAt = now.toISOString();
-              summary.added += 1;
-              summary.matched += 1;
-              if (record.body) summary.cachedBodies += 1;
-              summary.folders[folder].added += 1;
-              continue;
-            }
+          const routed = routeMailRecord(state, record, account, now.toISOString());
+          if (routed.kind === "followup") {
+            const followUp = routed.followUp;
+            const event = { ...routed.record, follow_up_id: followUp.id, brand_id: text(followUp.brand_id), brand: text(followUp.brand), updatedAt: now.toISOString() };
+            state.followUpEvents.unshift(event);
+            followUp.last_email_at = record.occurred_at;
+            followUp.has_unread_reply = routed.record.direction === "inbound";
+            followUp.updatedAt = now.toISOString();
+            summary.added += 1;
+            summary.matched += 1;
+            summary.routedToFollowUps += 1;
+            if (routed.matched === "contact_track") summary.waitingReplyMatched += 1;
+            if (routed.autoCreated) summary.autoCreatedFollowUps += 1;
+            if (record.body) summary.cachedBodies += 1;
+            summary.folders[folder].added += 1;
+            continue;
+          }
+          if (routed.kind === "tracked_outbound") {
+            summary.added += 1;
+            summary.waitingReplyMatched += 1;
+            if (record.body) summary.cachedBodies += 1;
+            summary.folders[folder].added += 1;
+            continue;
           }
 
-          const status = candidates.length > 1 ? "ambiguous_creator" : creator ? "needs_followup" : "unmatched";
+          const candidates = routed.people || [];
+          const creator = candidates.length === 1 && candidates[0].person_type === "creator" ? candidates[0] : null;
+          const status = routed.status || (candidates.length > 1 ? "ambiguous_creator" : creator ? "needs_followup" : "unmatched");
           state.mailInbox.unshift({
-            ...record,
+            ...routed.record,
             status,
-            brand_id: text(account.brand_id),
+            brand_id: text(routed.record.brand_id),
             matched_creator_id: creator?.id || "",
             matched_creator_name: creator?.name || "",
-            candidate_creator_ids: candidates.map((item) => item.id),
+            candidate_creator_ids: candidates.filter((item) => item.person_type === "creator").map((item) => item.id),
+            candidate_lead_ids: candidates.filter((item) => item.person_type === "lead").map((item) => item.id),
+            candidate_brand_ids: routed.candidateBrandIds || [...new Set(candidates.map((item) => item.brand_id).filter(Boolean))],
             candidate_follow_up_ids: creator ? activeFollowUps(state, creator.id).map((item) => item.id) : [],
           });
           summary.added += 1;
           summary.pending += 1;
+          if (status === "needs_brand_confirmation") summary.needsBrandConfirmation += 1;
           if (record.body) summary.cachedBodies += 1;
           summary.folders[folder].added += 1;
         }
@@ -670,6 +936,7 @@ async function sendMailAccount(settings, state, keyMaterial, input = {}) {
   const subject = text(input.subject).slice(0, 500);
   const body = compactBody(input.text);
   const followUpId = text(input.followUpId);
+  const brandId = text(input.brandId);
   if (!subject) throw new Error("请填写邮件主题。");
   if (!body) throw new Error("请填写邮件正文。");
   const nowDate = new Date();
@@ -679,7 +946,11 @@ async function sendMailAccount(settings, state, keyMaterial, input = {}) {
   const followUp = (Array.isArray(state.followUps) ? state.followUps : []).find((item) => text(item.id) === followUpId);
   if (!followUp) throw new Error("未找到对应合作跟进，无法保存发信记录。");
   const creator = (Array.isArray(state.creators) ? state.creators : []).find((item) => text(item.id) === text(followUp.creator_id));
-  if (text(account.brand_id) && text(followUp.brand_id || creator?.brand_id) && text(account.brand_id) !== text(followUp.brand_id || creator?.brand_id)) {
+  const followUpBrandId = text(followUp.brand_id || creator?.brand_id);
+  if (brandId && brandId !== followUpBrandId) {
+    throw new Error("发信品牌与当前合作跟进不一致，已阻止发送。");
+  }
+  if (!accountBrandIds(account).includes(followUpBrandId)) {
     throw new Error("所选官方邮箱不属于该品牌工作区，无法跨品牌发送。");
   }
 
@@ -715,13 +986,28 @@ async function sendMailAccount(settings, state, keyMaterial, input = {}) {
     fingerprint: stableFingerprint([now, from, to.join(";"), subject, body]),
     source: `SMTP · ${account.label || account.smtp.user}`,
     mailbox: account.imap.sentFolder || "Sent",
-    brand_id: text(followUp.brand_id || account.brand_id),
+    brand_id: followUpBrandId,
     mailbox_account_id: account.id,
     createdAt: now,
     updatedAt: now,
   };
   state.followUpEvents = [event, ...(Array.isArray(state.followUpEvents) ? state.followUpEvents : [])];
+  upsertContactTrack(state, {
+    brand_id: followUpBrandId,
+    brand: text(followUp.brand || creator?.brand),
+    person_type: "creator",
+    person_id: text(creator?.id || followUp.creator_id),
+    person_name: text(creator?.name || followUp.creator_name),
+    email: to[0],
+    mailbox_account_id: account.id,
+    last_outbound_at: now,
+    last_outbound_subject: subject,
+    status: "waiting_reply",
+    follow_up_id: followUp.id,
+    source: "smtp",
+  }, now);
   followUp.last_email_at = now;
+  followUp.has_unread_reply = false;
   followUp.updatedAt = now;
   return { ok: true, accountId: account.id, event };
 }
@@ -736,4 +1022,7 @@ module.exports = {
   syncMailAccount,
   testSmtpConnection,
   sendMailAccount,
+  upsertContactTrack,
+  routeMailRecord,
+  accountBrandIds,
 };

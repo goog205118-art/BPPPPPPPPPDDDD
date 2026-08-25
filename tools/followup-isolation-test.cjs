@@ -4,6 +4,7 @@ const fs = require("node:fs");
 const http = require("node:http");
 const os = require("node:os");
 const path = require("node:path");
+const { routeMailRecord } = require("./mail-sync.cjs");
 
 const rootDir = path.resolve(__dirname, "..");
 const storageDir = path.join(os.tmpdir(), `resource-workbench-followup-test-${process.pid}-${Date.now()}`);
@@ -27,8 +28,115 @@ function emptyState() {
     followUps: [],
     followUpEvents: [],
     mailInbox: [],
+    contactTracks: [],
     importHistory: [],
   };
+}
+
+function assertContactTrackRouting() {
+  const now = new Date().toISOString();
+  const singleBrandState = {
+    ...emptyState(),
+    brands: [{ id: "BR-A", name: "品牌 A" }],
+    leads: [{
+      id: "LEAD-A",
+      brand_id: "BR-A",
+      brand: "品牌 A",
+      name: "待开发达人 A",
+      email: "lead-a@example.com",
+      status: "已联系",
+      createdAt: now,
+      updatedAt: now,
+    }],
+    contactTracks: [{
+      id: "CT-A",
+      brand_id: "BR-A",
+      brand: "品牌 A",
+      person_type: "lead",
+      person_id: "LEAD-A",
+      person_name: "待开发达人 A",
+      email: "lead-a@example.com",
+      mailbox_account_id: "MB-A",
+      last_outbound_at: now,
+      status: "waiting_reply",
+      createdAt: now,
+      updatedAt: now,
+    }],
+  };
+  const singleAccount = { id: "MB-A", brand_ids: ["BR-A"] };
+  const uniqueReply = routeMailRecord(singleBrandState, {
+    id: "MAIL-A",
+    sender: "待开发达人 A <lead-a@example.com>",
+    recipients: "品牌 A <outreach@example.com>",
+    subject: "Re: Collaboration",
+    occurred_at: now,
+    message_id: "reply-a@example.com",
+    fingerprint: "reply-a",
+    mailbox_account_id: "MB-A",
+  }, singleAccount, now);
+  assert.equal(uniqueReply.kind, "followup", "唯一等待回复应直接归档到合作跟进。");
+  assert.equal(uniqueReply.matched, "contact_track");
+  assert.equal(uniqueReply.autoCreated, true, "首次唯一回复应准确标记为自动新建跟进。");
+  assert.equal(singleBrandState.followUps.length, 1);
+  assert.equal(singleBrandState.followUps[0].stage, "初步沟通");
+  assert.equal(singleBrandState.creators.length, 1, "待开发达人收到唯一回复后应转入达人库。");
+  assert.equal(singleBrandState.leads[0].status, "已转达人库");
+  assert.equal(singleBrandState.contactTracks[0].person_type, "creator");
+  assert.equal(singleBrandState.contactTracks[0].follow_up_id, singleBrandState.followUps[0].id);
+
+  const sharedMailboxUniqueOutboundState = {
+    ...emptyState(),
+    brands: [{ id: "BR-A", name: "品牌 A" }, { id: "BR-B", name: "品牌 B" }],
+    creators: [{
+      id: "CR-UNIQUE",
+      brand_id: "BR-A",
+      brand: "品牌 A",
+      name: "达人唯一",
+      email: "unique@example.com",
+      createdAt: now,
+      updatedAt: now,
+    }],
+  };
+  const uniqueOutbound = routeMailRecord(sharedMailboxUniqueOutboundState, {
+    id: "MAIL-UNIQUE-OUTBOUND",
+    sender: "品牌团队 <outreach@example.com>",
+    recipients: "达人唯一 <unique@example.com>",
+    subject: "Collaboration",
+    occurred_at: now,
+    message_id: "outbound-unique@example.com",
+    fingerprint: "outbound-unique",
+    mailbox_account_id: "MB-SHARED",
+  }, { id: "MB-SHARED", brand_ids: ["BR-A", "BR-B"] }, now);
+  assert.equal(uniqueOutbound.kind, "tracked_outbound", "共享邮箱下唯一匹配的已发送邮件应自动建立待回复轨迹。");
+  assert.equal(sharedMailboxUniqueOutboundState.contactTracks.length, 1);
+  assert.equal(sharedMailboxUniqueOutboundState.contactTracks[0].brand_id, "BR-A");
+  assert.equal(sharedMailboxUniqueOutboundState.contactTracks[0].status, "waiting_reply");
+
+  const sharedMailboxState = {
+    ...emptyState(),
+    brands: [{ id: "BR-A", name: "品牌 A" }, { id: "BR-B", name: "品牌 B" }],
+    creators: [
+      { id: "CR-A", brand_id: "BR-A", brand: "品牌 A", name: "达人 A", email: "shared@example.com", createdAt: now, updatedAt: now },
+      { id: "CR-B", brand_id: "BR-B", brand: "品牌 B", name: "达人 B", email: "shared@example.com", createdAt: now, updatedAt: now },
+    ],
+    contactTracks: [
+      { id: "CT-A", brand_id: "BR-A", brand: "品牌 A", person_type: "creator", person_id: "CR-A", person_name: "达人 A", email: "shared@example.com", mailbox_account_id: "MB-SHARED", status: "waiting_reply", createdAt: now, updatedAt: now },
+      { id: "CT-B", brand_id: "BR-B", brand: "品牌 B", person_type: "creator", person_id: "CR-B", person_name: "达人 B", email: "shared@example.com", mailbox_account_id: "MB-SHARED", status: "waiting_reply", createdAt: now, updatedAt: now },
+    ],
+  };
+  const sharedReply = routeMailRecord(sharedMailboxState, {
+    id: "MAIL-SHARED",
+    sender: "Unknown Creator <shared@example.com>",
+    recipients: "品牌团队 <outreach@example.com>",
+    subject: "Re: Collaboration",
+    occurred_at: now,
+    message_id: "reply-shared@example.com",
+    fingerprint: "reply-shared",
+    mailbox_account_id: "MB-SHARED",
+  }, { id: "MB-SHARED", brand_ids: ["BR-A", "BR-B"] }, now);
+  assert.equal(sharedReply.kind, "inbox", "共享邮箱歧义邮件应停留在待人工归档邮箱。");
+  assert.equal(sharedReply.status, "needs_brand_confirmation");
+  assert.equal(sharedMailboxState.followUps.length, 0, "共享邮箱有品牌歧义时不得自动创建合作跟进。");
 }
 
 function fixtureState() {
@@ -301,6 +409,7 @@ function jsonOptions(method, value) {
 async function run() {
   fs.mkdirSync(storageDir, { recursive: true });
   fs.writeFileSync(path.join(storageDir, "state.json"), JSON.stringify(emptyState(), null, 2), "utf8");
+  assertContactTrackRouting();
   await startFakeAiServer();
 
   server = spawn(process.execPath, ["tools/local-server.cjs"], {
@@ -380,6 +489,15 @@ async function run() {
           imap: { host: "", port: 993, secure: true, user: "b@example.com", password: "not-a-real-password" },
           smtp: { enabled: true, host: "127.0.0.1", port: 9, secure: true, user: "b@example.com", password: "", useImapPassword: true },
         },
+        {
+          id: "MB-SHARED",
+          brand_ids: ["BR-A", "BR-B"],
+          brand_name: "共用官方邮箱",
+          enabled: false,
+          label: "Shared Mail",
+          imap: { host: "", port: 993, secure: true, user: "shared@example.com", password: "" },
+          smtp: { enabled: false, host: "", port: 465, secure: true, user: "", password: "", useImapPassword: true },
+        },
       ],
     }),
   );
@@ -387,11 +505,16 @@ async function run() {
 
   result = await request("/api/mail/settings");
   assert.equal(result.response.status, 200);
-  assert.equal(result.payload.settings.accounts.length, 2);
+  assert.equal(result.payload.settings.accounts.length, 3);
   assert.equal(result.payload.settings.accounts.every((account) => account.imap.password === undefined && account.smtp.password === undefined), true);
   assert.deepEqual(
-    result.payload.settings.accounts.map((account) => account.brand_id).sort(),
+    result.payload.settings.accounts.filter((account) => account.id !== "MB-SHARED").map((account) => account.brand_id).sort(),
     ["BR-A", "BR-B"],
+  );
+  assert.deepEqual(
+    result.payload.settings.accounts.find((account) => account.id === "MB-SHARED").brand_ids,
+    ["BR-A", "BR-B"],
+    "共享官方邮箱应完整返回全部品牌归属。",
   );
 
   result = await request("/api/mail/test", jsonOptions("POST", { accountId: "MB-A" }));
@@ -519,7 +642,7 @@ async function run() {
   assert.equal(finalState.followUpEvents.length, 2, "被拦截的跨品牌发信不得产生时间线记录。");
   assert.equal(finalState.followUps.find((row) => row.id === "FU-B").stage, "初步沟通", "被拦截的跨品牌发信不得改动合作阶段。");
 
-  console.log("PASS follow-up isolation regression: brand isolation, body authorization, expiry cleanup, protected AI failure, blocked cross-brand SMTP.");
+  console.log("PASS follow-up isolation regression: contact-track routing, shared-mailbox confirmation, brand isolation, body authorization, expiry cleanup, protected AI failure, blocked cross-brand SMTP.");
 }
 
 async function cleanup() {

@@ -528,6 +528,7 @@ const emptyState = {
   matches: [],
   followUps: [],
   followUpEvents: [],
+  contactTracks: [],
   mailInbox: [],
   importHistory: [],
 };
@@ -553,6 +554,9 @@ const state = {
   activeBrandId: "",
   followUpInboxNotice: { tone: "", text: "" },
   followUpInboxBusyId: "",
+  followUpContactBusyId: "",
+  followUpSelectedIds: new Set(),
+  followUpBatch: { open: false, items: [], running: false, status: "", userNote: "" },
   selectedLeadIds: new Set(),
   productFilters: { query: "", brand: "", country: "", category: "", store: "" },
   outreach: { open: false, leadIds: [], result: null },
@@ -736,6 +740,10 @@ const elements = {
   followUpDetailTitle: document.getElementById("followUpDetailTitle"),
   followUpDetailHint: document.getElementById("followUpDetailHint"),
   followUpDetailBody: document.getElementById("followUpDetailBody"),
+  followUpBatchModal: document.getElementById("followUpBatchModal"),
+  followUpBatchBackdrop: document.getElementById("followUpBatchBackdrop"),
+  closeFollowUpBatchBtn: document.getElementById("closeFollowUpBatchBtn"),
+  followUpBatchBody: document.getElementById("followUpBatchBody"),
 };
 
 const formSections = {
@@ -1079,6 +1087,7 @@ const BRAND_USAGE_COLLECTIONS = [
   ["matches", "资源匹配"],
   ["followUps", "合作跟进"],
   ["followUpEvents", "跟进事件"],
+  ["contactTracks", "待回复联系"],
   ["mailInbox", "待归档邮件"],
 ];
 
@@ -1088,7 +1097,7 @@ function getBrandUsage(brandId) {
     const count = (state.data[key] || []).filter((row) => text(row?.brand_id) === id).length;
     return { key, label, count };
   }).filter((item) => item.count);
-  const accountCount = (state.mailSettings.accounts || []).filter((account) => text(account?.brand_id) === id).length;
+  const accountCount = (state.mailSettings.accounts || []).filter((account) => mailAccountBrandIds(account).includes(id)).length;
   return {
     records,
     accountCount,
@@ -1169,10 +1178,17 @@ function setBrandSettingsStatus(message) {
 
 async function syncBrandNameToMailAccounts(brand) {
   const accounts = state.mailSettings.accounts || [];
-  if (!accounts.some((account) => text(account.brand_id) === text(brand.id))) return;
+  if (!accounts.some((account) => mailAccountBrandIds(account).includes(text(brand.id)))) return;
   const nextAccounts = accounts.map((account) => {
-    if (text(account.brand_id) !== text(brand.id)) return account;
-    return { ...account, brand_name: brand.name };
+    const brandIds = mailAccountBrandIds(account);
+    if (!brandIds.includes(text(brand.id))) return account;
+    const brandNames = brandIds.map((id) => id === text(brand.id) ? brand.name : brandById(id)?.name).filter(Boolean);
+    return {
+      ...account,
+      brand_id: brandIds[0] || "",
+      brand_ids: brandIds,
+      brand_name: brandNames.join(" / "),
+    };
   });
   const response = await apiFetch(API_MAIL_SETTINGS, {
     method: "POST",
@@ -1487,6 +1503,9 @@ function ensureStateShape(nextState) {
   shaped.followUpEvents = Array.isArray(nextState?.followUpEvents)
     ? nextState.followUpEvents.map((row) => applyRecordBrand({ ...row }, shaped, followUpById.get(text(row.follow_up_id))))
     : [];
+  shaped.contactTracks = Array.isArray(nextState?.contactTracks)
+    ? nextState.contactTracks.map((row) => applyRecordBrand({ ...row }, shaped))
+    : [];
   shaped.mailInbox = Array.isArray(nextState?.mailInbox)
     ? nextState.mailInbox.map((row) => applyRecordBrand({ ...row }, shaped))
     : [];
@@ -1566,6 +1585,7 @@ function normalizeMailSettingsPayload(payload = {}) {
     id: text(raw.id),
     brand_id: text(raw.brand_id),
     brand_name: text(raw.brand_name),
+    brand_ids: [...new Set((Array.isArray(raw.brand_ids) ? raw.brand_ids : [raw.brand_id]).map(text).filter(Boolean))],
     enabled: raw.enabled !== false,
     label: text(raw.label),
     fromName: text(raw.fromName),
@@ -1597,6 +1617,16 @@ function normalizeMailSettingsPayload(payload = {}) {
     accounts: rawAccounts.map(account),
     contentPolicy: normalizedMailContentPolicy(settings),
   };
+}
+
+function mailAccountBrandIds(account = {}) {
+  const ids = Array.isArray(account.brand_ids) ? account.brand_ids.map(text).filter(Boolean) : [];
+  const legacy = text(account.brand_id);
+  return legacy && !ids.includes(legacy) ? [legacy, ...ids] : ids;
+}
+
+function mailAccountBrandNames(account = {}) {
+  return mailAccountBrandIds(account).map((id) => brandById(id)?.name).filter(Boolean);
 }
 
 function normalizedMailContentPolicy(settings = state.mailSettings) {
@@ -1765,6 +1795,7 @@ function emptyMailAccount(brandId = state.activeBrandId) {
     id: "",
     brand_id: text(brand?.id),
     brand_name: text(brand?.name),
+    brand_ids: brand?.id ? [brand.id] : [],
     enabled: true,
     label: "",
     fromName: "",
@@ -1784,12 +1815,14 @@ function mailEditingAccount() {
 function readMailSettingsForm() {
   const form = new FormData(elements.mailSettingsForm);
   const id = text(form.get("id")) || uid("MB");
-  const brand = brandById(form.get("brand_id"));
-  if (!brand) throw new Error("请先在资料中新增品牌，再为该品牌配置官方邮箱。");
+  const brandIds = [...new Set(form.getAll("brand_ids").map(text).filter(Boolean))];
+  const brands = brandIds.map((brandId) => brandById(brandId)).filter(Boolean);
+  if (!brands.length) throw new Error("请至少选择一个可服务品牌，再保存官方邮箱。");
   const account = {
     id,
-    brand_id: brand.id,
-    brand_name: brand.name,
+    brand_id: brands[0].id,
+    brand_ids: brands.map((brand) => brand.id),
+    brand_name: brands.map((brand) => brand.name).join(" / "),
     enabled: elements.mailEnabled.checked,
     label: text(form.get("label")),
     fromName: text(form.get("fromName")),
@@ -1823,11 +1856,11 @@ function readMailSettingsForm() {
 function renderMailSettings() {
   const allAccounts = state.mailSettings.accounts || [];
   const editingAccount = allAccounts.find((item) => text(item.id) === text(state.mailAccountEditingId));
-  if (state.activeBrandId && editingAccount && text(editingAccount.brand_id) !== text(state.activeBrandId)) {
+  if (state.activeBrandId && editingAccount && !mailAccountBrandIds(editingAccount).includes(text(state.activeBrandId))) {
     state.mailAccountEditingId = null;
   }
   const accounts = state.activeBrandId
-    ? allAccounts.filter((item) => text(item.brand_id) === text(state.activeBrandId))
+    ? allAccounts.filter((item) => mailAccountBrandIds(item).includes(text(state.activeBrandId)))
     : allAccounts;
   const account = mailEditingAccount();
   const imap = account.imap || {};
@@ -1842,7 +1875,7 @@ function renderMailSettings() {
             <article class="mail-account-row ${text(item.id) === text(state.mailAccountEditingId) ? "is-editing" : ""}">
               <div class="mail-account-row-main">
                 <strong>${escapeHtml(item.label || item.imap?.user || "未命名邮箱")}</strong>
-                <small>${escapeHtml([item.brand_name || brandById(item.brand_id)?.name || "未绑定品牌", item.imap?.user || "未填写邮箱", configured ? "IMAP 已配置" : "IMAP 待配置", smtpConfigured ? "SMTP 已配置" : "SMTP 待配置"].join(" · "))}</small>
+                <small>${escapeHtml([mailAccountBrandNames(item).join(" / ") || item.brand_name || "未绑定品牌", item.imap?.user || "未填写邮箱", configured ? "IMAP 已配置" : "IMAP 待配置", smtpConfigured ? "SMTP 已配置" : "SMTP 待配置"].join(" · "))}</small>
                 <span>${escapeHtml(formatMailAccountStatus(item))}</span>
               </div>
               <div class="mail-account-row-actions">
@@ -1860,10 +1893,12 @@ function renderMailSettings() {
   elements.mailCancelEditBtn.classList.toggle("hidden", !account.id);
   elements.mailAccountId.value = account.id || "";
   elements.mailBrandId.innerHTML = [
-    `<option value="">选择品牌</option>`,
     ...brands.map((brand) => `<option value="${escapeHtml(brand.id)}">${escapeHtml(brand.name)}</option>`),
   ].join("");
-  elements.mailBrandId.value = account.brand_id || "";
+  const selectedBrandIds = new Set(mailAccountBrandIds(account));
+  [...elements.mailBrandId.options].forEach((option) => {
+    option.selected = selectedBrandIds.has(option.value);
+  });
   elements.mailEnabled.checked = account.enabled !== false;
   elements.mailLabel.value = account.label || "";
   elements.mailFromName.value = account.fromName || "";
@@ -1999,7 +2034,7 @@ async function testSmtpSettings(accountId = "") {
 function availableMailAccount(brandId = state.activeBrandId) {
   const accounts = state.mailSettings.accounts || [];
   if (text(brandId)) {
-    return accounts.find((account) => account.enabled && text(account.brand_id) === text(brandId)) || null;
+    return accounts.find((account) => account.enabled && mailAccountBrandIds(account).includes(text(brandId))) || null;
   }
   return accounts.find((account) => account.enabled) || null;
 }
@@ -2007,7 +2042,7 @@ function availableMailAccount(brandId = state.activeBrandId) {
 async function syncMailbox(accountId = "") {
   const selected = (state.mailSettings.accounts || []).find((item) => text(item.id) === text(accountId));
   const account = selected || availableMailAccount();
-  if (account && state.activeBrandId && text(account.brand_id) !== text(state.activeBrandId)) {
+  if (account && state.activeBrandId && !mailAccountBrandIds(account).includes(text(state.activeBrandId))) {
     const error = "当前工作区只能使用绑定到同一品牌的官方邮箱。请切换工作区或在设置页配置该品牌邮箱。";
     if (state.activeTab === "settings") elements.mailSettingsStatus.textContent = error;
     else elements.importStatus.textContent = error;
@@ -3720,7 +3755,81 @@ function latestInboundFollowUpEmail(followUpId) {
   return followUpEventsFor(followUpId).find((event) => event.direction === "inbound" && text(event.message_id));
 }
 
+function contactTrackPerson(track) {
+  const collection = text(track?.person_type) === "lead" ? "leads" : "creators";
+  return allRows(collection).find((row) => text(row.id) === text(track?.person_id));
+}
+
+function contactTrackSourceLabel(source) {
+  return {
+    manual: "人工记录",
+    smtp: "系统发信",
+    imap_sent: "已发送邮件同步",
+  }[text(source)] || "邮件联系";
+}
+
+function waitingDays(value) {
+  const timestamp = new Date(value || 0).getTime();
+  if (!Number.isFinite(timestamp)) return "-";
+  return Math.max(0, Math.floor((Date.now() - timestamp) / 86400000));
+}
+
+function waitingTrackMarkup(track) {
+  const person = contactTrackPerson(track);
+  const personLabel = person?.name || track.person_name || "未命名达人";
+  const isPaused = text(track.status) === "paused";
+  const source = contactTrackSourceLabel(track.source);
+  return `
+    <article class="followup-waiting-row ${isPaused ? "is-paused" : ""}">
+      <div class="followup-waiting-person">
+        <span class="creator-avatar small">${escapeHtml(personLabel.slice(0, 1).toUpperCase())}</span>
+        <div><strong>${escapeHtml(personLabel)}</strong><small>${escapeHtml([track.email, source].filter(Boolean).join(" · ") || "邮箱待补充")}</small></div>
+      </div>
+      <div class="followup-waiting-time"><span>${isPaused ? "已暂停" : `等待 ${waitingDays(track.last_outbound_at)} 天`}</span><small>${escapeHtml(formatDateTime(track.last_outbound_at) || "未记录联系时间")}</small></div>
+      <div class="followup-waiting-actions">
+        <button type="button" class="ghost icon-action" data-contact-track-toggle="${escapeHtml(track.id)}" aria-label="${isPaused ? "恢复等待回复" : "暂停等待回复"}" title="${isPaused ? "恢复等待回复" : "暂停等待回复"}">${isPaused ? "↻" : "Ⅱ"}</button>
+        ${person ? `<button type="button" class="ghost icon-action" data-contact-track-open="${escapeHtml(track.id)}" aria-label="打开达人资料" title="打开达人资料">↗</button>` : ""}
+      </div>
+    </article>`;
+}
+
+function contactTrackPersonOptions() {
+  const creatorOptions = rows("creators")
+    .filter((row) => text(row.email))
+    .map((row) => ({ ...row, person_type: "creator" }));
+  const leadOptions = rows("leads")
+    .filter((row) => text(row.email))
+    .map((row) => ({ ...row, person_type: "lead" }));
+  return [...creatorOptions, ...leadOptions].sort((left, right) => text(left.name).localeCompare(text(right.name), "zh-CN"));
+}
+
+function followUpManualContactMarkup() {
+  const people = contactTrackPersonOptions();
+  const accounts = (state.mailSettings.accounts || []).filter((account) => account.enabled && mailAccountBrandIds(account).includes(text(state.activeBrandId)));
+  if (!state.activeBrandId) {
+    return `<p class="followup-waiting-empty">请先在顶部选择品牌工作区，才能人工记录“已联系待回复”。</p>`;
+  }
+  if (!people.length) {
+    return `<p class="followup-waiting-empty">当前品牌没有已填写邮箱的达人或待开发达人。</p>`;
+  }
+  return `
+    <form class="followup-contact-form" data-contact-track-form>
+      <select name="person" required aria-label="选择已联系的达人">
+        <option value="">选择达人 / 待开发达人</option>
+        ${people.map((person) => `<option value="${escapeHtml(`${person.person_type}:${person.id}`)}">${escapeHtml(`${person.name || person.handle || "未命名"} · ${person.email}${person.person_type === "lead" ? " · 待开发" : ""}`)}</option>`).join("")}
+      </select>
+      <select name="mailbox_account_id" aria-label="选择联系使用的官方邮箱">
+        <option value="">未指定官方邮箱</option>
+        ${accounts.map((account) => `<option value="${escapeHtml(account.id)}">${escapeHtml(account.label || account.smtp?.user || account.imap?.user || "官方邮箱")}</option>`).join("")}
+      </select>
+      <input name="subject" maxlength="500" placeholder="邮件主题 / 本次联系说明（选填）" aria-label="邮件主题或联系说明" />
+      <button type="submit" class="ghost">记录为待回复</button>
+    </form>
+    <p class="followup-contact-note">仅记录当前达人处于“已联系待回复”，不代表系统已验证邮件已经实际发出。</p>`;
+}
+
 function mailInboxStatusLabel(status) {
+  if (status === "needs_brand_confirmation") return "需确认品牌归属";
   if (status === "needs_followup") return "已匹配达人，缺少活跃跟进";
   if (status === "ambiguous_creator") return "匹配到多个达人";
   return "未匹配达人邮箱";
@@ -3731,6 +3840,9 @@ function setFollowUpInboxNotice(textValue, tone = "info") {
 }
 
 function pendingMailBlockedReason(message) {
+  if (message.status === "needs_brand_confirmation") {
+    return "该官方邮箱服务多个品牌，或相同邮箱在多个品牌存在资料。请人工确认品牌归属后再创建或归档跟进，系统不会猜测。";
+  }
   if (message.status === "ambiguous_creator") {
     return "该邮箱匹配到多个达人。请先核对并整理达人邮箱，再归档到正确的合作跟进。";
   }
@@ -3759,7 +3871,18 @@ function mailInboxRowMarkup(message) {
   const busy = Boolean(state.followUpInboxBusyId);
   const isCurrentBusy = text(state.followUpInboxBusyId) === text(message.id);
   let action = "";
-  if (message.status === "needs_followup" && message.matched_creator_id && !candidateFollowUps.length) {
+  if (message.status === "needs_brand_confirmation") {
+    const candidateIds = [...new Set((message.candidate_brand_ids || []).map(text).filter(Boolean))];
+    const candidateBrands = candidateIds.length ? candidateIds.map(brandById).filter(Boolean) : state.data.brands || [];
+    action = `
+      <div class="mail-inbox-actions">
+        <select data-mail-brand-select="${escapeHtml(message.id)}" aria-label="确认邮件所属品牌" ${busy ? "disabled" : ""}>
+          <option value="">选择归属品牌</option>
+          ${candidateBrands.map((brand) => `<option value="${escapeHtml(brand.id)}">${escapeHtml(brand.name)}</option>`).join("")}
+        </select>
+        <button type="button" class="ghost" data-mail-confirm-brand="${escapeHtml(message.id)}" ${busy ? "disabled" : ""}>${isCurrentBusy ? "正在确认..." : "确认品牌"}</button>
+      </div>`;
+  } else if (message.status === "needs_followup" && message.matched_creator_id && !candidateFollowUps.length) {
     action = `
       <div class="mail-inbox-actions">
         <button type="button" class="ghost" data-mail-create-followup="${escapeHtml(message.id)}" ${busy ? "disabled" : ""}>
@@ -3929,13 +4052,19 @@ async function createFollowUpAndArchiveMail(mailId) {
 }
 
 function handlePendingMailAction(event) {
-  const trigger = event.currentTarget?.matches?.("[data-mail-create-followup], [data-mail-archive]")
+  const trigger = event.currentTarget?.matches?.("[data-mail-create-followup], [data-mail-archive], [data-mail-confirm-brand]")
     ? event.currentTarget
-    : event.target.closest("[data-mail-create-followup], [data-mail-archive]");
+    : event.target.closest("[data-mail-create-followup], [data-mail-archive], [data-mail-confirm-brand]");
   if (!trigger) return;
 
   event.preventDefault();
   event.stopPropagation();
+  if (trigger.dataset.mailConfirmBrand) {
+    const row = trigger.closest(".mail-inbox-row");
+    const brandId = text(row?.querySelector("[data-mail-brand-select]")?.value);
+    void confirmPendingMailBrand(trigger.dataset.mailConfirmBrand, brandId);
+    return;
+  }
   if (trigger.dataset.mailCreateFollowup) {
     void createFollowUpAndArchiveMail(trigger.dataset.mailCreateFollowup);
     return;
@@ -3949,6 +4078,65 @@ function handlePendingMailAction(event) {
     return;
   }
   void archivePendingMail(trigger.dataset.mailArchive, followUpId);
+}
+
+async function confirmPendingMailBrand(mailId, brandId) {
+  if (state.followUpInboxBusyId) return;
+  state.followUpInboxBusyId = text(mailId);
+  setFollowUpInboxNotice("正在确认邮件归属品牌...", "info");
+  renderFollowUpPage();
+  try {
+    const message = (state.data.mailInbox || []).find((item) => text(item.id) === text(mailId));
+    const brand = brandById(brandId);
+    if (!message) throw new Error("找不到这封待确认邮件，可能已被其他操作处理。");
+    if (!brand) throw new Error("请选择一个有效的品牌后再确认。");
+    const allowed = new Set((message.candidate_brand_ids || []).map(text).filter(Boolean));
+    if (allowed.size && !allowed.has(brand.id)) throw new Error("该品牌不在此邮件的可选归属范围内，已阻止错误归档。");
+    const senderEmails = [...new Set(String(message.sender || "").match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)?.map((item) => item.toLowerCase()) || [])];
+    const matchesEmail = (row) => String(row.email || "").toLowerCase().match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)?.some((email) => senderEmails.includes(email));
+    const matchedCreators = (state.data.creators || []).filter((creator) => text(creator.brand_id) === brand.id && matchesEmail(creator));
+    const matchedLeads = (state.data.leads || []).filter((lead) => text(lead.brand_id) === brand.id && matchesEmail(lead));
+    const people = [...matchedCreators.map((row) => ({ ...row, person_type: "creator" })), ...matchedLeads.map((row) => ({ ...row, person_type: "lead" }))];
+    if (people.length !== 1 || people[0].person_type !== "creator") {
+      Object.assign(message, {
+        brand_id: brand.id,
+        brand: brand.name,
+        status: people.length > 1 ? "ambiguous_creator" : "unmatched",
+        candidate_creator_ids: matchedCreators.map((row) => row.id),
+        candidate_lead_ids: matchedLeads.map((row) => row.id),
+        matched_creator_id: "",
+        matched_creator_name: "",
+        updatedAt: new Date().toISOString(),
+      });
+      await persist();
+      setFollowUpInboxNotice(people.length > 1 ? "品牌已确认，但该品牌仍匹配多条资料，请先整理邮箱后再归档。" : "品牌已确认，但未找到唯一达人库资料。请补充或转入达人库后重新处理。", "info");
+      return;
+    }
+    const creator = people[0];
+    const followUps = allRows("followups").filter((row) =>
+      text(row.brand_id) === brand.id &&
+      text(row.creator_id) === text(creator.id) &&
+      !FOLLOW_UP_TERMINAL_STAGES.has(text(row.stage)),
+    );
+    Object.assign(message, {
+      brand_id: brand.id,
+      brand: brand.name,
+      status: "needs_followup",
+      matched_creator_id: creator.id,
+      matched_creator_name: creator.name,
+      candidate_creator_ids: [creator.id],
+      candidate_lead_ids: [],
+      candidate_follow_up_ids: followUps.map((row) => row.id),
+      updatedAt: new Date().toISOString(),
+    });
+    await persist();
+    setFollowUpInboxNotice(`已确认归属「${brand.name}」，可继续新建或归档到 ${creator.name || "该达人"} 的合作跟进。`, "success");
+  } catch (error) {
+    setFollowUpInboxNotice(error.message || "确认邮件归属品牌失败。", "error");
+  } finally {
+    state.followUpInboxBusyId = "";
+    renderFollowUpPage();
+  }
 }
 
 function decodeBytes(bytes, charset = "utf-8") {
@@ -4264,16 +4452,21 @@ function followUpCardMarkup(row) {
   const creatorLabel = creator?.name || row.creator_name || "未关联达人";
   const meta = [row.brand, product?.name, row.cooperation_mode].filter(Boolean).join(" · ");
   const followUpAt = row.next_follow_up_at ? formatDateTime(row.next_follow_up_at) : "未设置";
+  const selected = state.followUpSelectedIds.has(text(row.id));
+  const unread = Boolean(row.has_unread_reply);
   return `
     <article class="followup-card ${overdue ? "is-overdue" : ""}" data-followup-card="${escapeHtml(row.id)}" role="button" tabindex="0" aria-label="打开 ${escapeHtml(creatorLabel)} 的合作跟进详情">
       <div class="followup-card-head">
         <div class="followup-card-creator">
+          <label class="followup-card-select" title="加入批量 AI 分析">
+            <input type="checkbox" data-followup-select="${escapeHtml(row.id)}" ${selected ? "checked" : ""} aria-label="选择 ${escapeHtml(creatorLabel)} 进行批量 AI 分析" />
+          </label>
           <span class="creator-avatar small">${escapeHtml((creatorLabel || "达").slice(0, 1).toUpperCase())}</span>
           <div><strong>${escapeHtml(creatorLabel)}</strong><small>${escapeHtml([creator?.platform, normalizeCountry(creator?.country)].filter(Boolean).join(" · ") || "达人信息待补充")}</small></div>
         </div>
         <button type="button" class="icon-button" data-followup-edit="${escapeHtml(row.id)}" aria-label="编辑合作跟进" title="编辑合作跟进">✎</button>
       </div>
-      <div class="followup-card-badges">${statusBadge(row.stage)}${statusBadge(row.priority, "中")}</div>
+      <div class="followup-card-badges">${statusBadge(row.stage)}${statusBadge(row.priority, "中")}${unread ? `<span class="followup-unread-badge">待处理新回复</span>` : ""}</div>
       <p class="followup-card-meta">${escapeHtml(meta || "品牌 / 产品待补充")}</p>
       <div class="followup-card-next">
         <span>下一步</span><strong>${escapeHtml(row.next_action || "待补充动作")}</strong>
@@ -4282,6 +4475,9 @@ function followUpCardMarkup(row) {
       <div class="followup-card-foot">
         <span>${latestMail ? `最近邮件 ${escapeHtml(formatDateTime(latestMail.occurred_at))}` : "暂无邮件记录"}</span>
         <div class="followup-card-actions">
+          <select data-followup-stage="${escapeHtml(row.id)}" aria-label="手动推进合作阶段" title="手动推进合作阶段">
+            ${FOLLOW_UP_STAGES.map((stage) => `<option value="${escapeHtml(stage)}" ${text(row.stage) === stage ? "selected" : ""}>${escapeHtml(stage)}</option>`).join("")}
+          </select>
           <button type="button" class="ghost icon-action" data-followup-mail="${escapeHtml(row.id)}" aria-label="导入 Foxmail 邮件" title="导入 Foxmail 邮件">✉</button>
           <button type="button" class="ghost icon-action" data-followup-delete="${escapeHtml(row.id)}" aria-label="删除合作跟进" title="删除合作跟进">×</button>
         </div>
@@ -4298,7 +4494,7 @@ function followUpSmtpAccounts(followUp) {
     return (
       account.enabled &&
       smtp.enabled !== false &&
-      text(account.brand_id) === brandId &&
+      mailAccountBrandIds(account).includes(brandId) &&
       Boolean(smtp.host || imap.host) &&
       Boolean(smtp.user || imap.user) &&
       Boolean(passwordReady)
@@ -4394,6 +4590,7 @@ function followUpAnalysisMarkup(analysis, selectedStrategy) {
         <span>建议间隔：<b>${escapeHtml(`${Number(analysis.recommended_follow_up_days || 0)} 天`)}</b></span>
       </div>
       <p class="followup-ai-notice">仅建议，不会自动修改当前阶段。${escapeHtml(analysis.context_notice || "")}</p>
+      <button type="button" class="ghost followup-apply-analysis" data-followup-apply-analysis>人工应用建议阶段</button>
       <div class="followup-ai-grid">
         <section><h4>关键事实</h4>${list(analysis.key_facts || [])}</section>
         <section><h4>风险与待确认</h4>${list(analysis.risk_notes || [])}</section>
@@ -4554,6 +4751,7 @@ function renderFollowUpDetail() {
   });
   elements.followUpDetailBody.querySelector("[data-followup-detail-import]")?.addEventListener("click", () => openFollowUpMailImport(followUp.id));
   elements.followUpDetailBody.querySelector("[data-followup-ai-analyze]")?.addEventListener("click", () => void analyzeFollowUpDetail());
+  elements.followUpDetailBody.querySelector("[data-followup-apply-analysis]")?.addEventListener("click", () => void applyFollowUpAnalysisSuggestion(followUp.id, state.followUpDetail.analysis));
   elements.followUpDetailBody.querySelector("[data-followup-ai-draft]")?.addEventListener("click", () => void draftFollowUpReply());
   elements.followUpDetailBody.querySelector("[data-followup-send]")?.addEventListener("click", () => void sendFollowUpReply(inbound?.id || ""));
   elements.followUpDetailBody.querySelectorAll('input[name="followupStrategy"]').forEach((input) => {
@@ -4561,6 +4759,72 @@ function renderFollowUpDetail() {
       state.followUpDetail.strategyId = input.value;
     });
   });
+}
+
+async function requestFollowUpAnalysis(followUpId, userNote = "") {
+  const response = await apiFetch(API_FOLLOWUP_ANALYZE, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ followUpId, userNote }),
+  });
+  const result = await response.json().catch(() => ({}));
+  if (!response.ok || result.ok === false) throw new Error(result.error || "AI 沟通分析失败");
+  return result;
+}
+
+function nextFollowUpAtFromAnalysis(analysis) {
+  const rawDays = Number(analysis?.recommended_follow_up_days);
+  if (!Number.isFinite(rawDays) || rawDays < 0) return "";
+  const result = new Date();
+  result.setDate(result.getDate() + Math.min(Math.round(rawDays), 365));
+  result.setHours(9, 0, 0, 0);
+  return result.toISOString();
+}
+
+async function applyFollowUpAnalysisSuggestion(followUpId, analysis) {
+  const followUp = allRows("followups").find((row) => text(row.id) === text(followUpId));
+  const suggestedStage = text(analysis?.suggested_stage);
+  if (!followUp || !analysis) return;
+  if (!FOLLOW_UP_STAGES.includes(suggestedStage)) {
+    state.followUpDetail.status = "AI 未返回可应用的有效阶段；请使用卡片上的手动推进。";
+    renderFollowUpDetail();
+    return;
+  }
+  const snapshot = clone(state.data);
+  const now = new Date().toISOString();
+  try {
+    await withActivity("正在应用人工确认的建议", "正在保存阶段和下一步；不会发送邮件...", async () => {
+      Object.assign(followUp, {
+        stage: suggestedStage,
+        next_action: text(analysis.recommended_next_action) || followUp.next_action,
+        next_follow_up_at: nextFollowUpAtFromAnalysis(analysis) || followUp.next_follow_up_at,
+        has_unread_reply: false,
+        updatedAt: now,
+      });
+      state.data.followUpEvents = [{
+        id: uid("FUE"),
+        follow_up_id: followUp.id,
+        brand_id: followUp.brand_id,
+        brand: followUp.brand,
+        type: "stage_update",
+        direction: "internal",
+        subject: "已人工应用 AI 阶段建议",
+        excerpt: `阶段：${suggestedStage}${text(analysis.recommended_next_action) ? `；下一步：${text(analysis.recommended_next_action)}` : ""}`,
+        source: "人工确认 · AI 沟通研判",
+        occurred_at: now,
+        createdAt: now,
+        updatedAt: now,
+      }, ...(state.data.followUpEvents || [])];
+      await persist();
+    });
+    state.followUpDetail.status = `已由人工应用建议：${suggestedStage}。邮件不会自动发送。`;
+    renderFollowUpPage();
+    renderCreatorDrawer();
+  } catch (error) {
+    state.data = snapshot;
+    state.followUpDetail.status = error.message || "应用建议失败";
+  }
+  renderFollowUpDetail();
 }
 
 async function analyzeFollowUpDetail() {
@@ -4571,14 +4835,7 @@ async function analyzeFollowUpDetail() {
   renderFollowUpDetail();
   try {
     const payload = await withActivity("正在分析沟通状态", "AI 正在仅根据已归档邮件和合作资料生成建议...", async () => {
-      const response = await apiFetch(API_FOLLOWUP_ANALYZE, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ followUpId, userNote: note }),
-      });
-      const result = await response.json().catch(() => ({}));
-      if (!response.ok || result.ok === false) throw new Error(result.error || "AI 沟通分析失败");
-      return result;
+      return requestFollowUpAnalysis(followUpId, note);
     });
     state.followUpDetail.analysis = payload;
     state.followUpDetail.strategyId = text(payload.recommended_options?.[0]?.id);
@@ -4660,6 +4917,7 @@ async function sendFollowUpReply(replyToEventId = "") {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           followUpId: followUp.id,
+          brandId: followUp.brand_id,
           accountId,
           to,
           subject,
@@ -4679,6 +4937,248 @@ async function sendFollowUpReply(replyToEventId = "") {
     detail.status = error.message || "邮件发送失败";
   }
   renderFollowUpDetail();
+}
+
+function openFollowUpBatch() {
+  const followUps = rows("followups").filter((row) => state.followUpSelectedIds.has(text(row.id)));
+  if (!followUps.length) return;
+  state.followUpBatch = {
+    open: true,
+    items: followUps.map((followUp) => ({
+      followUpId: followUp.id,
+      creatorName: followUpCreator(followUp)?.name || followUp.creator_name || "未命名达人",
+      status: "queued",
+      analysis: null,
+      error: "",
+    })),
+    running: false,
+    status: "",
+    userNote: "",
+  };
+  elements.followUpBatchModal.classList.remove("hidden");
+  elements.followUpBatchModal.setAttribute("aria-hidden", "false");
+  renderFollowUpBatch();
+}
+
+function closeFollowUpBatch() {
+  if (state.followUpBatch.running) return;
+  state.followUpBatch = { open: false, items: [], running: false, status: "", userNote: "" };
+  elements.followUpBatchModal.classList.add("hidden");
+  elements.followUpBatchModal.setAttribute("aria-hidden", "true");
+  elements.followUpBatchBody.innerHTML = "";
+}
+
+function followUpBatchItemMarkup(item) {
+  const suggestedStage = text(item.analysis?.suggested_stage);
+  const summary = text(item.analysis?.summary_cn);
+  const status = {
+    queued: "待分析",
+    running: "正在分析",
+    success: "已完成",
+    error: "失败",
+  }[item.status] || "待分析";
+  return `
+    <article class="followup-batch-row is-${escapeHtml(item.status)}">
+      <div class="followup-batch-row-main">
+        <strong>${escapeHtml(item.creatorName)}</strong>
+        <span>${escapeHtml(status)}${suggestedStage ? ` · 建议 ${escapeHtml(suggestedStage)}` : ""}</span>
+        ${summary ? `<p>${escapeHtml(summary)}</p>` : ""}
+        ${item.error ? `<p class="is-error">${escapeHtml(item.error)}</p>` : ""}
+      </div>
+      <div class="followup-batch-row-actions">
+        <button type="button" class="ghost" data-followup-batch-open="${escapeHtml(item.followUpId)}" ${item.status === "running" ? "disabled" : ""}>详情</button>
+        ${item.analysis ? `<button type="button" class="ghost" data-followup-batch-apply="${escapeHtml(item.followUpId)}">应用建议</button>` : ""}
+      </div>
+    </article>`;
+}
+
+function renderFollowUpBatch() {
+  if (!state.followUpBatch.open) return;
+  const batch = state.followUpBatch;
+  const completed = batch.items.filter((item) => item.status === "success").length;
+  elements.followUpBatchBody.innerHTML = `
+    <div class="followup-batch-controls">
+      <div><strong>已选择 ${batch.items.length} 位达人</strong><small>每位达人单独读取自己的归档邮件上下文，采用最多 2 条并行请求。</small></div>
+      <textarea data-followup-batch-note rows="3" maxlength="1600" placeholder="本批次共同关注点（选填），例如：优先识别是否能进入合作协商。">${escapeHtml(batch.userNote || "")}</textarea>
+      <div class="followup-batch-actions">
+        <span>${escapeHtml(batch.status || `${completed} / ${batch.items.length} 已完成`)}</span>
+        <button type="button" class="primary" data-followup-batch-run ${batch.running ? "disabled" : ""}>${batch.running ? "正在分析..." : completed ? "重新分析失败项" : "开始 AI 分析"}</button>
+      </div>
+    </div>
+    <div class="followup-batch-list">${batch.items.map(followUpBatchItemMarkup).join("")}</div>
+  `;
+  elements.followUpBatchBody.querySelector("[data-followup-batch-run]")?.addEventListener("click", () => void runFollowUpBatchAnalysis());
+  elements.followUpBatchBody.querySelectorAll("[data-followup-batch-open]").forEach((button) => {
+    button.addEventListener("click", () => {
+      if (state.followUpBatch.running) return;
+      closeFollowUpBatch();
+      openFollowUpDetail(button.dataset.followupBatchOpen);
+    });
+  });
+  elements.followUpBatchBody.querySelectorAll("[data-followup-batch-apply]").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const item = state.followUpBatch.items.find((entry) => text(entry.followUpId) === text(button.dataset.followupBatchApply));
+      if (!item?.analysis) return;
+      await applyFollowUpAnalysisSuggestion(item.followUpId, item.analysis);
+      renderFollowUpBatch();
+    });
+  });
+}
+
+async function runWithConcurrency(items, limit, worker) {
+  const queue = items.slice();
+  const workers = Array.from({ length: Math.min(Math.max(1, limit), queue.length) }, async () => {
+    while (queue.length) {
+      const next = queue.shift();
+      if (next) await worker(next);
+    }
+  });
+  await Promise.all(workers);
+}
+
+async function runFollowUpBatchAnalysis() {
+  const batch = state.followUpBatch;
+  if (!batch.open || batch.running) return;
+  const note = text(elements.followUpBatchBody.querySelector("[data-followup-batch-note]")?.value);
+  const candidates = batch.items.filter((item) => ["queued", "error"].includes(item.status));
+  if (!candidates.length) {
+    batch.status = "当前批次已全部完成。";
+    renderFollowUpBatch();
+    return;
+  }
+  batch.userNote = note;
+  batch.running = true;
+  batch.status = `正在独立分析 ${candidates.length} 位达人...`;
+  renderFollowUpBatch();
+  try {
+    await withActivity("正在批量分析沟通状态", "每位达人将独立发送请求，分析结果不会自动推进或发送邮件...", async () => {
+      await runWithConcurrency(candidates, 2, async (item) => {
+        item.status = "running";
+        item.error = "";
+        renderFollowUpBatch();
+        try {
+          item.analysis = await requestFollowUpAnalysis(item.followUpId, note);
+          item.status = "success";
+        } catch (error) {
+          item.status = "error";
+          item.error = error.message || "AI 沟通分析失败";
+        }
+        renderFollowUpBatch();
+      });
+    });
+    const failed = batch.items.filter((item) => item.status === "error").length;
+    batch.status = failed ? `已完成，${failed} 位达人分析失败，可单独重试。` : "已完成。请逐位查看并由人工决定是否应用建议。";
+  } catch (error) {
+    batch.status = error.message || "批量 AI 分析失败";
+  } finally {
+    batch.running = false;
+    renderFollowUpBatch();
+  }
+}
+
+async function saveManualContactTrack(form) {
+  if (!state.activeBrandId) return;
+  const token = text(new FormData(form).get("person"));
+  const [personType, personId] = token.split(":");
+  const collection = personType === "lead" ? "leads" : "creators";
+  const person = rows(collection).find((row) => text(row.id) === text(personId));
+  const mailboxAccountId = text(new FormData(form).get("mailbox_account_id"));
+  const subject = text(new FormData(form).get("subject"));
+  if (!person || !text(person.email)) {
+    window.alert("请选择一位已填写邮箱的达人或待开发达人。");
+    return;
+  }
+  const now = new Date().toISOString();
+  const existing = (state.data.contactTracks || []).find((track) =>
+    text(track.brand_id) === text(state.activeBrandId) &&
+    text(track.person_type) === personType &&
+    text(track.person_id) === text(person.id) &&
+    text(track.email).toLowerCase() === text(person.email).toLowerCase() &&
+    text(track.mailbox_account_id) === mailboxAccountId,
+  );
+  const snapshot = clone(state.data);
+  try {
+    await withActivity("正在记录联系状态", "正在保存为已联系待回复；这不会代替实际邮件发送...", async () => {
+      const next = {
+        id: existing?.id || uid("CT"),
+        brand_id: state.activeBrandId,
+        brand: currentBrand()?.name || person.brand,
+        person_type: personType,
+        person_id: person.id,
+        person_name: person.name || person.handle,
+        email: text(person.email).toLowerCase(),
+        mailbox_account_id: mailboxAccountId,
+        last_outbound_at: now,
+        last_outbound_subject: subject,
+        status: "waiting_reply",
+        follow_up_id: existing?.follow_up_id || "",
+        source: "manual",
+        createdAt: existing?.createdAt || now,
+        updatedAt: now,
+      };
+      if (existing) Object.assign(existing, next);
+      else state.data.contactTracks = [next, ...(state.data.contactTracks || [])];
+      await persist();
+    });
+    renderFollowUpPage();
+  } catch (error) {
+    state.data = snapshot;
+    window.alert(error.message || "记录待回复状态失败。");
+  }
+}
+
+async function toggleContactTrack(trackId) {
+  const track = (state.data.contactTracks || []).find((item) => text(item.id) === text(trackId));
+  if (!track) return;
+  const snapshot = clone(state.data);
+  const nextStatus = text(track.status) === "paused" ? "waiting_reply" : "paused";
+  try {
+    await withActivity("正在更新待回复状态", nextStatus === "paused" ? "正在暂停等待回复..." : "正在恢复等待回复...", async () => {
+      track.status = nextStatus;
+      track.updatedAt = new Date().toISOString();
+      await persist();
+    });
+    renderFollowUpPage();
+  } catch (error) {
+    state.data = snapshot;
+    window.alert(error.message || "更新待回复状态失败。");
+  }
+}
+
+async function manuallyUpdateFollowUpStage(followUpId, stage) {
+  const followUp = allRows("followups").find((row) => text(row.id) === text(followUpId));
+  if (!followUp || !FOLLOW_UP_STAGES.includes(stage) || text(followUp.stage) === stage) return;
+  const snapshot = clone(state.data);
+  const now = new Date().toISOString();
+  try {
+    await withActivity("正在手动推进合作阶段", `正在更新为「${stage}」...`, async () => {
+      const previousStage = text(followUp.stage);
+      followUp.stage = stage;
+      followUp.has_unread_reply = false;
+      followUp.updatedAt = now;
+      state.data.followUpEvents = [{
+        id: uid("FUE"),
+        follow_up_id: followUp.id,
+        brand_id: followUp.brand_id,
+        brand: followUp.brand,
+        type: "stage_update",
+        direction: "internal",
+        subject: "已手动推进合作阶段",
+        excerpt: `${previousStage || "未设置"} → ${stage}`,
+        source: "人工推进",
+        occurred_at: now,
+        createdAt: now,
+        updatedAt: now,
+      }, ...(state.data.followUpEvents || [])];
+      await persist();
+    });
+    renderFollowUpPage();
+    renderCreatorDrawer();
+  } catch (error) {
+    state.data = snapshot;
+    window.alert(error.message || "手动推进失败。");
+    renderFollowUpPage();
+  }
 }
 
 function openFollowUpEditor({ id = null, creatorId = "", cooperationId = "" } = {}) {
@@ -4733,6 +5233,13 @@ function renderFollowUpPage() {
     .filter(belongsToActiveBrand)
     .slice()
     .sort((a, b) => new Date(b.occurred_at || b.createdAt || 0) - new Date(a.occurred_at || a.createdAt || 0));
+  const contactTracks = (state.data.contactTracks || [])
+    .filter((track) => belongsToActiveBrand(track) && ["waiting_reply", "paused"].includes(text(track.status)))
+    .slice()
+    .sort((a, b) => new Date(b.last_outbound_at || b.updatedAt || 0) - new Date(a.last_outbound_at || a.updatedAt || 0));
+  const waitingTracks = contactTracks.filter((track) => text(track.status) === "waiting_reply");
+  const pausedTracks = contactTracks.filter((track) => text(track.status) === "paused");
+  const selectedCount = visibleRows.filter((row) => state.followUpSelectedIds.has(text(row.id))).length;
   const activeMailAccount = state.activeBrandId ? availableMailAccount(state.activeBrandId) : null;
   const mailConfigured = Boolean(
     activeMailAccount?.enabled &&
@@ -4754,6 +5261,7 @@ function renderFollowUpPage() {
       <div class="followup-head-actions">
         <button type="button" class="ghost" data-followup-filter-overdue title="只看逾期跟进">${overdueCount ? `逾期 ${overdueCount}` : "逾期"}</button>
         <button type="button" class="ghost" data-followup-sync title="${mailConfigured ? "同步当前品牌官邮 IMAP" : state.activeBrandId ? "前往设置当前品牌邮箱 IMAP" : "请先选择品牌工作区"}">${mailConfigured ? "同步邮箱" : state.activeBrandId ? "配置邮箱" : "选择品牌"}</button>
+        <button type="button" class="ghost" data-followup-batch-open ${selectedCount ? "" : "disabled"}>批量 AI 分析${selectedCount ? ` (${selectedCount})` : ""}</button>
         <button type="button" class="primary" data-followup-new>新增跟进</button>
       </div>
     </header>
@@ -4766,6 +5274,17 @@ function renderFollowUpPage() {
       <select data-followup-filter="priority"><option value="">全部优先级</option>${["高", "中", "低"].map((priority) => `<option value="${priority}" ${boardFilter.priority === priority ? "selected" : ""}>${priority}优先级</option>`).join("")}</select>
       <span class="followup-toolbar-count">当前显示 ${visibleRows.length} / ${allRows.length} 条</span>
     </div>
+    <section class="followup-waiting">
+      <header class="followup-waiting-head">
+        <div><strong>已联系待回复</strong><small>同步到唯一匹配的回复后，会自动进入“初步沟通”；共享邮箱有歧义时仍需人工确认品牌。</small></div>
+        <span>${waitingTracks.length}</span>
+      </header>
+      ${followUpManualContactMarkup()}
+      <div class="followup-waiting-list">
+        ${waitingTracks.length ? waitingTracks.map(waitingTrackMarkup).join("") : `<p class="followup-waiting-empty">当前没有等待回复的达人。</p>`}
+      </div>
+      ${pausedTracks.length ? `<details class="followup-waiting-paused"><summary>已暂停等待 ${pausedTracks.length} 条</summary><div class="followup-waiting-list">${pausedTracks.map(waitingTrackMarkup).join("")}</div></details>` : ""}
+    </section>
     <div class="followup-board">
       ${FOLLOW_UP_BOARD_COLUMNS.map((column) => {
         const columnRows = activeRows.filter((row) => column.stages.includes(text(row.stage)));
@@ -4792,9 +5311,34 @@ function renderFollowUpPage() {
   `;
 
   elements.followUpPage.querySelectorAll("[data-followup-new]").forEach((button) => button.addEventListener("click", () => openFollowUpEditor()));
-  elements.followUpPage.querySelectorAll("[data-mail-create-followup], [data-mail-archive]").forEach((button) => {
+  elements.followUpPage.querySelectorAll("[data-mail-create-followup], [data-mail-archive], [data-mail-confirm-brand]").forEach((button) => {
     button.addEventListener("click", handlePendingMailAction);
   });
+  elements.followUpPage.querySelector("[data-contact-track-form]")?.addEventListener("submit", (event) => {
+    event.preventDefault();
+    void saveManualContactTrack(event.currentTarget);
+  });
+  elements.followUpPage.querySelectorAll("[data-contact-track-toggle]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      void toggleContactTrack(button.dataset.contactTrackToggle);
+    });
+  });
+  elements.followUpPage.querySelectorAll("[data-contact-track-open]").forEach((button) => {
+    button.addEventListener("click", (event) => {
+      event.stopPropagation();
+      const track = (state.data.contactTracks || []).find((item) => text(item.id) === text(button.dataset.contactTrackOpen));
+      const person = contactTrackPerson(track);
+      if (!person) return;
+      if (text(track.person_type) === "creator") openCreatorDrawer(person.id);
+      else {
+        state.activeTab = "leads";
+        render();
+        openEditor(person.id);
+      }
+    });
+  });
+  elements.followUpPage.querySelector("[data-followup-batch-open]")?.addEventListener("click", () => openFollowUpBatch());
   elements.followUpPage.querySelectorAll("[data-followup-card]").forEach((card) => {
     card.addEventListener("click", () => openFollowUpDetail(card.dataset.followupCard));
     card.addEventListener("keydown", (event) => {
@@ -4807,6 +5351,23 @@ function renderFollowUpPage() {
     button.addEventListener("click", (event) => {
       event.stopPropagation();
       openFollowUpEditor({ id: button.dataset.followupEdit });
+    });
+  });
+  elements.followUpPage.querySelectorAll("[data-followup-select]").forEach((input) => {
+    input.addEventListener("click", (event) => event.stopPropagation());
+    input.addEventListener("change", (event) => {
+      event.stopPropagation();
+      const followUpId = text(input.dataset.followupSelect);
+      if (input.checked) state.followUpSelectedIds.add(followUpId);
+      else state.followUpSelectedIds.delete(followUpId);
+      renderFollowUpPage();
+    });
+  });
+  elements.followUpPage.querySelectorAll("[data-followup-stage]").forEach((select) => {
+    select.addEventListener("click", (event) => event.stopPropagation());
+    select.addEventListener("change", (event) => {
+      event.stopPropagation();
+      void manuallyUpdateFollowUpStage(select.dataset.followupStage, select.value);
     });
   });
   elements.followUpPage.querySelectorAll("[data-followup-mail]").forEach((button) => {
@@ -6529,6 +7090,10 @@ function bindEvents() {
   elements.followUpDetailBackdrop.addEventListener("click", (event) => {
     if (event.target === elements.followUpDetailBackdrop) closeFollowUpDetail();
   });
+  elements.closeFollowUpBatchBtn.addEventListener("click", closeFollowUpBatch);
+  elements.followUpBatchBackdrop.addEventListener("click", (event) => {
+    if (event.target === elements.followUpBatchBackdrop) closeFollowUpBatch();
+  });
   elements.outreachResult.addEventListener("click", (event) => {
     const copyButton = event.target.closest("[data-copy-outreach]");
     if (copyButton) {
@@ -6592,6 +7157,11 @@ function bindEvents() {
     if (state.followUpDetail.open) {
       event.preventDefault();
       closeFollowUpDetail();
+      return;
+    }
+    if (state.followUpBatch.open) {
+      event.preventDefault();
+      closeFollowUpBatch();
       return;
     }
     if (state.creatorDrawer.open) {

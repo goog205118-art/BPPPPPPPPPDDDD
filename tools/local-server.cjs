@@ -77,6 +77,7 @@ const defaultState = {
   matches: [],
   followUps: [],
   followUpEvents: [],
+  contactTracks: [],
   mailInbox: [],
   importHistory: [],
 };
@@ -134,7 +135,7 @@ function generatedBrandId(name) {
 
 function normalizeBusinessState(rawState) {
   const state = rawState && typeof rawState === "object" ? rawState : {};
-  const rawCollections = ["creators", "resources", "leads", "products", "cooperations", "matches", "followUps"];
+  const rawCollections = ["creators", "resources", "leads", "products", "cooperations", "matches", "followUps", "contactTracks"];
   const brandsByKey = new Map();
   const brandsById = new Map();
   const addBrand = (raw) => {
@@ -239,6 +240,9 @@ function normalizeBusinessState(rawState) {
   const mailInbox = Array.isArray(state.mailInbox)
     ? state.mailInbox.map((row) => resolveBrand({ ...row, body: textValue(row.body) }))
     : [];
+  const contactTracks = Array.isArray(state.contactTracks)
+    ? state.contactTracks.map((row) => resolveBrand({ ...row, email: textValue(row.email), person_type: textValue(row.person_type) || "creator" }))
+    : [];
 
   return {
     ...defaultState,
@@ -253,6 +257,7 @@ function normalizeBusinessState(rawState) {
     matches,
     followUps,
     followUpEvents,
+    contactTracks,
     mailInbox,
     importHistory: Array.isArray(state.importHistory) ? state.importHistory : [],
   };
