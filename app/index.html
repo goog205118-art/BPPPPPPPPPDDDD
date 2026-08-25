@@ -246,6 +246,62 @@
           </div>
           <p class="settings-status" id="aiSettingsStatus"></p>
         </form>
+        <form id="mailSettingsForm" class="mail-settings" aria-labelledby="mailSettingsTitle">
+          <div class="option-settings-head">
+            <div>
+              <h3 id="mailSettingsTitle">官邮 IMAP 同步</h3>
+              <p>连接邮箱服务器读取最近收件与已发送邮件；仅归档主题、地址、时间和摘要，不读附件、不发送邮件，也不会改变合作阶段。</p>
+            </div>
+            <label class="switch-field" for="mailEnabled">
+              <span>启用同步</span>
+              <input id="mailEnabled" name="enabled" type="checkbox" />
+            </label>
+          </div>
+          <div class="settings-fields">
+            <div class="field">
+              <label for="mailLabel">账户名称</label>
+              <input id="mailLabel" name="label" type="text" maxlength="80" placeholder="例如：阿里官邮" />
+            </div>
+            <div class="field">
+              <label for="mailUser">邮箱账号</label>
+              <input id="mailUser" name="user" type="email" autocomplete="username" placeholder="name@yourdomain.com" />
+            </div>
+            <div class="field field-wide">
+              <label for="mailHost">IMAP 服务器</label>
+              <input id="mailHost" name="host" type="text" autocomplete="off" placeholder="例如：imap.qiye.aliyun.com 或你的 c2.icoremail 服务器地址" />
+            </div>
+            <div class="field">
+              <label for="mailPort">端口</label>
+              <input id="mailPort" name="port" type="number" min="1" max="65535" value="993" />
+            </div>
+            <label class="field checkbox-field" for="mailSecure">
+              <span>连接安全</span>
+              <span><input id="mailSecure" name="secure" type="checkbox" checked /> 使用 SSL / TLS</span>
+            </label>
+            <div class="field">
+              <label for="mailInboxFolder">收件箱文件夹</label>
+              <input id="mailInboxFolder" name="inboxFolder" type="text" value="INBOX" placeholder="INBOX" />
+            </div>
+            <div class="field">
+              <label for="mailSentFolder">已发送文件夹</label>
+              <input id="mailSentFolder" name="sentFolder" type="text" value="Sent" placeholder="Sent 或 已发送" />
+            </div>
+            <div class="field">
+              <label for="mailSyncDays">同步范围（最近天数）</label>
+              <input id="mailSyncDays" name="syncDays" type="number" min="1" max="90" value="30" />
+            </div>
+            <div class="field">
+              <label for="mailPassword">授权码 / 专用密码</label>
+              <input id="mailPassword" name="password" type="password" autocomplete="new-password" placeholder="保存后不会回显；留空表示不修改" />
+            </div>
+          </div>
+          <div class="settings-actions">
+            <button type="submit" class="primary">保存邮箱配置</button>
+            <button type="button" id="mailTestBtn" class="ghost">测试连接</button>
+            <button type="button" id="mailSyncBtn" class="ghost">立即同步</button>
+          </div>
+          <p class="settings-status" id="mailSettingsStatus"></p>
+        </form>
         <section class="timezone-settings" aria-labelledby="timezoneSettingsTitle">
           <div class="option-settings-head">
             <div>

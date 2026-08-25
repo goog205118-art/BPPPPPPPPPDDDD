@@ -150,7 +150,7 @@
 
 ## followUpEvents
 
-合作跟进事件表，用于保存从 Foxmail 导出的 `.eml` 邮件摘要，形成单条跟进的沟通时间线。
+合作跟进事件表，用于保存从 Foxmail 导出的 `.eml` 或官邮 IMAP 同步的邮件摘要，形成单条跟进的沟通时间线。
 
 - `id`
 - `follow_up_id`（关联 `followUps.id`）
@@ -163,11 +163,42 @@
 - `excerpt`
 - `message_id`
 - `fingerprint`（无 Message-ID 时用于去重）
-- `source`（例如 `Foxmail .eml`）
+- `source`（例如 `Foxmail .eml` 或 `IMAP · 官邮 IMAP`）
 - `filename`
+- `mailbox`（IMAP 文件夹名称）
+- `server_key`（邮箱服务器、文件夹和 UID 组成的去重键）
+- `imap_uid`
 - `createdAt`
 
-邮件导入只解析并保存标题、时间、收发方向、地址和正文摘要，不保存原始 `.eml` 文件、附件或完整邮件内容。相同 `Message-ID` 或相同指纹的邮件会跳过，避免重复导入。
+邮件导入只解析并保存标题、时间、收发方向、地址和正文摘要，不保存原始 `.eml` 文件、附件或完整邮件内容。相同 `Message-ID`、相同指纹或同一 IMAP 服务器 UID 的邮件会跳过，避免重复导入。
+
+## mailInbox
+
+待人工归档邮件表。官邮 IMAP 同步发现邮件后，只有在能唯一对应“一个达人 + 一条活跃合作跟进”时才会直接写入 `followUpEvents`。其余邮件保留在本表，供人工确认，防止错写到其他达人的合作历史。
+
+- `id`
+- `type`（当前为 `email`）
+- `occurred_at`
+- `direction`
+- `subject`
+- `sender`
+- `recipients`
+- `excerpt`
+- `message_id`
+- `fingerprint`
+- `source`
+- `mailbox`
+- `server_key`
+- `imap_uid`
+- `status`（`needs_followup`、`ambiguous_creator`、`unmatched`）
+- `matched_creator_id`
+- `matched_creator_name`
+- `candidate_creator_ids`
+- `candidate_follow_up_ids`
+- `createdAt`
+- `updatedAt`
+
+当 `status` 为 `needs_followup` 且没有活跃跟进时，可新建一条默认合作跟进后归档；当同一达人有多条活跃跟进时，必须先选择具体跟进。无法确认达人或匹配多个达人时，不提供自动归档。
 
 ## matches
 

@@ -1,11 +1,15 @@
 import { timingSafeEqual } from "node:crypto";
+import { createRequire } from "node:module";
 
 const STATE_BLOB = "resource-workbench/state.json";
 const SETTINGS_BLOB = "resource-workbench/private-ai-settings.json";
+const MAIL_SETTINGS_BLOB = "resource-workbench/private-mail-settings.json";
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 const AI_REQUEST_TIMEOUT_MS = Number(process.env.AI_REQUEST_TIMEOUT_MS || 60000);
 let blobClientPromise;
 let excelJsPromise;
+const require = createRequire(import.meta.url);
+const { normalizeMailSettings, publicMailSettings, testMailConnection, syncMailAccount } = require("../tools/mail-sync.cjs");
 
 const defaultState = {
   meta: { version: 1, updatedAt: new Date().toISOString() },
@@ -17,6 +21,7 @@ const defaultState = {
   matches: [],
   followUps: [],
   followUpEvents: [],
+  mailInbox: [],
   importHistory: [],
 };
 
@@ -126,6 +131,7 @@ function normalizeBusinessState(rawState) {
       })
     : [];
   const followUpEvents = Array.isArray(state.followUpEvents) ? state.followUpEvents : [];
+  const mailInbox = Array.isArray(state.mailInbox) ? state.mailInbox : [];
 
   return {
     ...defaultState,
@@ -139,6 +145,7 @@ function normalizeBusinessState(rawState) {
     matches,
     followUps,
     followUpEvents,
+    mailInbox,
     importHistory: Array.isArray(state.importHistory) ? state.importHistory : [],
   };
 }
@@ -308,6 +315,40 @@ async function saveAiSettings(input) {
     if (!profile.apiKey || profile.apiKey === "********") profile.apiKey = previous.apiKey || "";
   }
   await writeBlobJson(SETTINGS_BLOB, next);
+  return next;
+}
+
+function credentialKeyMaterial() {
+  return String(process.env.WORKBENCH_CREDENTIAL_ENCRYPTION_KEY || process.env.WORKBENCH_ACCESS_PASSWORD || "").trim();
+}
+
+async function loadMailSettings() {
+  const stored = await readBlobJson(MAIL_SETTINGS_BLOB, {});
+  return normalizeMailSettings(stored, stored, credentialKeyMaterial());
+}
+
+async function saveMailSettings(input) {
+  const existing = await loadMailSettings();
+  const next = normalizeMailSettings(input, existing, credentialKeyMaterial());
+  await writeBlobJson(MAIL_SETTINGS_BLOB, next);
+  return next;
+}
+
+async function saveMailSyncResult(settings, summary) {
+  const next = {
+    ...settings,
+    lastSyncAt: new Date().toISOString(),
+    lastSyncStatus: summary.warnings?.length ? "部分完成" : "完成",
+    lastSyncSummary: {
+      scanned: Number(summary.scanned || 0),
+      added: Number(summary.added || 0),
+      matched: Number(summary.matched || 0),
+      pending: Number(summary.pending || 0),
+      skipped: Number(summary.skipped || 0),
+      warnings: Array.isArray(summary.warnings) ? summary.warnings.slice(0, 5) : [],
+    },
+  };
+  await writeBlobJson(MAIL_SETTINGS_BLOB, next);
   return next;
 }
 
@@ -1360,6 +1401,17 @@ function formatError(error) {
   return message || "请求失败";
 }
 
+function formatMailError(error) {
+  const message = String(error?.message || error || "").trim();
+  if (/AbortError|timeout|超时/i.test(message)) {
+    return `邮箱 IMAP 连接超时：${message || "服务器未在限定时间内响应"}。请检查服务器地址、端口、SSL/TLS 和网络限制。`;
+  }
+  if (/(fetch failed|ENOTFOUND|ECONNREFUSED|ECONNRESET|EHOSTUNREACH|network|connect)/i.test(message)) {
+    return `邮箱 IMAP 连接失败：${message || "网络不可达"}。请检查 IMAP 服务器地址、端口、SSL/TLS、网络或防火墙设置。`;
+  }
+  return message || "邮箱 IMAP 请求失败";
+}
+
 function excelCellText(cell) {
   const value = cell.value;
   if (value === null || value === undefined) return "";
@@ -1430,6 +1482,48 @@ export default async function handler(req, res) {
 
     if (req.method === "GET" && pathname === "/api/ai/status") {
       json(res, 200, { ok: true, profiles: await publicAiStatus() });
+      return;
+    }
+
+    if (req.method === "GET" && pathname === "/api/mail/settings") {
+      json(res, 200, { ok: true, settings: publicMailSettings(await loadMailSettings()) });
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/mail/settings") {
+      try {
+        const body = JSON.parse((await readBody(req)) || "{}");
+        const settings = await saveMailSettings(body);
+        json(res, 200, { ok: true, settings: publicMailSettings(settings) });
+      } catch (error) {
+        json(res, 400, { ok: false, error: formatMailError(error) });
+      }
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/mail/test") {
+      try {
+        const result = await testMailConnection(await loadMailSettings(), credentialKeyMaterial());
+        json(res, 200, result);
+      } catch (error) {
+        json(res, 400, { ok: false, error: formatMailError(error) });
+      }
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/mail/sync") {
+      try {
+        const state = await loadState();
+        const settings = await loadMailSettings();
+        if (!settings.account.enabled) throw new Error("邮箱同步尚未启用。请先在设置页保存并启用 IMAP 邮箱。");
+        const body = JSON.parse((await readBody(req)) || "{}");
+        const summary = await syncMailAccount(settings, state, credentialKeyMaterial(), { maxPerFolder: body.maxPerFolder });
+        await saveState(state);
+        const nextSettings = await saveMailSyncResult(settings, summary);
+        json(res, 200, { ok: true, summary, settings: publicMailSettings(nextSettings), state });
+      } catch (error) {
+        json(res, 400, { ok: false, error: formatMailError(error) });
+      }
       return;
     }
 

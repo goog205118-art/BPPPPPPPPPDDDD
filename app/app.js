@@ -8,6 +8,9 @@ const API_AI_SETTINGS = "/api/ai/settings";
 const API_AI_STATUS = "/api/ai/status";
 const API_OUTREACH_GENERATE = "/api/ai/outreach-generate";
 const API_PRODUCT_PREVIEW = "/api/products/preview";
+const API_MAIL_SETTINGS = "/api/mail/settings";
+const API_MAIL_TEST = "/api/mail/test";
+const API_MAIL_SYNC = "/api/mail/sync";
 const STORAGE_ACCESS_PASSWORD = "resource-workbench-access-password";
 const SETTINGS_TAB = { key: "settings", title: "设置" };
 const MATCHING_TAB = { key: "matches", title: "本周资源匹配" };
@@ -43,6 +46,23 @@ const defaultAiSettings = {
     product: "standard",
     outreach: "special",
   },
+};
+const defaultMailSettings = {
+  account: {
+    enabled: false,
+    label: "官邮 IMAP",
+    host: "",
+    port: 993,
+    secure: true,
+    user: "",
+    hasPassword: false,
+    inboxFolder: "INBOX",
+    sentFolder: "Sent",
+    syncDays: 30,
+  },
+  lastSyncAt: "",
+  lastSyncStatus: "",
+  lastSyncSummary: null,
 };
 
 const yesNoOptions = ["否", "是"];
@@ -511,6 +531,7 @@ const emptyState = {
   matches: [],
   followUps: [],
   followUpEvents: [],
+  mailInbox: [],
   importHistory: [],
 };
 
@@ -529,6 +550,7 @@ const state = {
   filterMenu: null,
   optionSettingsType: "creators",
   aiSettings: clone(defaultAiSettings),
+  mailSettings: clone(defaultMailSettings),
   selectedLeadIds: new Set(),
   productFilters: { query: "", brand: "", country: "", category: "", store: "" },
   outreach: { open: false, leadIds: [], result: null },
@@ -589,6 +611,20 @@ const elements = {
   aiSettingsStatus: document.getElementById("aiSettingsStatus"),
   aiSettingsStatusBtn: document.getElementById("aiSettingsStatusBtn"),
   aiSettingsReloadBtn: document.getElementById("aiSettingsReloadBtn"),
+  mailSettingsForm: document.getElementById("mailSettingsForm"),
+  mailEnabled: document.getElementById("mailEnabled"),
+  mailLabel: document.getElementById("mailLabel"),
+  mailHost: document.getElementById("mailHost"),
+  mailPort: document.getElementById("mailPort"),
+  mailSecure: document.getElementById("mailSecure"),
+  mailUser: document.getElementById("mailUser"),
+  mailPassword: document.getElementById("mailPassword"),
+  mailInboxFolder: document.getElementById("mailInboxFolder"),
+  mailSentFolder: document.getElementById("mailSentFolder"),
+  mailSyncDays: document.getElementById("mailSyncDays"),
+  mailTestBtn: document.getElementById("mailTestBtn"),
+  mailSyncBtn: document.getElementById("mailSyncBtn"),
+  mailSettingsStatus: document.getElementById("mailSettingsStatus"),
   timezoneBar: document.getElementById("timezoneBar"),
   timezoneSettingsFields: document.getElementById("timezoneSettingsFields"),
   saveTimezonesBtn: document.getElementById("saveTimezonesBtn"),
@@ -1048,6 +1084,7 @@ function ensureStateShape(nextState) {
     : [];
   shaped.followUps = Array.isArray(nextState?.followUps) ? nextState.followUps.map((row) => normalizeFollowUp({ ...row }, shaped.creators, shaped.cooperations)) : [];
   shaped.followUpEvents = Array.isArray(nextState?.followUpEvents) ? nextState.followUpEvents : [];
+  shaped.mailInbox = Array.isArray(nextState?.mailInbox) ? nextState.mailInbox : [];
   shaped.matches = Array.isArray(nextState?.matches)
     ? nextState.matches.map((row) => ({
         ...row,
@@ -1108,6 +1145,36 @@ async function loadAiSettings() {
   } catch (error) {
     if (isOnlineDeployment()) throw error;
     state.aiSettings = clone(defaultAiSettings);
+  }
+}
+
+function normalizeMailSettingsPayload(payload = {}) {
+  const source = payload && typeof payload === "object" ? payload : {};
+  const settings = source.settings && typeof source.settings === "object" ? source.settings : source;
+  const account = settings.account && typeof settings.account === "object" ? settings.account : {};
+  return {
+    ...clone(defaultMailSettings),
+    ...settings,
+    account: {
+      ...clone(defaultMailSettings.account),
+      ...account,
+      enabled: Boolean(account.enabled),
+      secure: account.secure !== false,
+      hasPassword: Boolean(account.hasPassword),
+    },
+    lastSyncSummary: settings.lastSyncSummary && typeof settings.lastSyncSummary === "object" ? settings.lastSyncSummary : null,
+  };
+}
+
+async function loadMailSettings() {
+  try {
+    const response = await apiFetch(API_MAIL_SETTINGS);
+    const payload = await response.json().catch(() => ({}));
+    if (!response.ok || payload.ok === false) throw new Error(payload.error || "无法读取邮箱同步设置");
+    state.mailSettings = normalizeMailSettingsPayload(payload);
+  } catch (error) {
+    if (isOnlineDeployment()) throw error;
+    state.mailSettings = clone(defaultMailSettings);
   }
 }
 
@@ -1213,6 +1280,118 @@ function renderAiSettings() {
   elements.outreachAiProfile.value = assignments.outreach;
   const describe = (settings, label) => `${label}${settings.hasApiKey ? "已配置" : "未配置"}${settings.model ? `（${settings.model}）` : ""}`;
   elements.aiSettingsStatus.textContent = `${describe(standard, "普通 AI ")}；${describe(advanced, "高能力 AI ")}；${describe(special, "特殊 AI ")}。`;
+}
+
+function formatMailSyncStatus(settings = state.mailSettings) {
+  const account = settings.account || {};
+  const summary = settings.lastSyncSummary || {};
+  if (!account.host || !account.user || !account.hasPassword) return "尚未完成邮箱配置。保存配置后可先测试连接。";
+  if (!settings.lastSyncAt) return `${account.label || account.user} 已配置，尚未同步。`;
+  const status = settings.lastSyncStatus || "已完成";
+  const details = `扫描 ${Number(summary.scanned || 0)}，归档 ${Number(summary.matched || 0)}，待处理 ${Number(summary.pending || 0)}，跳过重复 ${Number(summary.skipped || 0)}`;
+  return `${status} · ${formatDateTime(settings.lastSyncAt)} · ${details}${summary.warnings?.length ? ` · ${summary.warnings.join("；")}` : ""}`;
+}
+
+function readMailSettingsForm() {
+  const form = new FormData(elements.mailSettingsForm);
+  return {
+    account: {
+      enabled: elements.mailEnabled.checked,
+      label: text(form.get("label")),
+      host: text(form.get("host")),
+      port: Number(form.get("port")) || 993,
+      secure: elements.mailSecure.checked,
+      user: text(form.get("user")),
+      password: text(form.get("password")),
+      inboxFolder: text(form.get("inboxFolder")) || "INBOX",
+      sentFolder: text(form.get("sentFolder")) || "Sent",
+      syncDays: Number(form.get("syncDays")) || 30,
+    },
+  };
+}
+
+function renderMailSettings() {
+  const account = { ...clone(defaultMailSettings.account), ...(state.mailSettings?.account || {}) };
+  elements.mailEnabled.checked = Boolean(account.enabled);
+  elements.mailLabel.value = account.label || "";
+  elements.mailHost.value = account.host || "";
+  elements.mailPort.value = String(account.port || 993);
+  elements.mailSecure.checked = account.secure !== false;
+  elements.mailUser.value = account.user || "";
+  elements.mailPassword.value = "";
+  elements.mailPassword.placeholder = account.hasPassword ? "已保存，留空表示不修改" : "填写邮箱授权码或专用密码";
+  elements.mailInboxFolder.value = account.inboxFolder || "INBOX";
+  elements.mailSentFolder.value = account.sentFolder || "Sent";
+  elements.mailSyncDays.value = String(account.syncDays || 30);
+  elements.mailSettingsStatus.textContent = formatMailSyncStatus();
+}
+
+async function saveMailSettings(event) {
+  event.preventDefault();
+  elements.mailSettingsStatus.textContent = "正在保存邮箱配置...";
+  try {
+    const payload = await withActivity("正在保存邮箱配置", "正在加密保存 IMAP 授权信息...", async () => {
+      const response = await apiFetch(API_MAIL_SETTINGS, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(readMailSettingsForm()),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.ok === false) throw new Error(result.error || "邮箱配置保存失败");
+      return result;
+    });
+    state.mailSettings = normalizeMailSettingsPayload(payload);
+    renderMailSettings();
+    elements.mailSettingsStatus.textContent = "邮箱配置已保存。授权码不会回显，后续可直接测试连接或立即同步。";
+  } catch (error) {
+    elements.mailSettingsStatus.textContent = error.message || "邮箱配置保存失败";
+  }
+}
+
+async function testMailSettings() {
+  elements.mailSettingsStatus.textContent = "正在测试 IMAP 连接...";
+  try {
+    const payload = await withActivity("正在测试邮箱连接", "正在验证服务器、端口、SSL 和授权码...", async () => {
+      const response = await apiFetch(API_MAIL_TEST, { method: "POST" });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.ok === false) throw new Error(result.error || "邮箱连接失败");
+      return result;
+    });
+    elements.mailSettingsStatus.textContent = `连接成功：${payload.account} · ${payload.mailbox} 共 ${Number(payload.messageCount || 0)} 封邮件。`;
+  } catch (error) {
+    elements.mailSettingsStatus.textContent = error.message || "邮箱连接失败";
+  }
+}
+
+async function syncMailbox() {
+  if (!state.mailSettings.account?.enabled) {
+    state.activeTab = SETTINGS_TAB.key;
+    render();
+    elements.mailSettingsStatus.textContent = "请先填写并启用 IMAP 邮箱，再执行同步。";
+    return;
+  }
+  try {
+    const payload = await withActivity("正在同步官邮", "正在读取近期收件与已发送邮件，并按达人邮箱安全归档...", async () => {
+      const response = await apiFetch(API_MAIL_SYNC, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ maxPerFolder: 120 }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.ok === false) throw new Error(result.error || "邮箱同步失败");
+      return result;
+    });
+    state.data = ensureStateShape(payload.state);
+    state.mailSettings = normalizeMailSettingsPayload(payload.settings);
+    render();
+    renderCreatorDrawer();
+  } catch (error) {
+    if (state.activeTab === "settings") {
+      elements.mailSettingsStatus.textContent = error.message || "邮箱同步失败";
+    } else {
+      elements.importStatus.textContent = error.message || "邮箱同步失败";
+    }
+  }
 }
 
 async function saveAiSettings(event) {
@@ -2416,6 +2595,7 @@ function renderSettingsPage() {
   elements.matchingPage.classList.add("hidden");
   elements.followUpPage.classList.add("hidden");
   renderAiSettings();
+  renderMailSettings();
   renderTimeZoneSettings();
   renderOptionSettings();
 }
@@ -2857,6 +3037,124 @@ function latestFollowUpEmail(followUpId) {
   return followUpEventsFor(followUpId).find((event) => event.type === "email");
 }
 
+function mailInboxStatusLabel(status) {
+  if (status === "needs_followup") return "已匹配达人，缺少活跃跟进";
+  if (status === "ambiguous_creator") return "匹配到多个达人";
+  return "未匹配达人邮箱";
+}
+
+function mailInboxRowMarkup(message) {
+  const direction = message.direction === "inbound" ? "收件" : message.direction === "outbound" ? "已发送" : "待判断";
+  const creator = message.matched_creator_name ? ` · ${message.matched_creator_name}` : "";
+  const candidateFollowUps = (message.candidate_follow_up_ids || [])
+    .map((id) => rows("followups").find((row) => text(row.id) === text(id)))
+    .filter(Boolean);
+  let action = "";
+  if (message.status === "needs_followup" && message.matched_creator_id && !candidateFollowUps.length) {
+    action = `<div class="mail-inbox-actions"><button type="button" class="ghost" data-mail-create-followup="${escapeHtml(message.id)}">新建跟进并归档</button></div>`;
+  } else if (message.status === "needs_followup" && candidateFollowUps.length) {
+    action = `
+      <div class="mail-inbox-actions">
+        <select data-mail-followup-select="${escapeHtml(message.id)}" aria-label="选择合作跟进">
+          ${candidateFollowUps.map((followUp) => `<option value="${escapeHtml(followUp.id)}">${escapeHtml(`${followUp.creator_name || "未命名达人"} · ${followUp.stage || "初步沟通"} · ${followUp.next_action || "无下一步"}`)}</option>`).join("")}
+        </select>
+        <button type="button" class="ghost" data-mail-archive="${escapeHtml(message.id)}">归档到跟进</button>
+      </div>`;
+  }
+  return `
+    <article class="mail-inbox-row">
+      <div class="mail-inbox-row-head">
+        <strong>${escapeHtml(message.subject || "无主题")}</strong>
+        <span>${escapeHtml(mailInboxStatusLabel(message.status))}</span>
+      </div>
+      <small>${escapeHtml([direction, message.sender || "未知发件人", formatDateTime(message.occurred_at), message.mailbox].filter(Boolean).join(" · "))}${escapeHtml(creator)}</small>
+      <p>${escapeHtml(message.excerpt || "没有可提取的正文摘要")}</p>
+      ${action}
+    </article>`;
+}
+
+function archiveMailIntoFollowUp(message, followUp) {
+  const now = new Date().toISOString();
+  const event = {
+    ...message,
+    follow_up_id: followUp.id,
+    updatedAt: now,
+  };
+  delete event.status;
+  delete event.matched_creator_id;
+  delete event.matched_creator_name;
+  delete event.candidate_creator_ids;
+  delete event.candidate_follow_up_ids;
+
+  state.data.followUpEvents = [event, ...(state.data.followUpEvents || [])];
+  state.data.mailInbox = (state.data.mailInbox || []).filter((item) => text(item.id) !== text(message.id));
+
+  const followUpIndex = (state.data.followUps || []).findIndex((row) => text(row.id) === text(followUp.id));
+  if (followUpIndex >= 0) {
+    const current = state.data.followUps[followUpIndex];
+    const currentLatest = text(current.last_email_at);
+    state.data.followUps[followUpIndex] = {
+      ...current,
+      last_email_at: !currentLatest || text(message.occurred_at) > currentLatest ? message.occurred_at : currentLatest,
+      updatedAt: now,
+    };
+  }
+}
+
+async function archivePendingMail(mailId, followUpId) {
+  const message = (state.data.mailInbox || []).find((item) => text(item.id) === text(mailId));
+  const followUp = rows("followups").find((item) => text(item.id) === text(followUpId));
+  if (!message || !followUp) return;
+
+  const duplicate = (state.data.followUpEvents || []).some((event) => {
+    const sameMessage = text(message.message_id) && text(event.message_id) === text(message.message_id);
+    const sameFingerprint = text(message.fingerprint) && text(event.fingerprint) === text(message.fingerprint);
+    const sameServerKey = text(message.server_key) && text(event.server_key) === text(message.server_key);
+    return sameMessage || sameFingerprint || sameServerKey;
+  });
+  if (duplicate) {
+    elements.importStatus.textContent = "该邮件已存在于跟进时间线，未重复归档。";
+    return;
+  }
+
+  await withActivity("正在归档邮件", "正在将邮件摘要写入合作跟进时间线...", async () => {
+    archiveMailIntoFollowUp(message, followUp);
+    await persist();
+  });
+  renderFollowUpPage();
+  renderCreatorDrawer();
+}
+
+async function createFollowUpAndArchiveMail(mailId) {
+  const message = (state.data.mailInbox || []).find((item) => text(item.id) === text(mailId));
+  const creator = rows("creators").find((item) => text(item.id) === text(message?.matched_creator_id));
+  if (!message || !creator) return;
+
+  const now = new Date().toISOString();
+  const followUp = normalizeFollowUp({
+    id: uid("FU"),
+    creator_id: creator.id,
+    creator_name: creator.name,
+    brand: creator.brand || "",
+    stage: "初步沟通",
+    priority: "中",
+    cooperation_mode: "待确认",
+    next_action: "查看已同步邮件并确认下一步",
+    shipping_status: "未寄样",
+    notes: "由官邮 IMAP 同步邮件手动新建跟进。",
+    createdAt: now,
+    updatedAt: now,
+  });
+
+  await withActivity("正在新建跟进", "正在建立合作跟进并归档对应邮件...", async () => {
+    state.data.followUps = [followUp, ...(state.data.followUps || [])];
+    archiveMailIntoFollowUp(message, followUp);
+    await persist();
+  });
+  renderFollowUpPage();
+  renderCreatorDrawer();
+}
+
 function decodeBytes(bytes, charset = "utf-8") {
   const normalized = String(charset || "utf-8").toLowerCase().replace(/["']/g, "");
   const aliases = { gb2312: "gb18030", gbk: "gb18030", "iso-8859-1": "windows-1252", latin1: "windows-1252" };
@@ -3204,16 +3502,19 @@ function renderFollowUpPage() {
   const metrics = getMetrics("followups", allRows);
   const todayCount = allRows.filter((row) => isSameLocalDay(row.next_follow_up_at, new Date())).length;
   const overdueCount = allRows.filter((row) => isFollowUpOverdue(row)).length;
+  const pendingMail = (state.data.mailInbox || []).slice().sort((a, b) => new Date(b.occurred_at || b.createdAt || 0) - new Date(a.occurred_at || a.createdAt || 0));
+  const mailConfigured = Boolean(state.mailSettings.account?.enabled && state.mailSettings.account?.host && state.mailSettings.account?.hasPassword);
 
   elements.followUpPage.innerHTML = `
     <header class="followup-head">
       <div>
         <span class="eyebrow">PIPELINE</span>
         <h2>合作跟进</h2>
-        <p class="panel-hint">按合作阶段集中查看沟通、寄样、物流和发布回收进度。Foxmail 邮件可通过导出 .eml 导入时间线。</p>
+        <p class="panel-hint">按合作阶段集中查看沟通、寄样、物流和发布回收进度。连接官邮 IMAP 后可手动同步，Foxmail .eml 导入仍可作为备用。</p>
       </div>
       <div class="followup-head-actions">
         <button type="button" class="ghost" data-followup-filter-overdue title="只看逾期跟进">${overdueCount ? `逾期 ${overdueCount}` : "逾期"}</button>
+        <button type="button" class="ghost" data-followup-sync title="${mailConfigured ? "同步官邮 IMAP" : "前往设置邮箱 IMAP"}">${mailConfigured ? "同步邮箱" : "配置邮箱"}</button>
         <button type="button" class="primary" data-followup-new>新增跟进</button>
       </div>
     </header>
@@ -3240,12 +3541,30 @@ function renderFollowUpPage() {
       <header class="followup-column-head"><strong>已结束 / 暂停</strong><span>${terminalRows.length}</span></header>
       <div class="followup-closed-list">${terminalRows.length ? terminalRows.map(followUpCardMarkup).join("") : `<p class="followup-column-empty">暂无已结束记录</p>`}</div>
     </section>
+    <section class="mail-inbox">
+      <header class="mail-inbox-head">
+        <div><strong>待人工归档邮件</strong><small>仅在无法唯一关联到一条活跃合作跟进时保留在此处，避免把邮件写错到其他达人。</small></div>
+        <span>${pendingMail.length}</span>
+      </header>
+      <div class="mail-inbox-list">${pendingMail.length ? pendingMail.slice(0, 24).map(mailInboxRowMarkup).join("") : `<p class="followup-column-empty">暂无待人工处理邮件</p>`}</div>
+    </section>
     ${!allRows.length ? `<section class="followup-empty"><strong>还没有合作跟进</strong><p>把已进入达人库的达人按实际进度建立跟进记录，之后就能在看板上持续追踪。</p><button type="button" class="primary" data-followup-new>新增第一条跟进</button></section>` : ""}
   `;
 
   elements.followUpPage.querySelectorAll("[data-followup-new]").forEach((button) => button.addEventListener("click", () => openFollowUpEditor()));
   elements.followUpPage.querySelectorAll("[data-followup-edit]").forEach((button) => button.addEventListener("click", () => openFollowUpEditor({ id: button.dataset.followupEdit })));
   elements.followUpPage.querySelectorAll("[data-followup-mail]").forEach((button) => button.addEventListener("click", () => openFollowUpMailImport(button.dataset.followupMail)));
+  elements.followUpPage.querySelector("[data-followup-sync]")?.addEventListener("click", syncMailbox);
+  elements.followUpPage.querySelectorAll("[data-mail-create-followup]").forEach((button) => {
+    button.addEventListener("click", () => createFollowUpAndArchiveMail(button.dataset.mailCreateFollowup));
+  });
+  elements.followUpPage.querySelectorAll("[data-mail-archive]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const mailId = button.dataset.mailArchive;
+      const followUpId = elements.followUpPage.querySelector(`[data-mail-followup-select="${CSS.escape(mailId)}"]`)?.value;
+      if (followUpId) archivePendingMail(mailId, followUpId);
+    });
+  });
   elements.followUpPage.querySelectorAll("[data-followup-delete]").forEach((button) => {
     button.addEventListener("click", async () => {
       const followUp = rows("followups").find((row) => row.id === button.dataset.followupDelete);
@@ -4493,6 +4812,7 @@ function snapshotBusinessState() {
     matches: clone(state.data.matches || []),
     followUps: clone(state.data.followUps || []),
     followUpEvents: clone(state.data.followUpEvents || []),
+    mailInbox: clone(state.data.mailInbox || []),
   };
 }
 
@@ -4525,6 +4845,7 @@ async function rollbackImport(historyId) {
   state.data.matches = Array.isArray(snapshot?.matches) ? snapshot.matches : state.data.matches;
   state.data.followUps = Array.isArray(snapshot?.followUps) ? snapshot.followUps : state.data.followUps;
   state.data.followUpEvents = Array.isArray(snapshot?.followUpEvents) ? snapshot.followUpEvents : state.data.followUpEvents;
+  state.data.mailInbox = Array.isArray(snapshot?.mailInbox) ? snapshot.mailInbox : state.data.mailInbox;
   state.data.meta = { version: 1, ...(snapshot?.meta || {}), updatedAt: new Date().toISOString() };
   state.data.importHistory = history.filter((entry) => entry.id !== historyId);
   resetEditorState();
@@ -4785,8 +5106,13 @@ function bindEvents() {
   elements.aiSettingsStatusBtn.addEventListener("click", checkAiStatus);
   elements.aiSettingsReloadBtn.addEventListener("click", async () => {
     await loadAiSettings();
+    await loadMailSettings();
     renderAiSettings();
+    renderMailSettings();
   });
+  elements.mailSettingsForm.addEventListener("submit", saveMailSettings);
+  elements.mailTestBtn.addEventListener("click", testMailSettings);
+  elements.mailSyncBtn.addEventListener("click", syncMailbox);
   elements.saveTimezonesBtn.addEventListener("click", saveTimeZones);
   const bindKeySource = (source, keyInput) => {
     source.addEventListener("change", () => {
@@ -4844,6 +5170,7 @@ function bindEvents() {
   elements.refreshBtn.addEventListener("click", async () => {
     await loadState();
     await loadAiSettings();
+    await loadMailSettings();
     render();
   });
   elements.globalSearchBtn.addEventListener("click", openGlobalSearch);
@@ -5025,6 +5352,7 @@ async function init() {
   loadDuplicateIgnores();
   await loadState();
   await loadAiSettings();
+  await loadMailSettings();
   startTimeZoneTicker();
   render();
 }

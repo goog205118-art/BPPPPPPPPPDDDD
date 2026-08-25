@@ -8,6 +8,13 @@ const url = require("url");
 const net = require("net");
 const zlib = require("zlib");
 const { spawnSync } = require("child_process");
+const { createHash } = require("crypto");
+const {
+  normalizeMailSettings,
+  publicMailSettings,
+  testMailConnection,
+  syncMailAccount,
+} = require("./mail-sync.cjs");
 
 const rootDir = path.resolve(__dirname, "..");
 const appDir = path.join(rootDir, "app");
@@ -19,6 +26,7 @@ const storageDir = path.resolve(process.env.RESOURCE_WORKBENCH_STORAGE_DIR || de
 const storageStateFile = path.join(storageDir, "state.json");
 const dbFile = path.join(storageDir, "resource-workbench.sqlite3");
 const aiSettingsFile = path.join(storageDir, "ai-settings.json");
+const mailSettingsFile = path.join(storageDir, "mail-settings.json");
 const excelReader = path.join(rootDir, "tools", "excel_to_json.py");
 const sqliteBridge = path.join(rootDir, "tools", "sqlite_store.py");
 const port = Number(process.env.PORT || 4173);
@@ -61,6 +69,9 @@ const defaultState = {
   products: [],
   cooperations: [],
   matches: [],
+  followUps: [],
+  followUpEvents: [],
+  mailInbox: [],
   importHistory: [],
 };
 
@@ -131,8 +142,37 @@ function normalizeBusinessState(rawState) {
         selected_resource_ids: Array.isArray(row.selected_resource_ids) ? row.selected_resource_ids : [],
       }))
     : [];
+  const followUps = Array.isArray(state.followUps)
+    ? state.followUps.map((row) => {
+        const creator = creators.find((item) => item.id === row.creator_id) || creatorByName.get(String(row.creator_name || "").trim());
+        const cooperation = cooperations.find((item) => item.id === row.cooperation_id);
+        return {
+          ...row,
+          creator_id: creator ? creator.id : String(row.creator_id || "").trim(),
+          creator_name: creator ? creator.name : String(row.creator_name || "").trim(),
+          cooperation_id: cooperation ? cooperation.id : String(row.cooperation_id || "").trim(),
+          brand: String(row.brand || creator?.brand || "").trim(),
+        };
+      })
+    : [];
+  const followUpEvents = Array.isArray(state.followUpEvents) ? state.followUpEvents : [];
+  const mailInbox = Array.isArray(state.mailInbox) ? state.mailInbox : [];
 
-  return { ...defaultState, ...state, creators, resources, leads, products, cooperations, matches, importHistory: Array.isArray(state.importHistory) ? state.importHistory : [] };
+  return {
+    ...defaultState,
+    ...state,
+    meta: { version: 1, ...(state.meta || {}) },
+    creators,
+    resources,
+    leads,
+    products,
+    cooperations,
+    matches,
+    followUps,
+    followUpEvents,
+    mailInbox,
+    importHistory: Array.isArray(state.importHistory) ? state.importHistory : [],
+  };
 }
 
 let pythonCommand;
@@ -176,6 +216,7 @@ function ensureDataFile() {
     copyIfMissing(path.join(legacyStorageDir, "resource-workbench.sqlite3-shm"), `${dbFile}-shm`);
     copyIfMissing(path.join(legacyStorageDir, "state.json"), storageStateFile);
     copyIfMissing(path.join(legacyStorageDir, "ai-settings.json"), aiSettingsFile);
+    copyIfMissing(path.join(legacyStorageDir, "mail-settings.json"), mailSettingsFile);
   }
 
   if (!fs.existsSync(stateFile)) {
@@ -225,6 +266,48 @@ function saveState(nextState) {
   } catch {
     // The project-side JSON mirror is best effort; SQLite remains the source of truth.
   }
+}
+
+function credentialKeyMaterial() {
+  const configured = String(process.env.WORKBENCH_CREDENTIAL_ENCRYPTION_KEY || process.env.WORKBENCH_ACCESS_PASSWORD || "").trim();
+  if (configured) return configured;
+  return createHash("sha256").update(`${os.userInfo().username}|${storageDir}|ResourceWorkbench`, "utf8").digest("hex");
+}
+
+function loadMailSettings() {
+  ensureDataFile();
+  try {
+    const stored = JSON.parse(fs.readFileSync(mailSettingsFile, "utf8"));
+    return normalizeMailSettings(stored, stored, credentialKeyMaterial());
+  } catch {
+    return normalizeMailSettings({}, {}, credentialKeyMaterial());
+  }
+}
+
+function saveMailSettings(input) {
+  ensureDataFile();
+  const existing = loadMailSettings();
+  const next = normalizeMailSettings(input, existing, credentialKeyMaterial());
+  fs.writeFileSync(mailSettingsFile, JSON.stringify(next, null, 2), "utf8");
+  return next;
+}
+
+function saveMailSyncResult(settings, summary) {
+  const next = {
+    ...settings,
+    lastSyncAt: new Date().toISOString(),
+    lastSyncStatus: summary.warnings?.length ? "部分完成" : "完成",
+    lastSyncSummary: {
+      scanned: Number(summary.scanned || 0),
+      added: Number(summary.added || 0),
+      matched: Number(summary.matched || 0),
+      pending: Number(summary.pending || 0),
+      skipped: Number(summary.skipped || 0),
+      warnings: Array.isArray(summary.warnings) ? summary.warnings.slice(0, 5) : [],
+    },
+  };
+  fs.writeFileSync(mailSettingsFile, JSON.stringify(next, null, 2), "utf8");
+  return next;
 }
 
 function runSqliteBridge(command, payload = null) {
@@ -622,6 +705,17 @@ function formatError(error) {
     return `AI API 连接失败：${combined || "网络不可达"}。请检查 API 地址、网络/代理/防火墙，或换用当前网络可访问的模型服务。`;
   }
   return message || "AI 请求失败";
+}
+
+function formatMailError(error) {
+  const message = String(error?.message || error || "").trim();
+  if (/timeout|超时/i.test(message)) {
+    return `邮箱 IMAP 连接超时：${message || "服务器未在限定时间内响应"}。请检查服务器地址、端口、SSL/TLS 和网络限制。`;
+  }
+  if (/(EACCES|ECONNREFUSED|ETIMEDOUT|ENOTFOUND|ECONNRESET|EHOSTUNREACH|network|fetch failed|connect)/i.test(message)) {
+    return `邮箱 IMAP 连接失败：${message || "网络不可达"}。请检查 IMAP 服务器地址、端口、SSL/TLS、网络或防火墙设置。`;
+  }
+  return message || "邮箱 IMAP 请求失败";
 }
 
 function postJson(targetUrl, payload, extraHeaders = {}) {
@@ -1773,6 +1867,45 @@ function handleApi(req, res, pathname) {
     publicAiStatus()
       .then((profiles) => jsonResponse(res, 200, { ok: true, profiles }))
       .catch((error) => jsonResponse(res, 400, { ok: false, error: formatError(error) }));
+    return true;
+  }
+
+  if (req.method === "GET" && pathname === "/api/mail/settings") {
+    jsonResponse(res, 200, { ok: true, settings: publicMailSettings(loadMailSettings()) });
+    return true;
+  }
+
+  if (req.method === "POST" && pathname === "/api/mail/settings") {
+    readBody(req)
+      .then((body) => {
+        const settings = saveMailSettings(JSON.parse(body || "{}"));
+        jsonResponse(res, 200, { ok: true, settings: publicMailSettings(settings) });
+      })
+      .catch((error) => jsonResponse(res, 400, { ok: false, error: formatMailError(error) }));
+    return true;
+  }
+
+  if (req.method === "POST" && pathname === "/api/mail/test") {
+    Promise.resolve()
+      .then(() => testMailConnection(loadMailSettings(), credentialKeyMaterial()))
+      .then((result) => jsonResponse(res, 200, result))
+      .catch((error) => jsonResponse(res, 400, { ok: false, error: formatMailError(error) }));
+    return true;
+  }
+
+  if (req.method === "POST" && pathname === "/api/mail/sync") {
+    readBody(req)
+      .then(async (body) => {
+        const settings = loadMailSettings();
+        if (!settings.account.enabled) throw new Error("邮箱同步尚未启用。请先在设置页保存并启用 IMAP 邮箱。");
+        const state = loadState();
+        const parsed = JSON.parse(body || "{}");
+        const summary = await syncMailAccount(settings, state, credentialKeyMaterial(), { maxPerFolder: parsed.maxPerFolder });
+        saveState(state);
+        const nextSettings = saveMailSyncResult(settings, summary);
+        jsonResponse(res, 200, { ok: true, summary, settings: publicMailSettings(nextSettings), state });
+      })
+      .catch((error) => jsonResponse(res, 400, { ok: false, error: formatMailError(error) }));
     return true;
   }
 
