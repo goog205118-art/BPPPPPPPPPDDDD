@@ -35,6 +35,8 @@ function emptyState() {
 
 function assertContactTrackRouting() {
   const now = new Date().toISOString();
+  const fiveDaysAgo = new Date(Date.now() - 5 * 24 * 60 * 60 * 1000).toISOString();
+  const thirtyOneDaysAgo = new Date(Date.now() - 31 * 24 * 60 * 60 * 1000).toISOString();
   const singleBrandState = {
     ...emptyState(),
     brands: [{ id: "BR-A", name: "品牌 A" }],
@@ -111,6 +113,78 @@ function assertContactTrackRouting() {
   assert.equal(sharedMailboxUniqueOutboundState.contactTracks.length, 1);
   assert.equal(sharedMailboxUniqueOutboundState.contactTracks[0].brand_id, "BR-A");
   assert.equal(sharedMailboxUniqueOutboundState.contactTracks[0].status, "waiting_reply");
+  assert.equal(sharedMailboxUniqueOutboundState.creators[0].last_outreach_at, now, "已发送邮件同步应回写达人最近首联/复联时间。");
+
+  const profileWindowState = {
+    ...emptyState(),
+    brands: [{ id: "BR-A", name: "品牌 A" }],
+    creators: [{
+      id: "CR-PROFILE",
+      brand_id: "BR-A",
+      brand: "品牌 A",
+      name: "资料时间达人",
+      email: "profile-window@example.com",
+      last_outreach_at: fiveDaysAgo,
+      createdAt: now,
+      updatedAt: now,
+    }],
+  };
+  const profileWindowReply = routeMailRecord(profileWindowState, {
+    id: "MAIL-PROFILE-WINDOW",
+    sender: "资料时间达人 <profile-window@example.com>",
+    recipients: "品牌 A <outreach@example.com>",
+    subject: "Re: Collaboration",
+    occurred_at: now,
+    message_id: "profile-window-reply@example.com",
+    fingerprint: "profile-window-reply",
+    mailbox_account_id: "MB-A",
+  }, singleAccount, now);
+  assert.equal(profileWindowReply.kind, "followup", "未建立待回复轨迹时，应以资料中的最近发件时间兜底匹配。");
+  assert.equal(profileWindowReply.matched, "profile_outreach_window");
+  assert.equal(profileWindowState.followUps.length, 1);
+  assert.equal(profileWindowState.followUps[0].stage, "初步沟通");
+  assert.equal(profileWindowState.contactTracks[0].last_outbound_at, fiveDaysAgo);
+
+  const expiredProfileWindowState = {
+    ...emptyState(),
+    brands: [{ id: "BR-A", name: "品牌 A" }],
+    creators: [{
+      id: "CR-EXPIRED",
+      brand_id: "BR-A",
+      brand: "品牌 A",
+      name: "过期窗口达人",
+      email: "expired-window@example.com",
+      last_outreach_at: thirtyOneDaysAgo,
+      createdAt: now,
+      updatedAt: now,
+    }],
+    contactTracks: [{
+      id: "CT-EXPIRED",
+      brand_id: "BR-A",
+      brand: "品牌 A",
+      person_type: "creator",
+      person_id: "CR-EXPIRED",
+      person_name: "过期窗口达人",
+      email: "expired-window@example.com",
+      mailbox_account_id: "MB-A",
+      last_outbound_at: thirtyOneDaysAgo,
+      status: "waiting_reply",
+      createdAt: now,
+      updatedAt: now,
+    }],
+  };
+  const expiredProfileReply = routeMailRecord(expiredProfileWindowState, {
+    id: "MAIL-EXPIRED-WINDOW",
+    sender: "过期窗口达人 <expired-window@example.com>",
+    recipients: "品牌 A <outreach@example.com>",
+    subject: "Re: Collaboration",
+    occurred_at: now,
+    message_id: "expired-window-reply@example.com",
+    fingerprint: "expired-window-reply",
+    mailbox_account_id: "MB-A",
+  }, singleAccount, now);
+  assert.equal(expiredProfileReply.kind, "inbox", "超过 30 天的回信不得自动进入合作跟进。");
+  assert.equal(expiredProfileWindowState.followUps.length, 0);
 
   const sharedMailboxState = {
     ...emptyState(),
@@ -173,6 +247,7 @@ function fixtureState() {
         name: "Creator A",
         email: "shared@example.com",
         social_url: "https://example.com/shared",
+        last_outreach_at: "2026-08-20T00:00:00.000Z",
         createdAt: now,
         updatedAt: now,
       },
@@ -456,6 +531,7 @@ async function run() {
     "品牌工作区的默认市场、语言、币种和时区应完整保存。",
   );
   assert.equal(result.payload.creators.filter((row) => row.brand_id === "BR-A").length, 1);
+  assert.equal(result.payload.creators.find((row) => row.id === "CR-A").last_outreach_at, "2026-08-20T00:00:00.000Z", "最近发件时间应经 SQLite 完整保存。");
   assert.equal(result.payload.creators.filter((row) => row.brand_id === "BR-B").length, 1);
   assert.equal(result.payload.products.filter((row) => row.brand_id === "BR-A").length, 1);
   assert.equal(result.payload.products.filter((row) => row.brand_id === "BR-B").length, 1);
@@ -642,7 +718,7 @@ async function run() {
   assert.equal(finalState.followUpEvents.length, 2, "被拦截的跨品牌发信不得产生时间线记录。");
   assert.equal(finalState.followUps.find((row) => row.id === "FU-B").stage, "初步沟通", "被拦截的跨品牌发信不得改动合作阶段。");
 
-  console.log("PASS follow-up isolation regression: contact-track routing, shared-mailbox confirmation, brand isolation, body authorization, expiry cleanup, protected AI failure, blocked cross-brand SMTP.");
+  console.log("PASS follow-up isolation regression: 30-day outreach routing, contact-track routing, shared-mailbox confirmation, brand isolation, body authorization, expiry cleanup, protected AI failure, blocked cross-brand SMTP.");
 }
 
 async function cleanup() {

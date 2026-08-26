@@ -24,6 +24,7 @@ SCHEMA = {
         "social_url": "TEXT",
         "email": "TEXT",
         "email_source": "TEXT",
+        "last_outreach_at": "TEXT",
         "country": "TEXT",
         "language": "TEXT",
         "platform": "TEXT",
@@ -85,6 +86,7 @@ SCHEMA = {
         "engagement": "REAL",
         "email": "TEXT",
         "email_source": "TEXT",
+        "last_outreach_at": "TEXT",
         "status": "TEXT",
         "priority": "TEXT",
         "notes": "TEXT",
@@ -198,6 +200,24 @@ SCHEMA = {
         "createdAt": "TEXT",
         "updatedAt": "TEXT",
     },
+    "contactTracks": {
+        "id": "TEXT PRIMARY KEY",
+        "brand_id": "TEXT",
+        "brand": "TEXT",
+        "person_type": "TEXT",
+        "person_id": "TEXT",
+        "person_name": "TEXT",
+        "email": "TEXT",
+        "mailbox_account_id": "TEXT",
+        "last_outbound_at": "TEXT",
+        "last_outbound_subject": "TEXT",
+        "status": "TEXT",
+        "follow_up_id": "TEXT",
+        "replied_at": "TEXT",
+        "source": "TEXT",
+        "createdAt": "TEXT",
+        "updatedAt": "TEXT",
+    },
     "mailInbox": {
         "id": "TEXT PRIMARY KEY",
         "brand_id": "TEXT",
@@ -223,6 +243,8 @@ SCHEMA = {
         "matched_creator_id": "TEXT",
         "matched_creator_name": "TEXT",
         "candidate_creator_ids": "TEXT",
+        "candidate_lead_ids": "TEXT",
+        "candidate_brand_ids": "TEXT",
         "candidate_follow_up_ids": "TEXT",
         "createdAt": "TEXT",
         "updatedAt": "TEXT",
@@ -302,6 +324,7 @@ def rows_to_state(conn):
         "followUps": [],
         "followUpEvents": [],
         "mailInbox": [],
+        "contactTracks": [],
         "importHistory": [],
     }
 
@@ -329,7 +352,7 @@ def rows_to_state(conn):
 
 def row_to_dict(row):
     payload = {key: row[key] for key in row.keys()}
-    for key in ("beforeCounts", "snapshot", "selected_resource_ids", "candidate_creator_ids", "candidate_follow_up_ids"):
+    for key in ("beforeCounts", "snapshot", "selected_resource_ids", "candidate_creator_ids", "candidate_lead_ids", "candidate_brand_ids", "candidate_follow_up_ids"):
         if payload.get(key):
             try:
                 payload[key] = json.loads(payload[key])

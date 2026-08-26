@@ -44,6 +44,8 @@ const DEFAULT_MAIL_SETTINGS = {
     retentionDays: 90,
   },
 };
+const REPLY_WINDOW_DAYS = 30;
+const REPLY_WINDOW_MS = REPLY_WINDOW_DAYS * 24 * 60 * 60 * 1000;
 
 function text(value) {
   return String(value ?? "").trim();
@@ -93,6 +95,20 @@ function accountBrandIds(account = {}) {
 
 function emailsIn(value) {
   return [...new Set(String(value || "").match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)?.map(normalizeEmail) || [])];
+}
+
+function dateTimestamp(value) {
+  const timestamp = new Date(value || "").getTime();
+  return Number.isFinite(timestamp) ? timestamp : NaN;
+}
+
+function isWithinReplyWindow(lastOutboundAt, inboundOccurredAt) {
+  const outbound = dateTimestamp(lastOutboundAt);
+  const inbound = dateTimestamp(inboundOccurredAt);
+  return Number.isFinite(outbound) &&
+    Number.isFinite(inbound) &&
+    inbound >= outbound &&
+    inbound - outbound <= REPLY_WINDOW_MS;
 }
 
 function credentialKey(keyMaterial) {
@@ -577,7 +593,7 @@ function makeMailRecord(parsed, message, mailbox, account, creator, now, policy 
   };
 }
 
-function findContactTrackMatches(state, emailAddresses, account, direction) {
+function findContactTrackMatches(state, emailAddresses, account, direction, occurredAt = "") {
   const scope = new Set(accountBrandIds(account));
   const addresses = new Set(emailAddresses.map(normalizeEmail).filter(Boolean));
   if (!addresses.size) return [];
@@ -586,9 +602,24 @@ function findContactTrackMatches(state, emailAddresses, account, direction) {
       if (!scope.has(text(track.brand_id))) return false;
       if (text(track.mailbox_account_id) && text(track.mailbox_account_id) !== text(account.id)) return false;
       if (direction === "inbound" && !["waiting_reply", "replied"].includes(text(track.status))) return false;
+      if (direction === "inbound" && !isWithinReplyWindow(track.last_outbound_at, occurredAt)) return false;
       return emailsIn(track.email).some((email) => addresses.has(email));
     })
     .sort((a, b) => new Date(b.last_outbound_at || b.updatedAt || 0) - new Date(a.last_outbound_at || a.updatedAt || 0));
+}
+
+function updatePersonOutreachTimestamp(state, person, occurredAt, now = new Date().toISOString()) {
+  const timestamp = dateTimestamp(occurredAt);
+  if (!Number.isFinite(timestamp)) return false;
+  const collectionKey = text(person?.person_type) === "lead" ? "leads" : "creators";
+  const collection = Array.isArray(state[collectionKey]) ? state[collectionKey] : [];
+  const source = collection.find((row) => text(row.id) === text(person?.id));
+  if (!source) return false;
+  const previous = dateTimestamp(source.last_outreach_at);
+  if (Number.isFinite(previous) && previous >= timestamp) return false;
+  source.last_outreach_at = new Date(timestamp).toISOString();
+  source.updatedAt = now;
+  return true;
 }
 
 function createId(prefix) {
@@ -656,6 +687,11 @@ function upsertContactTrack(state, input = {}, now = new Date().toISOString()) {
     normalizeEmail(track.email) === email &&
     text(track.mailbox_account_id) === text(input.mailbox_account_id),
   );
+  const inputOutboundAt = text(input.last_outbound_at);
+  const foundOutboundAt = text(found?.last_outbound_at);
+  const shouldRefreshOutbound = !found ||
+    !Number.isFinite(dateTimestamp(foundOutboundAt)) ||
+    (Number.isFinite(dateTimestamp(inputOutboundAt)) && dateTimestamp(inputOutboundAt) >= dateTimestamp(foundOutboundAt));
   const next = {
     id: found?.id || createId("CT"),
     brand_id: text(input.brand_id),
@@ -665,9 +701,11 @@ function upsertContactTrack(state, input = {}, now = new Date().toISOString()) {
     person_name: text(input.person_name),
     email,
     mailbox_account_id: text(input.mailbox_account_id),
-    last_outbound_at: text(input.last_outbound_at || found?.last_outbound_at || now),
-    last_outbound_subject: text(input.last_outbound_subject || found?.last_outbound_subject),
-    status: text(input.status || found?.status || "waiting_reply"),
+    last_outbound_at: shouldRefreshOutbound ? text(inputOutboundAt || foundOutboundAt || now) : foundOutboundAt,
+    last_outbound_subject: shouldRefreshOutbound
+      ? text(input.last_outbound_subject || found?.last_outbound_subject)
+      : text(found?.last_outbound_subject),
+    status: shouldRefreshOutbound ? text(input.status || found?.status || "waiting_reply") : text(found?.status || input.status || "waiting_reply"),
     follow_up_id: text(input.follow_up_id || found?.follow_up_id),
     source: text(input.source || found?.source || "smtp"),
     createdAt: text(found?.createdAt || now),
@@ -686,7 +724,7 @@ function routeMailRecord(state, record, account, now = new Date().toISOString())
   const people = findPeopleMatches(state, [...senderEmails, ...recipientEmails], scope);
   const inboundPeople = people.filter((person) => emailsIn(person.email).some((email) => senderEmails.includes(email)));
   const outboundPeople = people.filter((person) => emailsIn(person.email).some((email) => recipientEmails.includes(email)));
-  const inboundTracks = findContactTrackMatches(state, senderEmails, account, "inbound");
+  const inboundTracks = findContactTrackMatches(state, senderEmails, account, "inbound", record.occurred_at);
   const threadEvent = text(record.in_reply_to)
     ? (Array.isArray(state.followUpEvents) ? state.followUpEvents : []).find((event) => text(event.message_id) === text(record.in_reply_to) && scope.includes(text(event.brand_id)))
     : null;
@@ -725,6 +763,35 @@ function routeMailRecord(state, record, account, now = new Date().toISOString())
   if (inboundTracks.length > 1) directions.push("contact_track");
   if (inboundPeople.length === 1) {
     const person = inboundPeople[0];
+    if (isWithinReplyWindow(person.last_outreach_at, record.occurred_at)) {
+      const track = upsertContactTrack(state, {
+        brand_id: person.brand_id,
+        brand: person.brand,
+        person_type: person.person_type,
+        person_id: person.id,
+        person_name: person.name,
+        email: emailsIn(person.email)[0],
+        mailbox_account_id: account.id,
+        last_outbound_at: person.last_outreach_at,
+        status: "waiting_reply",
+        source: "profile_outreach_window",
+      }, now);
+      const followUpResult = createFollowUpForTrack(state, track, record, now);
+      const followUp = followUpResult?.followUp;
+      if (followUp) {
+        track.status = "replied";
+        track.follow_up_id = followUp.id;
+        track.replied_at = now;
+        track.updatedAt = now;
+        return {
+          kind: "followup",
+          followUp,
+          autoCreated: Boolean(followUpResult.created),
+          record: { ...record, direction: "inbound", brand_id: followUp.brand_id, brand: followUp.brand },
+          matched: "profile_outreach_window",
+        };
+      }
+    }
     return {
       kind: "inbox",
       status: "needs_followup",
@@ -748,6 +815,7 @@ function routeMailRecord(state, record, account, now = new Date().toISOString())
       status: "waiting_reply",
       source: "imap_sent",
     }, now);
+    updatePersonOutreachTimestamp(state, person, record.occurred_at, now);
     return { kind: "tracked_outbound", track, record: { ...record, direction: "outbound", brand_id: person.brand_id, brand: person.brand }, people: [person] };
   }
 
@@ -1006,6 +1074,7 @@ async function sendMailAccount(settings, state, keyMaterial, input = {}) {
     follow_up_id: followUp.id,
     source: "smtp",
   }, now);
+  if (creator) updatePersonOutreachTimestamp(state, { ...creator, person_type: "creator" }, now, now);
   followUp.last_email_at = now;
   followUp.has_unread_reply = false;
   followUp.updatedAt = now;

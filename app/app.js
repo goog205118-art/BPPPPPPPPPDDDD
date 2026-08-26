@@ -94,6 +94,7 @@ const entityConfig = {
       { key: "social_url", label: "社媒地址", type: "text", placeholder: "主页链接 / 达人链接" },
       { key: "email", label: "达人邮箱", type: "text", placeholder: "公开邮箱或人工补充" },
       { key: "email_source", label: "邮箱公开来源", type: "text", placeholder: "公开页面链接；AI 补全时自动记录" },
+      { key: "last_outreach_at", label: "最近首联 / 复联发件时间", type: "datetime-local", placeholder: "用于 30 天内回信自动进入初步沟通" },
       { key: "country", label: "国家和地区", type: "text" },
       { key: "language", label: "语言", type: "text" },
       { key: "platform", label: "平台", type: "text" },
@@ -121,6 +122,7 @@ const entityConfig = {
       social_url: ["社媒地址", "达人链接", "主页链接", "账号链接", "链接", "profile", "url", "social_url", "homepage"],
       email: ["达人邮箱", "邮箱", "邮件", "email", "e-mail", "mail"],
       email_source: ["邮箱公开来源", "邮箱来源", "邮箱出处", "email_source", "email source"],
+      last_outreach_at: ["最近首联时间", "最近复联时间", "最后联系时间", "最后发件时间", "last_outreach_at", "last_contacted_at"],
       country: ["国家和地区", "国家", "地区", "覆盖国家", "country"],
       language: ["语言", "语种", "language"],
       platform: ["平台", "渠道", "platform"],
@@ -238,6 +240,7 @@ const entityConfig = {
       { key: "engagement", label: "互动率 (%)", type: "number", step: "0.1" },
       { key: "email", label: "达人邮箱", type: "text", placeholder: "仅保留可验证公开邮箱" },
       { key: "email_source", label: "邮箱公开来源", type: "text", placeholder: "公开页面链接" },
+      { key: "last_outreach_at", label: "最近首联 / 复联发件时间", type: "datetime-local", placeholder: "用于 30 天内回信自动进入初步沟通" },
       { key: "status", label: "开发状态", type: "select", options: ["待开发", "已联系", "已转达人库", "不适合"] },
       { key: "priority", label: "跟进优先级", type: "select", options: ["高", "中", "低"] },
       { key: "notes", label: "备注", type: "textarea" },
@@ -255,6 +258,7 @@ const entityConfig = {
       engagement: ["互动率", "互动率(%)", "engagement"],
       email: ["达人邮箱", "邮箱", "邮件", "email", "e-mail", "mail"],
       email_source: ["邮箱公开来源", "邮箱来源", "邮箱出处", "email_source", "email source"],
+      last_outreach_at: ["最近首联时间", "最近复联时间", "最后联系时间", "最后发件时间", "last_outreach_at", "last_contacted_at"],
       status: ["开发状态", "状态", "status"],
       priority: ["跟进优先级", "优先级", "priority"],
       notes: ["备注", "说明", "notes"],
@@ -2386,7 +2390,7 @@ function renderForm() {
 
   elements.form.innerHTML = item.fields
     .flatMap((field) => {
-      const value = current?.[field.key] ?? "";
+      const value = field.type === "datetime-local" ? datetimeLocalValue(current?.[field.key]) : current?.[field.key] ?? "";
       const required = field.required ? "required" : "";
       const mark = field.required ? " *" : "";
       const placeholder = field.placeholder ? `placeholder="${escapeHtml(field.placeholder)}"` : "";
@@ -3392,6 +3396,7 @@ function markLeadAsContacted(leadId, channel) {
     status: "已联系",
     first_contacted_at: text(lead.first_contacted_at) || now,
     last_contacted_at: now,
+    last_outreach_at: now,
     contact_channel: text(channel) || text(lead.contact_channel),
     updatedAt: now,
   };
@@ -5254,6 +5259,15 @@ async function saveManualContactTrack(form) {
       };
       if (existing) Object.assign(existing, next);
       else state.data.contactTracks = [next, ...(state.data.contactTracks || [])];
+      const personIndex = state.data[collection].findIndex((row) => text(row.id) === text(person.id));
+      if (personIndex >= 0) {
+        const storedPerson = state.data[collection][personIndex];
+        state.data[collection][personIndex] = {
+          ...storedPerson,
+          last_outreach_at: now,
+          updatedAt: now,
+        };
+      }
       await persist();
     });
     renderFollowUpPage();
@@ -6033,8 +6047,19 @@ function render() {
 
 function fieldValue(field, rawValue) {
   if (field.type === "number") return toNumber(rawValue);
+  if (field.type === "datetime-local") {
+    const parsed = new Date(text(rawValue));
+    return Number.isNaN(parsed.getTime()) ? "" : parsed.toISOString();
+  }
   if (field.key === "country") return normalizeCountry(rawValue);
   return text(rawValue);
+}
+
+function datetimeLocalValue(value) {
+  const date = new Date(value || "");
+  if (Number.isNaN(date.getTime())) return "";
+  const pad = (part) => String(part).padStart(2, "0");
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 function resolveCooperationLinks(record, creators = rows("creators"), resources = rows("resources"), data = state.data) {
@@ -6388,7 +6413,7 @@ async function transferLeadToCreator(leadId) {
 
   const now = new Date().toISOString();
   const creator = defaultRecord("creators");
-  for (const key of ["brand", "name", "handle", "social_url", "email", "email_source", "country", "platform", "niche", "followers", "avg_views", "engagement", "priority"]) {
+  for (const key of ["brand", "name", "handle", "social_url", "email", "email_source", "last_outreach_at", "country", "platform", "niche", "followers", "avg_views", "engagement", "priority"]) {
     creator[key] = lead[key] ?? creator[key];
   }
   creator.status = "待联系";
