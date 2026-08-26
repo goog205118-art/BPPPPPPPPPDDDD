@@ -710,9 +710,21 @@ async function detectLocalProxy() {
   return "";
 }
 
+function isLoopbackApiUrl(value) {
+  try {
+    const host = new URL(String(value || "")).hostname.toLowerCase();
+    return host === "localhost" || host.endsWith(".localhost") || host === "::1" || /^127\./.test(host);
+  } catch {
+    return false;
+  }
+}
+
 async function resolveAiNetwork(settings) {
   const manualProxy = normalizeProxyUrl(settings.proxyUrl);
   if (manualProxy) return { proxyUrl: manualProxy, source: "手动设置", automatic: false };
+  if (isLoopbackApiUrl(settings.apiBaseUrl)) {
+    return { proxyUrl: "", source: "本机 AI 地址直连", automatic: true };
+  }
 
   const environmentProxy = normalizeProxyUrl(
     process.env.HTTPS_PROXY || process.env.https_proxy || process.env.HTTP_PROXY || process.env.http_proxy || process.env.ALL_PROXY || process.env.all_proxy || "",

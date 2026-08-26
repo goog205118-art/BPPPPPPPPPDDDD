@@ -821,9 +821,11 @@ function routeMailRecord(state, record, account, now = new Date().toISOString())
 
   const candidates = inboundPeople.length ? inboundPeople : outboundPeople;
   const candidateBrandIds = [...new Set(candidates.map((person) => text(person.brand_id)).filter(Boolean))];
+  const hasMultipleCandidateBrands = candidateBrandIds.length > 1;
+  const hasMultipleCandidates = candidates.length > 1;
   return {
     kind: "inbox",
-    status: candidateBrandIds.length > 1 || scope.length > 1 && candidates.length ? "needs_brand_confirmation" : candidates.length > 1 ? "ambiguous_creator" : "unmatched",
+    status: hasMultipleCandidateBrands ? "needs_brand_confirmation" : hasMultipleCandidates ? "ambiguous_creator" : "unmatched",
     record: { ...record, direction: inboundPeople.length ? "inbound" : outboundPeople.length ? "outbound" : record.direction, brand_id: candidateBrandIds.length === 1 ? candidateBrandIds[0] : "" },
     people: candidates,
     candidateBrandIds: candidateBrandIds.length ? candidateBrandIds : scope,

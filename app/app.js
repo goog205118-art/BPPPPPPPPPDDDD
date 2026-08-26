@@ -1335,7 +1335,16 @@ function rows(type = state.activeTab) {
 }
 
 function belongsToActiveBrand(row) {
-  return !state.activeBrandId || text(row?.brand_id) === text(state.activeBrandId);
+  if (!state.activeBrandId || text(row?.brand_id) === text(state.activeBrandId)) return true;
+
+  // A shared official mailbox can contain mail that has not been assigned to
+  // one brand yet. Keep those unresolved inbox records visible in every
+  // candidate workspace so they can be confirmed there, without loosening
+  // isolation for archived mail, follow-ups, or resolved inbox records.
+  const unresolvedMailboxStatus = new Set(["needs_brand_confirmation", "unmatched", "ambiguous_creator"]);
+  return unresolvedMailboxStatus.has(text(row?.status)) &&
+    Array.isArray(row?.candidate_brand_ids) &&
+    row.candidate_brand_ids.map(text).includes(text(state.activeBrandId));
 }
 
 function referenceLabel(type, row) {
@@ -3884,6 +3893,13 @@ function pendingMailCreatorOptions(message) {
 function mailInboxRowMarkup(message) {
   const direction = message.direction === "inbound" ? "收件" : message.direction === "outbound" ? "已发送" : "待判断";
   const creator = message.matched_creator_name ? ` · ${message.matched_creator_name}` : "";
+  const candidateBrandNames = [...new Set((message.candidate_brand_ids || []).map(text).filter(Boolean))]
+    .map(brandById)
+    .filter(Boolean)
+    .map((brand) => brand.name);
+  const candidateBrandNote = candidateBrandNames.length > 1 && ["needs_brand_confirmation", "unmatched", "ambiguous_creator"].includes(text(message.status))
+    ? `<small class="mail-inbox-candidates">候选工作区：${escapeHtml(candidateBrandNames.join(" / "))}</small>`
+    : "";
   const candidateFollowUps = (message.candidate_follow_up_ids || [])
     .map((id) => rows("followups").find((row) => text(row.id) === text(id)))
     .filter(Boolean);
@@ -3943,6 +3959,7 @@ function mailInboxRowMarkup(message) {
         <span>${escapeHtml(mailInboxStatusLabel(message.status, message))}</span>
       </div>
       <small>${escapeHtml([direction, message.sender || "未知发件人", formatDateTime(message.occurred_at), message.mailbox].filter(Boolean).join(" · "))}${escapeHtml(creator)}</small>
+      ${candidateBrandNote}
       <p>${escapeHtml(message.excerpt || "没有可提取的正文摘要")}</p>
       ${action}
     </article>`;

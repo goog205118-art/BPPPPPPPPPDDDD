@@ -4677,6 +4677,15 @@ body.access-locked .app-shell {
   white-space: nowrap;
 }
 
+.mail-inbox-row .mail-inbox-candidates {
+  overflow: visible;
+  color: #afc7dc;
+  font-size: 0.63rem;
+  line-height: 1.35;
+  text-overflow: clip;
+  white-space: normal;
+}
+
 .mail-inbox-row p {
   display: -webkit-box;
   margin: 0;

@@ -115,6 +115,75 @@ function assertContactTrackRouting() {
   assert.equal(sharedMailboxUniqueOutboundState.contactTracks[0].status, "waiting_reply");
   assert.equal(sharedMailboxUniqueOutboundState.creators[0].last_outreach_at, now, "已发送邮件同步应回写达人最近首联/复联时间。");
 
+  const sharedMailboxUniqueInboundState = {
+    ...emptyState(),
+    brands: [{ id: "BR-IN", name: "印度品牌" }, { id: "BR-JP", name: "日本品牌" }, { id: "BR-US", name: "欧美品牌" }],
+    creators: [{
+      id: "CR-JP",
+      brand_id: "BR-JP",
+      brand: "日本品牌",
+      name: "日本达人",
+      email: "jp-creator@example.com",
+      last_outreach_at: fiveDaysAgo,
+      createdAt: now,
+      updatedAt: now,
+    }],
+  };
+  const threeBrandAccount = { id: "MB-THREE", brand_ids: ["BR-IN", "BR-JP", "BR-US"] };
+  const uniqueInbound = routeMailRecord(sharedMailboxUniqueInboundState, {
+    id: "MAIL-JP-INBOUND",
+    sender: "日本达人 <jp-creator@example.com>",
+    recipients: "品牌团队 <outreach@example.com>",
+    subject: "Re: Collaboration",
+    occurred_at: now,
+    message_id: "jp-inbound@example.com",
+    fingerprint: "jp-inbound",
+    mailbox_account_id: "MB-THREE",
+  }, threeBrandAccount, now);
+  assert.equal(uniqueInbound.kind, "followup", "三品牌共享邮箱下，唯一匹配到日本达人的回信应自动进入日本品牌跟进。");
+  assert.equal(uniqueInbound.followUp.brand_id, "BR-JP");
+  assert.equal(sharedMailboxUniqueInboundState.followUps.length, 1);
+
+  const unmatchedThreeBrand = routeMailRecord({
+    ...emptyState(),
+    brands: sharedMailboxUniqueInboundState.brands,
+  }, {
+    id: "MAIL-UNMATCHED",
+    sender: "陌生发件人 <unknown@example.com>",
+    recipients: "品牌团队 <outreach@example.com>",
+    subject: "Hello",
+    occurred_at: now,
+    message_id: "unmatched@example.com",
+    fingerprint: "unmatched",
+    mailbox_account_id: "MB-THREE",
+  }, threeBrandAccount, now);
+  assert.equal(unmatchedThreeBrand.kind, "inbox");
+  assert.equal(unmatchedThreeBrand.status, "unmatched", "未匹配邮件不能被错误归属到共享邮箱的首个品牌。");
+  assert.equal(unmatchedThreeBrand.record.brand_id, "");
+  assert.deepEqual(unmatchedThreeBrand.candidateBrandIds, ["BR-IN", "BR-JP", "BR-US"]);
+
+  const sameBrandDuplicateState = {
+    ...emptyState(),
+    brands: [{ id: "BR-IN", name: "印度品牌" }, { id: "BR-JP", name: "日本品牌" }, { id: "BR-US", name: "欧美品牌" }],
+    creators: [
+      { id: "CR-IN-1", brand_id: "BR-IN", brand: "印度品牌", name: "印度达人 1", email: "duplicate@example.com", createdAt: now, updatedAt: now },
+      { id: "CR-IN-2", brand_id: "BR-IN", brand: "印度品牌", name: "印度达人 2", email: "duplicate@example.com", createdAt: now, updatedAt: now },
+    ],
+  };
+  const sameBrandDuplicate = routeMailRecord(sameBrandDuplicateState, {
+    id: "MAIL-DUPLICATE",
+    sender: "同邮箱达人 <duplicate@example.com>",
+    recipients: "品牌团队 <outreach@example.com>",
+    subject: "Re: Collaboration",
+    occurred_at: now,
+    message_id: "duplicate@example.com",
+    fingerprint: "duplicate",
+    mailbox_account_id: "MB-THREE",
+  }, threeBrandAccount, now);
+  assert.equal(sameBrandDuplicate.kind, "inbox");
+  assert.equal(sameBrandDuplicate.status, "ambiguous_creator", "同一品牌内的重复达人应只要求选择达人，不应误报品牌冲突。");
+  assert.equal(sameBrandDuplicate.record.brand_id, "BR-IN");
+
   const profileWindowState = {
     ...emptyState(),
     brands: [{ id: "BR-A", name: "品牌 A" }],
