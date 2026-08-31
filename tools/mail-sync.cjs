@@ -11,6 +11,7 @@ const DEFAULT_MAIL_ACCOUNT = {
   enabled: false,
   label: "官方邮箱",
   fromName: "",
+  signatureText: "",
   imap: {
     host: "",
     port: 993,
@@ -160,6 +161,7 @@ function legacyAccountToModern(account = {}, settings = {}) {
     enabled: parseFlag(source.enabled),
     label: text(source.label || "官邮 IMAP").slice(0, 80),
     fromName: text(source.fromName).slice(0, 120),
+    signatureText: compactBody(source.signatureText).slice(0, 4000),
     brand_id: text(source.brand_id),
     brand_name: text(source.brand_name),
     brand_ids: uniqueTextList(source.brand_ids || source.brand_id),
@@ -218,6 +220,7 @@ function normalizeAccount(input = {}, previous = {}, keyMaterial) {
     enabled: source.enabled === undefined ? parseFlag(old.enabled) : parseFlag(source.enabled),
     label: text(source.label || old.label || DEFAULT_MAIL_ACCOUNT.label).slice(0, 80),
     fromName: text(source.fromName ?? old.fromName).slice(0, 120),
+    signatureText: compactBody(source.signatureText ?? old.signatureText).slice(0, 4000),
     imap: {
       ...DEFAULT_MAIL_ACCOUNT.imap,
       ...oldImap,
@@ -292,6 +295,7 @@ function publicMailSettings(settings = {}) {
       enabled: parseFlag(account.enabled),
       label: text(account.label),
       fromName: text(account.fromName),
+      signatureText: text(account.signatureText),
       imap: {
         host: text(account.imap.host),
         port: account.imap.port,
@@ -1383,6 +1387,64 @@ function compactBody(value) {
   return String(value || "").replace(/\r\n?/g, "\n").trim().slice(0, 16000);
 }
 
+function removeGeneratedSignature(value) {
+  const lines = compactBody(value).split("\n");
+  const marker = lines.findIndex((line) =>
+    /^\s*(best regards|best wishes|kind regards|warm regards|regards|sincerely|yours sincerely|感谢|此致|敬礼)\s*[,:]?\s*$/i.test(line),
+  );
+  return compactBody(marker >= 0 ? lines.slice(0, marker).join("\n") : lines.join("\n"));
+}
+
+function emailLinkLabel(url) {
+  try {
+    const hostname = new URL(url).hostname.replace(/^www\./i, "");
+    if (/(amazon\.[a-z.]+|amzn\.to)$/i.test(hostname)) return "View product";
+    return `Open ${hostname}`;
+  } catch {
+    return "Open link";
+  }
+}
+
+function escapeEmailHtml(value) {
+  return text(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+function linkifyEmailHtml(value) {
+  const escaped = escapeEmailHtml(value);
+  return escaped.replace(/(https?:\/\/[^\s<]+)/g, (url) => {
+    const trailing = url.match(/[),.!?;:]+$/)?.[0] || "";
+    const href = url.slice(0, url.length - trailing.length);
+    return `<a href="${href}" style="color:#1565c0;text-decoration:underline;">${emailLinkLabel(href)}</a>${trailing}`;
+  });
+}
+
+function buildEmailHtml(body, signature = "") {
+  const bodyParagraphs = removeGeneratedSignature(body).split(/\n\s*\n/).filter(Boolean);
+  const paragraphHtml = bodyParagraphs
+    .map((paragraph) => `<p style="margin:0 0 16px;line-height:1.6;">${linkifyEmailHtml(paragraph).replace(/\n/g, "<br>")}</p>`)
+    .join("");
+  const signatureText = compactBody(signature).slice(0, 4000);
+  const signatureHtml = signatureText
+    ? `<div style="margin-top:20px;line-height:1.55;">${linkifyEmailHtml(signatureText).replace(/\n/g, "<br>")}</div>`
+    : "";
+  return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:11pt;line-height:1.6;color:#111827;">${paragraphHtml || "<p></p>"}${signatureHtml}</div>`;
+}
+
+function formatEmailContent(body, signature = "") {
+  const cleanBody = removeGeneratedSignature(body);
+  const cleanSignature = compactBody(signature).slice(0, 4000);
+  const plainText = [cleanBody, cleanSignature].filter(Boolean).join("\n\n");
+  return {
+    text: plainText,
+    html: buildEmailHtml(cleanBody, cleanSignature),
+  };
+}
+
 function replyHeaderMessageId(value) {
   const id = text(value).replace(/[<>]/g, "");
   return id ? `<${id}>` : "";
@@ -1391,7 +1453,8 @@ function replyHeaderMessageId(value) {
 async function sendMailAccount(settings, state, keyMaterial, input = {}) {
   const account = resolveMailAccount(settings, keyMaterial, input.accountId, "smtp");
   const subject = text(input.subject).slice(0, 500);
-  const body = compactBody(input.text);
+  const formatted = formatEmailContent(input.text, account.signatureText);
+  const body = formatted.text;
   const followUpId = text(input.followUpId);
   const leadId = text(input.leadId);
   const brandId = text(input.brandId);
@@ -1430,6 +1493,7 @@ async function sendMailAccount(settings, state, keyMaterial, input = {}) {
     to,
     subject,
     text: body,
+    html: formatted.html,
     inReplyTo: referenceId || undefined,
     references: referenceId || undefined,
   });
@@ -1538,4 +1602,6 @@ module.exports = {
   cacheBodyOnExistingRecord,
   findKnownMailRecord,
   recordDedupKeys,
+  formatEmailContent,
+  buildEmailHtml,
 };

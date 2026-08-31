@@ -5093,6 +5093,14 @@ body.access-locked .app-shell {
   font-size: 0.67rem;
 }
 
+.mail-account-editor .field-hint {
+  display: block;
+  margin-top: 4px;
+  color: #93a9bc;
+  font-size: 0.67rem;
+  line-height: 1.45;
+}
+
 .mail-protocol-title {
   padding-top: 3px;
   border-top: 1px solid #2c3d4f;

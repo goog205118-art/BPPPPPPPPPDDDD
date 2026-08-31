@@ -365,6 +365,11 @@
                 <label for="mailFromName">发件显示名称</label>
                 <input id="mailFromName" name="fromName" type="text" maxlength="120" placeholder="例如：Palficab Team（可选）" />
               </div>
+              <div class="field field-wide">
+                <label for="mailSignatureText">邮件签名</label>
+                <textarea id="mailSignatureText" name="signatureText" rows="5" maxlength="4000" placeholder="例如：&#10;Best Regards&#10;HSU Shop Team&#10;&#10;Website: https://hsushop.com/&#10;&#10;Happy Share Up"></textarea>
+                <small class="field-hint">开发邮件和合作跟进回复发送时自动追加；AI 只生成正文，不会重复生成签名。链接会自动转换为可点击超链接。</small>
+              </div>
               <label class="field checkbox-field" for="mailEnabled">
                 <span>同步开关</span>
                 <span><input id="mailEnabled" name="enabled" type="checkbox" checked /> 启用该账户的手动同步</span>

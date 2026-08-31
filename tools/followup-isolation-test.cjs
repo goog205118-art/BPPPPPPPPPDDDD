@@ -11,6 +11,9 @@ const {
   recordDedupKeys,
   createWaitingFollowUpForLead,
   promoteFollowUpLeadToCreator,
+  normalizeMailSettings,
+  publicMailSettings,
+  formatEmailContent,
 } = require("./mail-sync.cjs");
 
 const rootDir = path.resolve(__dirname, "..");
@@ -39,6 +42,41 @@ function emptyState() {
     contactTracks: [],
     importHistory: [],
   };
+}
+
+function assertEmailFormatting() {
+  const formatted = formatEmailContent(
+    [
+      "Hi creator,",
+      "",
+      "We would love to explore a collaboration.",
+      "",
+      "View the product: https://www.amazon.in/dp/B0GHR62CPZ?th=1",
+      "",
+      "Best Regards",
+      "AI Generated Team",
+    ].join("\n"),
+    "Best Regards\nHSU Shop Team\n\nWebsite: https://hsushop.com/\n\nHappy Share Up",
+  );
+  assert.match(formatted.text, /HSU Shop Team/);
+  assert.match(formatted.text, /Website: https:\/\/hsushop\.com\//);
+  assert.doesNotMatch(formatted.text, /AI Generated Team/);
+  assert.doesNotMatch(formatted.text, /<a |<\/div>/);
+  assert.match(formatted.html, /View product/);
+  assert.match(formatted.html, /href="https:\/\/www\.amazon\.in\/dp\/B0GHR62CPZ\?th=1"/);
+  assert.match(formatted.html, /HSU Shop Team/);
+  assert.equal((formatted.text.match(/Best Regards/g) || []).length, 1, "AI 签名和账户签名不能重复保存。");
+
+  const settings = normalizeMailSettings({
+    accounts: [{
+      id: "MB-SIGNATURE",
+      brand_ids: ["BR-A"],
+      label: "测试官方邮箱",
+      signatureText: "Best Regards\nBrand Team",
+    }],
+  }, {}, "signature-test-key");
+  const publicSettings = publicMailSettings(settings);
+  assert.equal(publicSettings.accounts[0].signatureText, "Best Regards\nBrand Team");
 }
 
 function assertContactTrackRouting() {
@@ -1381,6 +1419,7 @@ function jsonOptions(method, value) {
 async function run() {
   fs.mkdirSync(storageDir, { recursive: true });
   fs.writeFileSync(path.join(storageDir, "state.json"), JSON.stringify(emptyState(), null, 2), "utf8");
+  assertEmailFormatting();
   assertFrontendMailImportGuards();
   assertContactTrackRouting();
   assertLeadOutreachFollowUpLifecycle();

@@ -635,6 +635,7 @@ const elements = {
   mailEnabled: document.getElementById("mailEnabled"),
   mailLabel: document.getElementById("mailLabel"),
   mailFromName: document.getElementById("mailFromName"),
+  mailSignatureText: document.getElementById("mailSignatureText"),
   mailHost: document.getElementById("mailHost"),
   mailPort: document.getElementById("mailPort"),
   mailSecure: document.getElementById("mailSecure"),
@@ -1616,6 +1617,7 @@ function normalizeMailSettingsPayload(payload = {}) {
     enabled: raw.enabled !== false,
     label: text(raw.label),
     fromName: text(raw.fromName),
+    signatureText: text(raw.signatureText),
     imap: {
       host: text(raw.imap?.host ?? raw.host),
       port: Number(raw.imap?.port ?? raw.port) || 993,
@@ -1826,6 +1828,7 @@ function emptyMailAccount(brandId = state.activeBrandId) {
     enabled: true,
     label: "",
     fromName: "",
+    signatureText: "",
     imap: { host: "", port: 993, secure: true, user: "", hasPassword: false, inboxFolder: "INBOX", sentFolder: "Sent", syncDays: 30 },
     smtp: { enabled: true, host: "", port: 465, secure: true, user: "", hasPassword: false, useImapPassword: true },
     lastSyncAt: "",
@@ -1853,6 +1856,7 @@ function readMailSettingsForm() {
     enabled: elements.mailEnabled.checked,
     label: text(form.get("label")),
     fromName: text(form.get("fromName")),
+    signatureText: text(form.get("signatureText")),
     imap: {
       host: text(form.get("imap.host")),
       port: Number(form.get("imap.port")) || 993,
@@ -1929,6 +1933,7 @@ function renderMailSettings() {
   elements.mailEnabled.checked = account.enabled !== false;
   elements.mailLabel.value = account.label || "";
   elements.mailFromName.value = account.fromName || "";
+  elements.mailSignatureText.value = account.signatureText || "";
   elements.mailHost.value = imap.host || "";
   elements.mailPort.value = String(imap.port || 993);
   elements.mailSecure.checked = imap.secure !== false;
@@ -6324,19 +6329,38 @@ function linkifyOutreachText(value) {
   });
 }
 
-function buildOutreachHtml(body) {
-  const paragraphs = normalizeOutreachBody(body).split(/\n\s*\n/).filter(Boolean);
+function selectedOutreachMailAccount() {
+  const accountId = text(new FormData(elements.outreachForm).get("mailboxAccountId"));
+  return (state.mailSettings.accounts || []).find((account) => text(account.id) === accountId) || null;
+}
+
+function removeGeneratedSignature(value) {
+  const lines = normalizeOutreachBody(value).split("\n");
+  const marker = lines.findIndex((line) =>
+    /^\s*(best regards|best wishes|kind regards|warm regards|regards|sincerely|yours sincerely|感谢|此致|敬礼)\s*[,:]?\s*$/i.test(line),
+  );
+  return normalizeOutreachBody(marker >= 0 ? lines.slice(0, marker).join("\n") : lines.join("\n"));
+}
+
+function buildOutreachHtml(body, signature = "") {
+  const paragraphs = removeGeneratedSignature(body).split(/\n\s*\n/).filter(Boolean);
   const paragraphHtml = paragraphs
     .map((paragraph) => `<p style="margin:0 0 16px;line-height:1.6;">${linkifyOutreachText(paragraph).replace(/\n/g, "<br>")}</p>`)
     .join("");
-  return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:11pt;line-height:1.6;color:#111827;">${paragraphHtml || "<p></p>"}</div>`;
+  const cleanSignature = normalizeOutreachBody(signature);
+  const signatureHtml = cleanSignature
+    ? `<div style="margin-top:20px;line-height:1.55;">${linkifyOutreachText(cleanSignature).replace(/\n/g, "<br>")}</div>`
+    : "";
+  return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:11pt;line-height:1.6;color:#111827;">${paragraphHtml || "<p></p>"}${signatureHtml}</div>`;
 }
 
 async function copyOutreachDraft(index, includeSubject = true) {
   const subject = text(elements.outreachResult.querySelector(`[data-outreach-subject="${index}"]`)?.value);
-  const body = normalizeOutreachBody(elements.outreachResult.querySelector(`[data-outreach-body="${index}"]`)?.value);
-  const plainText = includeSubject ? `Subject: ${subject}\n\n${body}` : body;
-  const html = buildOutreachHtml(body);
+  const body = removeGeneratedSignature(elements.outreachResult.querySelector(`[data-outreach-body="${index}"]`)?.value);
+  const signature = selectedOutreachMailAccount()?.signatureText || "";
+  const formattedBody = [body, normalizeOutreachBody(signature)].filter(Boolean).join("\n\n");
+  const plainText = includeSubject ? `Subject: ${subject}\n\n${formattedBody}` : formattedBody;
+  const html = buildOutreachHtml(body, signature);
   try {
     if (navigator.clipboard?.write && window.ClipboardItem) {
       await navigator.clipboard.write([
@@ -6365,7 +6389,7 @@ async function launchOutreachMail(index) {
   const lead = selectedLeadsForOutreach(state.outreach.leadIds).find((item) => item.id === draft?.lead_id);
   if (!lead?.email) return;
   const subject = text(elements.outreachResult.querySelector(`[data-outreach-subject="${index}"]`)?.value || draft.subject);
-  const body = normalizeOutreachBody(elements.outreachResult.querySelector(`[data-outreach-body="${index}"]`)?.value || draft.body);
+  const body = removeGeneratedSignature(elements.outreachResult.querySelector(`[data-outreach-body="${index}"]`)?.value || draft.body);
   const accountId = text(new FormData(elements.outreachForm).get("mailboxAccountId"));
   const account = outreachSmtpAccounts(lead).find((item) => text(item.id) === accountId);
   if (!account) {
@@ -6375,7 +6399,10 @@ async function launchOutreachMail(index) {
       setOutreachDraftNote(index, "联系状态保存失败，未打开邮件客户端；请先补充所属品牌或检查数据保存状态。");
       return;
     }
-    window.location.href = `mailto:${encodeURIComponent(lead.email)}?subject=${encodeURIComponent(subject)}`;
+    const clientBody = [body, normalizeOutreachBody(account?.signatureText || selectedOutreachMailAccount()?.signatureText || "")]
+      .filter(Boolean)
+      .join("\n\n");
+    window.location.href = `mailto:${encodeURIComponent(lead.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(clientBody)}`;
     setOutreachDraftNote(
       index,
       copiedRichText
