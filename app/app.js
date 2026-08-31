@@ -558,6 +558,7 @@ const state = {
   activeBrandId: "",
   followUpInboxNotice: { tone: "", text: "" },
   followUpInboxBusyId: "",
+  followUpDeleteBusyId: "",
   followUpContactBusyId: "",
   followUpSelectedIds: new Set(),
   followUpBatch: { open: false, items: [], running: false, status: "", userNote: "" },
@@ -3224,8 +3225,8 @@ function renderTable(visibleRows) {
   elements.tableBody.querySelectorAll("[data-delete]").forEach((button) => {
     button.addEventListener("click", async () => {
       if (state.activeTab === "followups") {
-        state.data.followUps = allRows("followups").filter((row) => row.id !== button.dataset.delete);
-        state.data.followUpEvents = (state.data.followUpEvents || []).filter((event) => event.follow_up_id !== button.dataset.delete);
+        await deleteFollowUpRecord(button.dataset.delete);
+        return;
       } else {
         state.data[state.activeTab] = allRows().filter((row) => row.id !== button.dataset.delete);
       }
@@ -3759,6 +3760,62 @@ function followUpEventsFor(followUpId) {
   return (state.data.followUpEvents || [])
     .filter((event) => text(event.follow_up_id) === text(followUpId) && belongsToActiveBrand(event))
     .sort((a, b) => new Date(b.occurred_at || b.createdAt || 0) - new Date(a.occurred_at || a.createdAt || 0));
+}
+
+async function deleteFollowUpRecord(followUpId) {
+  if (state.followUpDeleteBusyId) return false;
+
+  const id = text(followUpId);
+  const followUp = allRows("followups").find((row) => text(row.id) === id);
+  if (!followUp) {
+    setFollowUpInboxNotice("找不到要删除的合作跟进，可能已被其他操作处理。", "error");
+    if (state.activeTab === "followups") render();
+    return false;
+  }
+  if (!window.confirm(`确认删除「${followUp.creator_name || "该达人"}」的合作跟进？`)) return false;
+
+  const snapshot = clone(state.data);
+  const now = new Date().toISOString();
+  state.followUpDeleteBusyId = id;
+  try {
+    await withActivity("正在删除合作跟进", "正在清理跟进时间线和关联引用，请稍候...", async () => {
+      state.data.followUps = (state.data.followUps || []).filter((row) => text(row.id) !== id);
+      state.data.followUpEvents = (state.data.followUpEvents || []).filter((event) => text(event.follow_up_id) !== id);
+      state.data.contactTracks = (state.data.contactTracks || []).map((track) =>
+        text(track.follow_up_id) === id
+          ? { ...track, follow_up_id: "", updatedAt: now }
+          : track,
+      );
+      state.data.mailInbox = (state.data.mailInbox || []).map((message) => {
+        const candidateIds = Array.isArray(message.candidate_follow_up_ids)
+          ? message.candidate_follow_up_ids.map(text).filter((candidateId) => candidateId && candidateId !== id)
+          : null;
+        const next = { ...message };
+        if (candidateIds) next.candidate_follow_up_ids = candidateIds;
+        if (text(next.follow_up_id) === id) next.follow_up_id = "";
+        return next;
+      });
+      state.followUpSelectedIds.delete(id);
+      if (state.editingId && text(state.editingId) === id) state.editingId = null;
+      if (state.followUpDetail.open && text(state.followUpDetail.followUpId) === id) closeFollowUpDetail();
+      await persist();
+    });
+    setFollowUpInboxNotice(`已删除「${followUp.creator_name || "该达人"}」的合作跟进，并清理关联引用。`, "success");
+    return true;
+  } catch (error) {
+    state.data = snapshot;
+    localStorage.setItem(STORAGE_FALLBACK, JSON.stringify(snapshot, null, 2));
+    setFollowUpInboxNotice(error.message || "删除合作跟进失败，原记录已恢复。", "error");
+    elements.importStatus.textContent = error.message || "删除合作跟进失败，原记录已恢复。";
+    return false;
+  } finally {
+    state.followUpDeleteBusyId = "";
+    if (state.activeTab === "followups") render();
+    else {
+      renderFollowUpPage();
+      renderCreatorDrawer();
+    }
+  }
 }
 
 function latestFollowUpEmail(followUpId) {
@@ -5559,15 +5616,9 @@ function renderFollowUpPage() {
     void syncMailbox(activeMailAccount.id);
   });
   elements.followUpPage.querySelectorAll("[data-followup-delete]").forEach((button) => {
-    button.addEventListener("click", async (event) => {
+    button.addEventListener("click", (event) => {
       event.stopPropagation();
-      const followUp = rows("followups").find((row) => row.id === button.dataset.followupDelete);
-      if (!followUp || !window.confirm(`确认删除「${followUp.creator_name || "该达人"}」的合作跟进？`)) return;
-      state.data.followUps = allRows("followups").filter((row) => row.id !== followUp.id);
-      state.data.followUpEvents = (state.data.followUpEvents || []).filter((event) => event.follow_up_id !== followUp.id);
-      await persist();
-      renderFollowUpPage();
-      renderCreatorDrawer();
+      void deleteFollowUpRecord(button.dataset.followupDelete);
     });
   });
   elements.followUpPage.querySelectorAll("[data-followup-filter]").forEach((control) => {
