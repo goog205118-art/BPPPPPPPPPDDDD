@@ -92,8 +92,34 @@ function assertEmailFormatting() {
   }, {}, "signature-test-key");
   const publicSettings = publicMailSettings(settings);
   assert.equal(publicSettings.accounts[0].signatureText, "Best Regards\nBrand Team");
+  assert.equal(publicSettings.accounts[0].signatureHtml, "");
   assert.equal(publicSettings.accounts[0].signatureImageUrl, "", "签名图片地址必须使用 HTTPS。");
   assert.match(publicSettings.accounts[0].signatureImageData, /^data:image\/png;base64,/);
+
+  const richSignature = formatEmailContent("Hi creator,", "", {
+    signatureHtml: [
+      '<div style="color:#0a7;"><strong>HSU Shop Team</strong></div>',
+      '<div><a href="https://hsushop.com/" onclick="alert(1)">Website</a></div>',
+      '<div><img src="data:image/png;base64,iVBORw0KGgo=" onerror="alert(1)" alt="Brand logo"></div>',
+      "<script>alert(1)</script>",
+    ].join(""),
+  });
+  assert.doesNotMatch(richSignature.html, /script|onclick|onerror/i);
+  assert.match(richSignature.html, /href="https:\/\/hsushop\.com\//);
+  assert.match(richSignature.html, /cid:signature-[a-f0-9]+@resource-workbench/);
+  assert.equal(richSignature.attachments.length, 1);
+  assert.match(richSignature.text, /HSU Shop Team/);
+  assert.match(richSignature.text, /Website/);
+  assert.doesNotMatch(richSignature.text, /<div|<a |<img/);
+
+  const richSettings = normalizeMailSettings({
+    accounts: [{
+      id: "MB-RICH",
+      brand_ids: ["BR-A"],
+      signatureHtml: '<p><strong>HSU</strong> <a href="mailto:team@hsushop.com">Email</a></p>',
+    }],
+  }, {}, "signature-test-key");
+  assert.match(publicMailSettings(richSettings).accounts[0].signatureHtml, /<strong>HSU<\/strong>/);
 }
 
 function assertContactTrackRouting() {

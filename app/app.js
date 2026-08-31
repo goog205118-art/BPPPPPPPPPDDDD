@@ -635,14 +635,9 @@ const elements = {
   mailEnabled: document.getElementById("mailEnabled"),
   mailLabel: document.getElementById("mailLabel"),
   mailFromName: document.getElementById("mailFromName"),
+  mailSignatureEditor: document.getElementById("mailSignatureEditor"),
+  mailSignatureHtml: document.getElementById("mailSignatureHtml"),
   mailSignatureText: document.getElementById("mailSignatureText"),
-  mailSignatureImageUrl: document.getElementById("mailSignatureImageUrl"),
-  mailSignatureImageFile: document.getElementById("mailSignatureImageFile"),
-  mailSignatureImageClearBtn: document.getElementById("mailSignatureImageClearBtn"),
-  mailSignatureImageData: document.getElementById("mailSignatureImageData"),
-  mailSignatureImagePreview: document.getElementById("mailSignatureImagePreview"),
-  mailSignatureImagePreviewImg: document.getElementById("mailSignatureImagePreviewImg"),
-  mailSignatureImagePreviewText: document.getElementById("mailSignatureImagePreviewText"),
   mailHost: document.getElementById("mailHost"),
   mailPort: document.getElementById("mailPort"),
   mailSecure: document.getElementById("mailSecure"),
@@ -1624,6 +1619,7 @@ function normalizeMailSettingsPayload(payload = {}) {
     enabled: raw.enabled !== false,
     label: text(raw.label),
     fromName: text(raw.fromName),
+    signatureHtml: text(raw.signatureHtml),
     signatureText: text(raw.signatureText),
     signatureImageUrl: text(raw.signatureImageUrl),
     signatureImageData: text(raw.signatureImageData),
@@ -1839,6 +1835,7 @@ function emptyMailAccount(brandId = state.activeBrandId) {
     label: "",
     fromName: "",
     signatureText: "",
+    signatureHtml: "",
     signatureImageUrl: "",
     signatureImageData: "",
     signatureImageAlt: "HSU Shop",
@@ -1869,10 +1866,11 @@ function readMailSettingsForm() {
     enabled: elements.mailEnabled.checked,
     label: text(form.get("label")),
     fromName: text(form.get("fromName")),
+    signatureHtml: syncMailSignatureFields(),
     signatureText: text(form.get("signatureText")),
-    signatureImageUrl: text(form.get("signatureImageUrl")),
-    signatureImageData: text(form.get("signatureImageData")),
-    signatureImageAlt: text(form.get("signatureImageAlt")) || "HSU Shop",
+    signatureImageUrl: "",
+    signatureImageData: "",
+    signatureImageAlt: "HSU Shop",
     imap: {
       host: text(form.get("imap.host")),
       port: Number(form.get("imap.port")) || 993,
@@ -1949,11 +1947,7 @@ function renderMailSettings() {
   elements.mailEnabled.checked = account.enabled !== false;
   elements.mailLabel.value = account.label || "";
   elements.mailFromName.value = account.fromName || "";
-  elements.mailSignatureText.value = account.signatureText || "";
-  elements.mailSignatureImageUrl.value = account.signatureImageUrl || "";
-  elements.mailSignatureImageData.value = account.signatureImageData || "";
-  elements.mailSignatureImageFile.value = "";
-  renderMailSignatureImagePreview(account);
+  renderMailSignatureEditor(account);
   elements.mailHost.value = imap.host || "";
   elements.mailPort.value = String(imap.port || 993);
   elements.mailSecure.checked = imap.secure !== false;
@@ -1979,51 +1973,136 @@ function renderMailSettings() {
   elements.mailSettingsStatus.textContent = formatMailSyncStatus();
 }
 
-function renderMailSignatureImagePreview(account = mailEditingAccount()) {
-  const source = text(account.signatureImageData || account.signatureImageUrl);
-  if (!source) {
-    elements.mailSignatureImagePreview.hidden = true;
-    elements.mailSignatureImagePreviewImg.removeAttribute("src");
-    elements.mailSignatureImagePreviewText.textContent = "";
-    return;
+function sanitizeSignatureUrl(value, image = false) {
+  const source = text(value);
+  if (/^data:image\/(?:png|jpe?g|gif|webp);base64,[a-z0-9+/=\s]+$/i.test(source)) return source.replace(/\s/g, "");
+  try {
+    const parsed = new URL(source);
+    if (["http:", "https:"].includes(parsed.protocol) || (!image && parsed.protocol === "mailto:")) return parsed.href;
+  } catch {
+    return "";
   }
-  elements.mailSignatureImagePreview.hidden = false;
-  elements.mailSignatureImagePreviewImg.src = source;
-  elements.mailSignatureImagePreviewText.textContent = account.signatureImageData
-    ? "已选择本地图片，将以内嵌图片发送"
-    : "已设置图片地址，发送时使用远程图片";
+  return "";
 }
 
-function clearMailSignatureImage() {
-  elements.mailSignatureImageUrl.value = "";
-  elements.mailSignatureImageData.value = "";
-  elements.mailSignatureImageFile.value = "";
-  renderMailSignatureImagePreview({});
+function sanitizeSignatureEditorHtml(value) {
+  const source = text(value);
+  if (!source || typeof DOMParser === "undefined") return "";
+  const parser = new DOMParser();
+  const documentNode = parser.parseFromString(`<div>${source.slice(0, 4 * 1024 * 1024)}</div>`, "text/html");
+  const root = documentNode.body.firstElementChild;
+  if (!root) return "";
+  const allowedTags = new Set(["DIV", "P", "BR", "STRONG", "B", "EM", "I", "U", "A", "IMG", "SPAN", "FONT", "TABLE", "TBODY", "TR", "TD"]);
+  const blockedTags = new Set(["SCRIPT", "STYLE", "IFRAME", "OBJECT", "SVG", "FORM", "META", "LINK"]);
+  [...root.querySelectorAll("*")].forEach((node) => {
+    if (blockedTags.has(node.tagName)) {
+      node.remove();
+      return;
+    }
+    if (!allowedTags.has(node.tagName)) {
+      node.replaceWith(...[...node.childNodes]);
+      return;
+    }
+    [...node.attributes].forEach((attribute) => {
+      const name = attribute.name.toLowerCase();
+      if (name.startsWith("on") || ["id", "class", "srcset", "formaction"].includes(name)) {
+        node.removeAttribute(attribute.name);
+        return;
+      }
+      if (name === "href") {
+        const url = sanitizeSignatureUrl(attribute.value);
+        if (!url) node.removeAttribute(attribute.name);
+        else {
+          node.setAttribute("href", url);
+          node.setAttribute("target", "_blank");
+          node.setAttribute("rel", "noopener noreferrer");
+        }
+        return;
+      }
+      if (name === "src") {
+        const url = sanitizeSignatureUrl(attribute.value, true);
+        if (!url) node.remove();
+        else node.setAttribute("src", url);
+        return;
+      }
+      if (name === "style") {
+        const style = attribute.value
+          .replace(/expression\s*\([^)]*\)/gi, "")
+          .replace(/url\s*\(\s*['"]?\s*javascript:[^)]*\)/gi, "")
+          .replace(/behavior\s*:[^;]+;?/gi, "")
+          .replace(/-moz-binding\s*:[^;]+;?/gi, "")
+          .trim();
+        if (style) node.setAttribute("style", style.slice(0, 4000));
+        else node.removeAttribute("style");
+      }
+    });
+  });
+  return root.innerHTML.trim().slice(0, 4 * 1024 * 1024);
 }
 
-function readMailSignatureImageFile(file) {
-  if (!file) return;
-  if (!/^image\/(png|jpeg|gif|webp)$/i.test(file.type)) {
-    elements.mailSettingsStatus.textContent = "签名图片仅支持 PNG、JPG、GIF 或 WEBP。";
-    elements.mailSignatureImageFile.value = "";
-    return;
+function signatureEditorPlainText(value = elements.mailSignatureEditor?.innerHTML || "") {
+  if (!value) return "";
+  const wrapper = document.createElement("div");
+  wrapper.innerHTML = sanitizeSignatureEditorHtml(value);
+  wrapper.querySelectorAll("br").forEach((node) => node.replaceWith("\n"));
+  wrapper.querySelectorAll("p, div, tr").forEach((node) => {
+    if (node.nextSibling) node.appendChild(document.createTextNode("\n"));
+  });
+  return normalizeOutreachBody(wrapper.textContent || "");
+}
+
+function legacySignatureEditorHtml(account = {}) {
+  const parts = [];
+  const legacyText = text(account.signatureText);
+  if (legacyText) parts.push(escapeHtml(legacyText).replace(/\n/g, "<br>"));
+  const imageSource = text(account.signatureImageData || safeExternalUrl(account.signatureImageUrl));
+  if (imageSource) {
+    parts.push(`<div><img src="${escapeHtml(imageSource)}" alt="${escapeHtml(account.signatureImageAlt || "Email signature")}" /></div>`);
   }
-  if (file.size > 2 * 1024 * 1024) {
-    elements.mailSettingsStatus.textContent = "签名图片不能超过 2MB，请压缩后再上传。";
-    elements.mailSignatureImageFile.value = "";
-    return;
+  return parts.join("<br>");
+}
+
+function syncMailSignatureFields() {
+  if (!elements.mailSignatureEditor || !elements.mailSignatureHtml || !elements.mailSignatureText) return "";
+  const html = sanitizeSignatureEditorHtml(elements.mailSignatureEditor.innerHTML);
+  elements.mailSignatureEditor.innerHTML = html;
+  elements.mailSignatureHtml.value = html;
+  elements.mailSignatureText.value = signatureEditorPlainText(html);
+  return html;
+}
+
+function renderMailSignatureEditor(account = mailEditingAccount()) {
+  if (!elements.mailSignatureEditor) return;
+  const html = sanitizeSignatureEditorHtml(account.signatureHtml) || legacySignatureEditorHtml(account);
+  elements.mailSignatureEditor.innerHTML = sanitizeSignatureEditorHtml(html);
+  syncMailSignatureFields();
+}
+
+function runSignatureCommand(command) {
+  elements.mailSignatureEditor?.focus();
+  if (command === "createLink") {
+    const url = window.prompt("请输入链接地址（http、https 或 mailto）：", "https://");
+    const safeUrl = sanitizeSignatureUrl(url);
+    if (!safeUrl) return;
+    document.execCommand("createLink", false, safeUrl);
+  } else {
+    document.execCommand(command, false);
   }
+  syncMailSignatureFields();
+}
+
+function pasteSignatureImage(event) {
+  const imageFile = [...(event.clipboardData?.files || [])].find((file) => /^image\/(png|jpeg|gif|webp)$/i.test(file.type));
+  if (!imageFile || imageFile.size > 2 * 1024 * 1024) return false;
+  event.preventDefault();
   const reader = new FileReader();
   reader.onload = () => {
-    elements.mailSignatureImageData.value = text(reader.result);
-    elements.mailSignatureImageUrl.value = "";
-    renderMailSignatureImagePreview({ signatureImageData: elements.mailSignatureImageData.value });
-    elements.mailSettingsStatus.textContent = "签名图片已载入，点击保存邮箱配置后生效。";
+    elements.mailSignatureEditor.focus();
+    document.execCommand("insertHTML", false, `<img src="${escapeHtml(reader.result)}" alt="Email signature" />`);
+    syncMailSignatureFields();
   };
-  reader.onerror = () => {
-    elements.mailSettingsStatus.textContent = "签名图片读取失败，请重新选择。";
-  };
-  reader.readAsDataURL(file);
+  reader.readAsDataURL(imageFile);
+  return true;
 }
 
 async function saveMailSettings(event) {
@@ -6414,15 +6493,14 @@ function buildOutreachHtml(body, signature = "", account = {}) {
   const paragraphHtml = paragraphs
     .map((paragraph) => `<p style="margin:0 0 16px;line-height:1.6;">${linkifyOutreachText(paragraph).replace(/\n/g, "<br>")}</p>`)
     .join("");
+  const cleanSignatureHtml = sanitizeSignatureEditorHtml(account.signatureHtml);
   const cleanSignature = normalizeOutreachBody(signature);
-  const signatureHtml = cleanSignature
-    ? `<div style="margin-top:20px;line-height:1.55;">${linkifyOutreachText(cleanSignature).replace(/\n/g, "<br>")}</div>`
-    : "";
-  const imageSource = text(account.signatureImageData || safeExternalUrl(account.signatureImageUrl));
-  const imageHtml = imageSource
-    ? `<div style="margin-top:16px;"><img src="${escapeHtml(imageSource)}" alt="${escapeHtml(account.signatureImageAlt || "Email signature")}" style="display:block;max-width:600px;height:auto;border:0;" /></div>`
-    : "";
-  return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:11pt;line-height:1.6;color:#111827;">${paragraphHtml || "<p></p>"}${imageHtml}${signatureHtml}</div>`;
+  const signatureHtml = cleanSignatureHtml
+    ? `<div style="margin-top:20px;">${cleanSignatureHtml}</div>`
+    : cleanSignature
+      ? `<div style="margin-top:20px;line-height:1.55;">${linkifyOutreachText(cleanSignature).replace(/\n/g, "<br>")}</div>`
+      : legacySignatureEditorHtml(account);
+  return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:11pt;line-height:1.6;color:#111827;">${paragraphHtml || "<p></p>"}${signatureHtml}</div>`;
 }
 
 async function copyOutreachDraft(index, includeSubject = true) {
@@ -6430,7 +6508,8 @@ async function copyOutreachDraft(index, includeSubject = true) {
   const body = removeGeneratedSignature(elements.outreachResult.querySelector(`[data-outreach-body="${index}"]`)?.value);
   const account = selectedOutreachMailAccount();
   const signature = account?.signatureText || "";
-  const formattedBody = [body, normalizeOutreachBody(signature)].filter(Boolean).join("\n\n");
+  const signatureText = account?.signatureHtml ? signatureEditorPlainText(account.signatureHtml) : normalizeOutreachBody(signature);
+  const formattedBody = [body, signatureText].filter(Boolean).join("\n\n");
   const plainText = includeSubject ? `Subject: ${subject}\n\n${formattedBody}` : formattedBody;
   const html = buildOutreachHtml(body, signature, account || {});
   try {
@@ -6471,7 +6550,11 @@ async function launchOutreachMail(index) {
       setOutreachDraftNote(index, "联系状态保存失败，未打开邮件客户端；请先补充所属品牌或检查数据保存状态。");
       return;
     }
-    const clientBody = [body, normalizeOutreachBody(account?.signatureText || selectedOutreachMailAccount()?.signatureText || "")]
+    const clientAccount = account || selectedOutreachMailAccount() || {};
+    const clientSignatureText = clientAccount.signatureHtml
+      ? signatureEditorPlainText(clientAccount.signatureHtml)
+      : normalizeOutreachBody(clientAccount.signatureText || "");
+    const clientBody = [body, clientSignatureText]
       .filter(Boolean)
       .join("\n\n");
     window.location.href = `mailto:${encodeURIComponent(lead.email)}?subject=${encodeURIComponent(subject)}&body=${encodeURIComponent(clientBody)}`;
@@ -7773,16 +7856,14 @@ function bindEvents() {
     if (action === "delete") void deleteBrand(brandId);
   });
   elements.mailSettingsForm.addEventListener("submit", saveMailSettings);
-  elements.mailSignatureImageFile.addEventListener("change", () => {
-    readMailSignatureImageFile(elements.mailSignatureImageFile.files?.[0]);
+  elements.mailSignatureEditor.addEventListener("input", syncMailSignatureFields);
+  elements.mailSignatureEditor.addEventListener("blur", syncMailSignatureFields);
+  elements.mailSignatureEditor.addEventListener("paste", (event) => {
+    if (!pasteSignatureImage(event)) window.setTimeout(syncMailSignatureFields, 0);
   });
-  elements.mailSignatureImageClearBtn.addEventListener("click", clearMailSignatureImage);
-  elements.mailSignatureImageUrl.addEventListener("input", () => {
-    if (text(elements.mailSignatureImageUrl.value)) elements.mailSignatureImageData.value = "";
-    renderMailSignatureImagePreview({
-      signatureImageUrl: elements.mailSignatureImageUrl.value,
-      signatureImageAlt: "Email signature",
-    });
+  document.querySelectorAll("[data-signature-command]").forEach((button) => {
+    button.addEventListener("mousedown", (event) => event.preventDefault());
+    button.addEventListener("click", () => runSignatureCommand(button.dataset.signatureCommand));
   });
   elements.mailSaveContentPolicyBtn.addEventListener("click", () => void saveMailContentPolicy());
   elements.mailCacheBodies.addEventListener("change", () => {

@@ -366,23 +366,20 @@
                 <input id="mailFromName" name="fromName" type="text" maxlength="120" placeholder="例如：Palficab Team（可选）" />
               </div>
               <div class="field field-wide">
-                <label for="mailSignatureText">邮件签名</label>
-                <textarea id="mailSignatureText" name="signatureText" rows="5" maxlength="4000" placeholder="例如：&#10;Best Regards&#10;HSU Shop Team&#10;&#10;Website: https://hsushop.com/&#10;&#10;Happy Share Up"></textarea>
-                <small class="field-hint">开发邮件和合作跟进回复发送时自动追加；AI 只生成正文，不会重复生成签名。链接会自动转换为可点击超链接。</small>
-              </div>
-              <div class="field field-wide">
-                <label for="mailSignatureImageUrl">签名图片</label>
-                <input id="mailSignatureImageUrl" name="signatureImageUrl" type="url" maxlength="4000000" placeholder="粘贴图片地址，或在右侧选择本地图片" />
-                <input id="mailSignatureImageData" name="signatureImageData" type="hidden" />
-                <div class="mail-signature-image-tools">
-                  <input id="mailSignatureImageFile" type="file" accept="image/png,image/jpeg,image/gif,image/webp" />
-                  <button type="button" class="ghost" id="mailSignatureImageClearBtn">清除图片</button>
+                <label for="mailSignatureEditor">可视化邮件签名</label>
+                <div class="mail-signature-editor-shell">
+                  <div class="mail-signature-editor-toolbar" role="toolbar" aria-label="签名编辑工具">
+                    <button type="button" class="ghost" data-signature-command="bold" title="加粗"><strong>B</strong></button>
+                    <button type="button" class="ghost" data-signature-command="italic" title="斜体"><em>I</em></button>
+                    <button type="button" class="ghost" data-signature-command="underline" title="下划线"><u>U</u></button>
+                    <button type="button" class="ghost" data-signature-command="createLink" title="插入链接">链接</button>
+                    <span>可直接从网页或邮箱复制粘贴文字、链接和图片</span>
+                  </div>
+                  <div id="mailSignatureEditor" class="mail-signature-editor" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="例如：粘贴 Foxmail 中的完整签名"></div>
                 </div>
-                <div class="mail-signature-image-preview" id="mailSignatureImagePreview" hidden>
-                  <img id="mailSignatureImagePreviewImg" alt="签名图片预览" />
-                  <span id="mailSignatureImagePreviewText"></span>
-                </div>
-                <small class="field-hint">支持 PNG、JPG、GIF、WEBP，建议宽度不超过 600px、文件不超过 2MB。SMTP 会以内嵌图片发送；图片地址需使用 HTTPS。</small>
+                <input id="mailSignatureHtml" name="signatureHtml" type="hidden" />
+                <input id="mailSignatureText" name="signatureText" type="hidden" />
+                <small class="field-hint">开发邮件和合作跟进回复发送时自动追加，AI 只生成正文。图片会在 SMTP 邮件中以内嵌方式发送；旧版文字签名仍可继续使用。</small>
               </div>
               <label class="field checkbox-field" for="mailEnabled">
                 <span>同步开关</span>

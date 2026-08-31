@@ -11,6 +11,7 @@ const DEFAULT_MAIL_ACCOUNT = {
   enabled: false,
   label: "官方邮箱",
   fromName: "",
+  signatureHtml: "",
   signatureText: "",
   signatureImageUrl: "",
   signatureImageData: "",
@@ -164,6 +165,7 @@ function legacyAccountToModern(account = {}, settings = {}) {
     enabled: parseFlag(source.enabled),
     label: text(source.label || "官邮 IMAP").slice(0, 80),
     fromName: text(source.fromName).slice(0, 120),
+    signatureHtml: cleanSignatureHtml(source.signatureHtml),
     signatureText: compactBody(source.signatureText).slice(0, 4000),
     signatureImageUrl: normalizeSignatureImageUrl(source.signatureImageUrl),
     signatureImageData: normalizeSignatureImageData(source.signatureImageData),
@@ -226,6 +228,7 @@ function normalizeAccount(input = {}, previous = {}, keyMaterial) {
     enabled: source.enabled === undefined ? parseFlag(old.enabled) : parseFlag(source.enabled),
     label: text(source.label || old.label || DEFAULT_MAIL_ACCOUNT.label).slice(0, 80),
     fromName: text(source.fromName ?? old.fromName).slice(0, 120),
+    signatureHtml: cleanSignatureHtml(source.signatureHtml ?? old.signatureHtml),
     signatureText: compactBody(source.signatureText ?? old.signatureText).slice(0, 4000),
     signatureImageUrl: normalizeSignatureImageUrl(source.signatureImageUrl ?? old.signatureImageUrl),
     signatureImageData: normalizeSignatureImageData(source.signatureImageData ?? old.signatureImageData),
@@ -304,6 +307,7 @@ function publicMailSettings(settings = {}) {
       enabled: parseFlag(account.enabled),
       label: text(account.label),
       fromName: text(account.fromName),
+      signatureHtml: text(account.signatureHtml),
       signatureText: text(account.signatureText),
       signatureImageUrl: text(account.signatureImageUrl),
       signatureImageData: text(account.signatureImageData),
@@ -1399,6 +1403,114 @@ function compactBody(value) {
   return String(value || "").replace(/\r\n?/g, "\n").trim().slice(0, 16000);
 }
 
+function decodeBasicHtmlEntities(value) {
+  return String(value || "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&quot;/gi, '"')
+    .replace(/&#039;|&#39;/gi, "'");
+}
+
+function safeSignatureHref(value) {
+  const source = text(value);
+  try {
+    const parsed = new URL(source);
+    return ["http:", "https:", "mailto:"].includes(parsed.protocol) ? parsed.href : "";
+  } catch {
+    return "";
+  }
+}
+
+function safeSignatureImageSource(value) {
+  const source = text(value);
+  if (/^data:image\/(?:png|jpe?g|gif|webp);base64,[a-z0-9+/=\s]+$/i.test(source)) return source.replace(/\s/g, "");
+  try {
+    const parsed = new URL(source);
+    return ["http:", "https:"].includes(parsed.protocol) ? parsed.href : "";
+  } catch {
+    return "";
+  }
+}
+
+function safeSignatureStyle(value) {
+  return text(value)
+    .replace(/expression\s*\([^)]*\)/gi, "")
+    .replace(/url\s*\(\s*['"]?\s*javascript:[^)]*\)/gi, "")
+    .replace(/behavior\s*:[^;]+;?/gi, "")
+    .replace(/-moz-binding\s*:[^;]+;?/gi, "")
+    .slice(0, 4000);
+}
+
+function cleanSignatureHtml(value) {
+  let source = String(value || "").slice(0, 4 * 1024 * 1024);
+  if (!source) return "";
+  source = source
+    .replace(/<!--[\s\S]*?-->/g, "")
+    .replace(/<(script|style|iframe|object|svg|form|meta|link)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, "")
+    .replace(/<(script|style|iframe|object|svg|form|meta|link)\b[^>]*\/?>/gi, "");
+  const allowedTags = new Set(["div", "p", "br", "strong", "b", "em", "i", "u", "a", "img", "span", "font", "table", "tbody", "tr", "td"]);
+  return source.replace(/<([/!]?)\s*([a-z0-9]+)([^>]*)>/gi, (full, closing, rawTag, rawAttributes) => {
+    const tag = rawTag.toLowerCase();
+    if (closing === "!") return "";
+    if (!allowedTags.has(tag)) return "";
+    if (closing === "/") return `</${tag}>`;
+    if (tag === "br") return "<br>";
+    const attributes = [];
+    const matches = String(rawAttributes || "").matchAll(/([:\w-]+)\s*=\s*(?:"([^"]*)"|'([^']*)'|([^\s"'=<>`]+))/g);
+    for (const match of matches) {
+      const name = String(match[1] || "").toLowerCase();
+      const attributeValue = match[2] ?? match[3] ?? match[4] ?? "";
+      if (name.startsWith("on") || ["id", "class", "srcset", "formaction"].includes(name)) continue;
+      if (name === "href") {
+        const href = safeSignatureHref(attributeValue);
+        if (href) attributes.push(`href="${escapeEmailHtml(href)}" target="_blank" rel="noopener noreferrer"`);
+        continue;
+      }
+      if (name === "src") {
+        const src = safeSignatureImageSource(attributeValue);
+        if (src) attributes.push(`src="${escapeEmailHtml(src)}"`);
+        continue;
+      }
+      if (name === "alt" || name === "title") {
+        attributes.push(`${name}="${escapeEmailHtml(attributeValue).slice(0, 500)}"`);
+        continue;
+      }
+      if (name === "color") {
+        if (/^(#[0-9a-f]{3,8}|rgb\(\s*\d{1,3}\s*,\s*\d{1,3}\s*,\s*\d{1,3}\s*\)|[a-z]{1,24})$/i.test(attributeValue)) {
+          attributes.push(`color="${escapeEmailHtml(attributeValue)}"`);
+        }
+        continue;
+      }
+      if (name === "face") {
+        if (/^[a-z0-9 ,"'_-]{1,120}$/i.test(attributeValue)) attributes.push(`face="${escapeEmailHtml(attributeValue)}"`);
+        continue;
+      }
+      if (name === "size") {
+        if (/^[1-7]$/.test(attributeValue)) attributes.push(`size="${attributeValue}"`);
+        continue;
+      }
+      if (name === "style") {
+        const style = safeSignatureStyle(attributeValue);
+        if (style) attributes.push(`style="${escapeEmailHtml(style)}"`);
+      }
+    }
+    return `<${tag}${attributes.length ? ` ${attributes.join(" ")}` : ""}>`;
+  }).trim().slice(0, 4 * 1024 * 1024);
+}
+
+function signatureHtmlPlainText(value) {
+  return compactBody(
+    decodeBasicHtmlEntities(
+      String(value || "")
+        .replace(/<br\s*\/?>/gi, "\n")
+        .replace(/<\/(p|div|tr|table|tbody)>/gi, "\n")
+        .replace(/<[^>]+>/g, ""),
+    ),
+  );
+}
+
 function normalizeSignatureImageUrl(value) {
   const source = text(value);
   return /^https:\/\/[^\s<>"']+$/i.test(source) ? source.slice(0, 4000000) : "";
@@ -1469,11 +1581,30 @@ function signatureImageDetails(source = {}) {
   return imageUrl ? { src: imageUrl, cid: "", attachment: null } : { src: "", cid: "", attachment: null };
 }
 
-function buildEmailHtml(body, signature = "", signatureImage = {}) {
-  const bodyParagraphs = removeGeneratedSignature(body).split(/\n\s*\n/).filter(Boolean);
-  const paragraphHtml = bodyParagraphs
-    .map((paragraph) => `<p style="margin:0 0 16px;line-height:1.6;">${linkifyEmailHtml(paragraph).replace(/\n/g, "<br>")}</p>`)
-    .join("");
+function signatureHtmlDetails(source = {}) {
+  const cleanHtml = cleanSignatureHtml(source.signatureHtml);
+  const attachments = [];
+  const html = cleanHtml.replace(/\s(src)=("([^"]*)"|'([^']*)')/gi, (full, attribute, quoted, doubleValue, singleValue) => {
+    const sourceValue = doubleValue ?? singleValue ?? "";
+    const imageData = normalizeSignatureImageData(sourceValue);
+    if (!imageData) return full;
+    const match = imageData.match(/^data:(image\/(?:png|jpe?g|gif|webp));base64,(.+)$/i);
+    if (!match) return full;
+    const cid = `signature-${createHash("sha256").update(imageData).digest("hex").slice(0, 16)}@resource-workbench`;
+    if (!attachments.some((attachment) => attachment.cid === cid)) {
+      attachments.push({
+        filename: `signature-${attachments.length + 1}.${match[1].split("/")[1].replace("jpeg", "jpg")}`,
+        content: Buffer.from(match[2], "base64"),
+        cid,
+        contentType: match[1],
+      });
+    }
+    return ` src="cid:${cid}"`;
+  });
+  return { html, text: signatureHtmlPlainText(cleanHtml), attachments };
+}
+
+function legacySignatureHtml(signature = "", signatureImage = {}) {
   const signatureText = compactBody(signature).slice(0, 4000);
   const image = signatureImageDetails(signatureImage);
   const imageHtml = image.src
@@ -1482,18 +1613,31 @@ function buildEmailHtml(body, signature = "", signatureImage = {}) {
   const textHtml = signatureText
     ? `<div style="margin-top:20px;line-height:1.55;">${linkifyEmailHtml(signatureText).replace(/\n/g, "<br>")}</div>`
     : "";
-  return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:11pt;line-height:1.6;color:#111827;">${paragraphHtml || "<p></p>"}${imageHtml}${textHtml}</div>`;
+  return { html: `${imageHtml}${textHtml}`, text: signatureText, attachments: image.attachment ? [image.attachment] : [] };
+}
+
+function buildEmailHtml(body, signature = "", signatureImage = {}) {
+  const bodyParagraphs = removeGeneratedSignature(body).split(/\n\s*\n/).filter(Boolean);
+  const paragraphHtml = bodyParagraphs
+    .map((paragraph) => `<p style="margin:0 0 16px;line-height:1.6;">${linkifyEmailHtml(paragraph).replace(/\n/g, "<br>")}</p>`)
+    .join("");
+  const renderedSignature = cleanSignatureHtml(signatureImage.signatureHtml)
+    ? signatureHtmlDetails(signatureImage).html
+    : legacySignatureHtml(signature, signatureImage).html;
+  return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:11pt;line-height:1.6;color:#111827;">${paragraphHtml || "<p></p>"}${renderedSignature ? `<div style="margin-top:20px;">${renderedSignature}</div>` : ""}</div>`;
 }
 
 function formatEmailContent(body, signature = "", signatureImage = {}) {
   const cleanBody = removeGeneratedSignature(body);
-  const cleanSignature = compactBody(signature).slice(0, 4000);
+  const richSignature = cleanSignatureHtml(signatureImage.signatureHtml)
+    ? signatureHtmlDetails(signatureImage)
+    : legacySignatureHtml(signature, signatureImage);
+  const cleanSignature = richSignature.text;
   const plainText = [cleanBody, cleanSignature].filter(Boolean).join("\n\n");
-  const image = signatureImageDetails(signatureImage);
   return {
     text: plainText,
     html: buildEmailHtml(cleanBody, cleanSignature, signatureImage),
-    attachments: image.attachment ? [image.attachment] : [],
+    attachments: richSignature.attachments,
   };
 }
 
