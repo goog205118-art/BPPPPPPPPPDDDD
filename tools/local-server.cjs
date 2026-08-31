@@ -397,6 +397,8 @@ function saveMailSyncResult(settings, summary, accountId) {
               matched: Number(summary.matched || 0),
               pending: Number(summary.pending || 0),
               skipped: Number(summary.skipped || 0),
+              repliesMarkedUnread: Number(summary.repliesMarkedUnread || 0),
+              stagesAdvancedFromReplies: Number(summary.stagesAdvancedFromReplies || 0),
               warnings: Array.isArray(summary.warnings) ? summary.warnings.slice(0, 5) : [],
             },
             updatedAt: now,
@@ -1694,6 +1696,11 @@ function followUpText(value, maximum = 0) {
   return maximum ? cleaned.slice(0, maximum) : cleaned;
 }
 
+function isTruthyFlag(value) {
+  if (value === true || value === 1) return true;
+  return ["1", "true", "yes", "是"].includes(followUpText(value).toLowerCase());
+}
+
 function followUpBodyState(event, policy, nowMs = Date.now()) {
   const body = followUpText(event?.body);
   if (!body) return "summary";
@@ -1715,6 +1722,9 @@ function followUpEventScope(event, policy, nowMs) {
   return "已归档邮件摘要";
 }
 
+const FOLLOWUP_AI_MAX_CHARS = 48000;
+const FOLLOWUP_EVENT_SUMMARY_MAX_CHARS = 1600;
+
 function followUpAiContext(state, followUpId, settings = {}) {
   const id = followUpText(followUpId);
   const followUp = (Array.isArray(state?.followUps) ? state.followUps : []).find((row) => followUpText(row.id) === id);
@@ -1728,44 +1738,92 @@ function followUpAiContext(state, followUpId, settings = {}) {
   });
   const policy = mailContentPolicy(settings);
   const nowMs = Date.now();
-  let remainingChars = 48000;
-  const eventStats = { full_body_count: 0, summary_count: 0, withheld_count: 0, expired_count: 0, legacy_count: 0, limited_count: 0, body_characters: 0 };
-  const events = (Array.isArray(state?.followUpEvents) ? state.followUpEvents : [])
+  const rawEvents = (Array.isArray(state?.followUpEvents) ? state.followUpEvents : [])
     .filter((event) => followUpText(event.follow_up_id) === id && (!brandId || followUpText(event.brand_id) === brandId))
     .sort((a, b) => new Date(b.occurred_at || b.createdAt || 0) - new Date(a.occurred_at || a.createdAt || 0))
-    .slice(0, 10)
-    .reverse()
-    .map((event) => {
+    .reverse();
+  const summaryBudget = rawEvents.length
+    ? Math.max(1, Math.min(FOLLOWUP_EVENT_SUMMARY_MAX_CHARS, Math.floor(FOLLOWUP_AI_MAX_CHARS / rawEvents.length)))
+    : 0;
+  const descriptors = rawEvents.map((event) => {
       const bodyState = followUpBodyState(event, policy, nowMs);
-      const fullBodyAvailable = bodyState === "full";
-      const completeBody = fullBodyAvailable && remainingChars > 0;
-      const limit = completeBody ? Math.min(7000, remainingChars) : 1600;
-      const rawContent = completeBody ? followUpText(event.body) : followUpText(event.excerpt);
-      const content = followUpText(rawContent, limit);
-      if (completeBody) {
-        eventStats.full_body_count += 1;
-        eventStats.body_characters += content.length;
-        remainingChars -= content.length;
-      } else {
-        eventStats.summary_count += 1;
-        if (fullBodyAvailable) eventStats.limited_count += 1;
-        if (bodyState === "withheld" || bodyState === "disabled") eventStats.withheld_count += 1;
-        if (bodyState === "expired") eventStats.expired_count += 1;
-        if (bodyState === "legacy") eventStats.legacy_count += 1;
-      }
       return {
-        occurred_at: followUpText(event.occurred_at || event.createdAt),
-        direction: followUpText(event.direction) || "unknown",
-        subject: followUpText(event.subject, 500),
-        sender: followUpText(event.sender, 320),
-        recipients: followUpText(event.recipients, 640),
-        content,
-        source: followUpText(event.source, 160),
-        scope: completeBody ? followUpEventScope(event, policy, nowMs) : fullBodyAvailable ? "完整正文受上下文长度限制，使用摘要" : followUpEventScope(event, policy, nowMs),
-        body_truncated: completeBody && (Boolean(event.body_truncated) || content.length < followUpText(event.body).length),
-        message_id: followUpText(event.message_id, 320),
+        event,
+        bodyState,
+        body: followUpText(event.body),
+        summary: followUpText(event.excerpt, summaryBudget) || "未提供可用的邮件摘要。",
+        content: followUpText(event.excerpt, summaryBudget) || "未提供可用的邮件摘要。",
+        mode: "summary",
       };
     });
+  let usedChars = descriptors.reduce((total, item) => total + item.content.length, 0);
+  let remainingChars = Math.max(0, FOLLOWUP_AI_MAX_CHARS - usedChars);
+  const eventStats = {
+    total_events: descriptors.length,
+    included_events: descriptors.length,
+    omitted_count: 0,
+    full_body_count: 0,
+    summary_count: 0,
+    withheld_count: 0,
+    expired_count: 0,
+    legacy_count: 0,
+    limited_count: 0,
+    body_truncated_count: 0,
+    body_characters: 0,
+  };
+
+  for (let index = descriptors.length - 1; index >= 0; index -= 1) {
+    const descriptor = descriptors[index];
+    if (descriptor.bodyState !== "full" || !descriptor.body) continue;
+    const capacity = descriptor.summary.length + remainingChars;
+    if (capacity <= descriptor.summary.length) {
+      eventStats.limited_count += 1;
+      continue;
+    }
+    const content = followUpText(descriptor.body, Math.min(7000, capacity));
+    if (content.length <= descriptor.summary.length) {
+      eventStats.limited_count += 1;
+      continue;
+    }
+    usedChars += content.length - descriptor.summary.length;
+    remainingChars = Math.max(0, FOLLOWUP_AI_MAX_CHARS - usedChars);
+    descriptor.content = content;
+    if (content.length < descriptor.body.length || isTruthyFlag(descriptor.event.body_truncated)) {
+      descriptor.mode = "truncated";
+      eventStats.limited_count += 1;
+      eventStats.body_truncated_count += 1;
+    } else {
+      descriptor.mode = "full";
+      eventStats.full_body_count += 1;
+    }
+    eventStats.body_characters += content.length;
+  }
+
+  const events = descriptors.map((descriptor) => {
+    const { event, bodyState } = descriptor;
+    if (descriptor.mode === "summary") {
+      eventStats.summary_count += 1;
+      if (bodyState === "withheld" || bodyState === "disabled") eventStats.withheld_count += 1;
+      if (bodyState === "expired") eventStats.expired_count += 1;
+      if (bodyState === "legacy") eventStats.legacy_count += 1;
+    }
+    return {
+      occurred_at: followUpText(event.occurred_at || event.createdAt),
+      direction: followUpText(event.direction) || "unknown",
+      subject: followUpText(event.subject, 500),
+      sender: followUpText(event.sender, 320),
+      recipients: followUpText(event.recipients, 640),
+      content: descriptor.content,
+      source: followUpText(event.source, 160),
+      scope: descriptor.mode === "full"
+        ? followUpEventScope(event, policy, nowMs)
+        : descriptor.mode === "truncated"
+          ? "完整正文受上下文长度限制，已截断"
+          : followUpEventScope(event, policy, nowMs),
+      body_truncated: descriptor.mode === "truncated",
+      message_id: followUpText(event.message_id, 320),
+    };
+  });
   return {
     followUp: {
       id: followUpText(followUp.id),
@@ -1800,8 +1858,8 @@ function followUpAiContext(state, followUpId, settings = {}) {
     })),
     context_meta: {
       ...eventStats,
-      max_events: 10,
-      max_characters: 48000,
+      max_events: descriptors.length,
+      max_characters: FOLLOWUP_AI_MAX_CHARS,
       cache_bodies: policy.cacheBodies,
       allow_ai_context: policy.allowAiContext,
     },
@@ -1813,24 +1871,30 @@ function followUpContextNotice(context) {
   const meta = context.context_meta || {};
   const summaryOnly = Number(meta.summary_count || 0);
   const fullBody = Number(meta.full_body_count || 0);
+  const totalEvents = Number(meta.total_events || meta.max_events || context.events.length || 0);
+  const includedEvents = Number(meta.included_events || context.events.length || 0);
+  const omittedEvents = Number(meta.omitted_count || 0);
   if (!context.events.length) return "当前没有归档邮件，不能判断实际沟通进展；仅可基于跟进字段提出准备建议。";
-  if (!meta.cache_bodies) return `完整正文缓存未开启，当前仅按 ${summaryOnly} 封归档摘要分析；附件、原始 MIME 和外部沟通均不可见。`;
-  if (!meta.allow_ai_context) return `完整正文已按保留策略缓存，但未授权给 AI；当前仅按 ${summaryOnly} 封摘要分析。`;
+  const coverage = `共 ${totalEvents} 封，已纳入 ${includedEvents} 封`;
+  if (!meta.cache_bodies) return `${coverage}；完整正文缓存未开启，当前仅按 ${summaryOnly} 封归档摘要分析；附件、原始 MIME 和外部沟通均不可见。`;
+  if (!meta.allow_ai_context) return `${coverage}；完整正文已按保留策略缓存，但未授权给 AI；当前仅按 ${summaryOnly} 封摘要分析。`;
   if (fullBody) {
     const extras = [
       summaryOnly ? `${summaryOnly} 封仅摘要` : "",
       meta.expired_count ? `${meta.expired_count} 封正文已过期` : "",
       meta.legacy_count ? `${meta.legacy_count} 封历史正文未纳入` : "",
-      meta.limited_count ? `${meta.limited_count} 封受上下文长度限制，仅使用摘要` : "",
+      meta.limited_count ? `${meta.limited_count} 封受上下文长度限制，使用摘要或截断正文` : "",
+      omittedEvents ? `${omittedEvents} 封未纳入` : "",
     ].filter(Boolean);
-    return `当前 AI 使用同品牌、同合作跟进的 ${fullBody} 封完整正文（约 ${Number(meta.body_characters || 0)} 字）${extras.length ? `；另有 ${extras.join("、")}` : ""}。附件、原始 MIME 和外部沟通均不可见。`;
+    return `当前 AI 使用同品牌、同合作跟进的 ${coverage}，其中 ${fullBody} 封为完整正文（约 ${Number(meta.body_characters || 0)} 字）${extras.length ? `；另有 ${extras.join("、")}` : ""}。附件、原始 MIME 和外部沟通均不可见。`;
   }
   const unavailable = [
     meta.expired_count ? `${meta.expired_count} 封正文已过期` : "",
     meta.legacy_count ? `${meta.legacy_count} 封历史正文未纳入` : "",
-    meta.limited_count ? `${meta.limited_count} 封受上下文长度限制，仅使用摘要` : "",
+    meta.limited_count ? `${meta.limited_count} 封受上下文长度限制，仅使用摘要或截断正文` : "",
+    omittedEvents ? `${omittedEvents} 封未纳入` : "",
   ].filter(Boolean);
-  return `当前没有可用完整正文，AI 仅按 ${summaryOnly} 封归档摘要分析${unavailable.length ? `；${unavailable.join("、")}` : ""}。请检查正文缓存、AI 授权和保留期限。`;
+  return `当前没有可用完整正文，AI 仅按 ${coverage}中的归档摘要分析${unavailable.length ? `；${unavailable.join("、")}` : ""}。请检查正文缓存、AI 授权和保留期限。`;
 }
 
 function followUpEvidence(context) {
@@ -1937,7 +2001,7 @@ function sanitizeFollowUpAnalysis(raw, context) {
       .filter(Boolean),
   );
   const notice = followUpContextNotice(context);
-  if (Number(context.context_meta?.summary_count || 0) || Number(context.context_meta?.withheld_count || 0) || Number(context.context_meta?.expired_count || 0) || Number(context.context_meta?.legacy_count || 0)) {
+  if (Number(context.context_meta?.summary_count || 0) || Number(context.context_meta?.withheld_count || 0) || Number(context.context_meta?.expired_count || 0) || Number(context.context_meta?.legacy_count || 0) || Number(context.context_meta?.limited_count || 0)) {
     warningSet.add("部分结论仅基于归档摘要；未读取完整原邮件、附件或外部沟通记录。");
   }
   return {
@@ -1962,7 +2026,7 @@ function sanitizeFollowUpDraft(raw, context) {
   if (!subject || !body) throw new Error("AI 没有返回可用的邮件主题和正文。");
   const warnings = (Array.isArray(raw?.warnings) ? raw.warnings : []).map((item) => followUpText(item, 360)).filter(Boolean);
   warnings.push("邮件仅为草稿，需人工编辑并确认后才会发送。");
-  if (Number(context.context_meta?.summary_count || 0) || Number(context.context_meta?.withheld_count || 0) || Number(context.context_meta?.expired_count || 0) || Number(context.context_meta?.legacy_count || 0)) {
+  if (Number(context.context_meta?.summary_count || 0) || Number(context.context_meta?.withheld_count || 0) || Number(context.context_meta?.expired_count || 0) || Number(context.context_meta?.legacy_count || 0) || Number(context.context_meta?.limited_count || 0)) {
     warnings.push("草稿对仅摘要、未授权或过期邮件不会补造细节；请人工核对完整邮件。");
   }
   return { ok: true, subject, body, warnings: [...new Set(warnings)].slice(0, 8), context_notice: followUpContextNotice(context) };

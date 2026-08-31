@@ -18,9 +18,10 @@ const API_FOLLOWUP_DRAFT = "/api/ai/followup-draft";
 const STORAGE_ACCESS_PASSWORD = "resource-workbench-access-password";
 const SETTINGS_TAB = { key: "settings", title: "设置" };
 const MATCHING_TAB = { key: "matches", title: "本周资源匹配" };
-const FOLLOW_UP_STAGES = ["初步沟通", "已回复", "谈合作方式 / 报价", "条款确认", "待寄样", "运输中", "已签收", "待发布", "已发布", "数据回收", "已结案", "暂停跟进", "未谈妥"];
+const FOLLOW_UP_STAGES = ["已联系待回复", "初步沟通", "已回复", "谈合作方式 / 报价", "条款确认", "待寄样", "运输中", "已签收", "待发布", "已发布", "数据回收", "已结案", "暂停跟进", "未谈妥"];
 const FOLLOW_UP_TERMINAL_STAGES = new Set(["已结案", "暂停跟进", "未谈妥"]);
 const FOLLOW_UP_BOARD_COLUMNS = [
+  { title: "待回复", stages: ["已联系待回复", "待回复"] },
   { title: "初步沟通", stages: ["初步沟通", "已回复"] },
   { title: "合作协商", stages: ["谈合作方式 / 报价", "条款确认"] },
   { title: "寄样", stages: ["待寄样"] },
@@ -854,6 +855,15 @@ function text(value) {
   return String(value ?? "").trim();
 }
 
+function parseFlag(value) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "number") return value !== 0;
+  const normalized = text(value).toLowerCase();
+  if (["true", "1", "yes", "y", "是", "已开启", "开启"].includes(normalized)) return true;
+  if (["false", "0", "no", "n", "否", "未开启", "关闭", ""].includes(normalized)) return false;
+  return Boolean(value);
+}
+
 function escapeHtml(value) {
   return text(value)
     .replaceAll("&", "&amp;")
@@ -951,6 +961,7 @@ function saveDuplicateIgnores() {
 
 const defaultOutreachOptions = {
   productIds: [],
+  mailboxAccountId: "",
   language: "English",
   tone: "自然友好",
   cooperation: ["让 AI 根据量级建议"],
@@ -966,6 +977,7 @@ function normalizeOutreachOptions(value) {
   return {
     ...defaultOutreachOptions,
     productIds: Array.isArray(source.productIds) ? source.productIds.map(text).filter(Boolean) : [],
+    mailboxAccountId: text(source.mailboxAccountId),
     language: ["English", "creator"].includes(source.language) ? source.language : defaultOutreachOptions.language,
     tone: ["自然友好", "专业简洁", "创作者同行"].includes(source.tone) ? source.tone : defaultOutreachOptions.tone,
     cooperation: Array.isArray(source.cooperation)
@@ -995,6 +1007,7 @@ function outreachOptionsFromForm(form) {
   const formData = new FormData(form);
   return normalizeOutreachOptions({
     productIds: formData.getAll("productIds"),
+    mailboxAccountId: text(formData.get("mailboxAccountId")),
     language: text(formData.get("language")),
     tone: text(formData.get("tone")),
     cooperation: formData.getAll("cooperation"),
@@ -1608,7 +1621,7 @@ function normalizeMailSettingsPayload(payload = {}) {
       port: Number(raw.imap?.port ?? raw.port) || 993,
       secure: raw.imap?.secure ?? raw.secure ?? true,
       user: text(raw.imap?.user ?? raw.user),
-      hasPassword: Boolean(raw.imap?.hasPassword ?? raw.hasPassword),
+      hasPassword: parseFlag(raw.imap?.hasPassword ?? raw.hasPassword),
       inboxFolder: text(raw.imap?.inboxFolder ?? raw.inboxFolder) || "INBOX",
       sentFolder: text(raw.imap?.sentFolder ?? raw.sentFolder) || "Sent",
       syncDays: Number(raw.imap?.syncDays ?? raw.syncDays) || 30,
@@ -1619,7 +1632,7 @@ function normalizeMailSettingsPayload(payload = {}) {
       port: Number(raw.smtp?.port) || 465,
       secure: raw.smtp?.secure !== false,
       user: text(raw.smtp?.user),
-      hasPassword: Boolean(raw.smtp?.hasPassword),
+      hasPassword: parseFlag(raw.smtp?.hasPassword),
       useImapPassword: raw.smtp?.useImapPassword !== false,
     },
     lastSyncAt: text(raw.lastSyncAt),
@@ -1645,11 +1658,11 @@ function mailAccountBrandNames(account = {}) {
 
 function normalizedMailContentPolicy(settings = state.mailSettings) {
   const source = settings?.contentPolicy && typeof settings.contentPolicy === "object" ? settings.contentPolicy : {};
-  const cacheBodies = Boolean(source.cacheBodies);
+  const cacheBodies = parseFlag(source.cacheBodies);
   const retentionDays = Number(source.retentionDays);
   return {
     cacheBodies,
-    allowAiContext: cacheBodies && Boolean(source.allowAiContext),
+    allowAiContext: cacheBodies && parseFlag(source.allowAiContext),
     retentionDays: Number.isFinite(retentionDays) ? Math.min(365, Math.max(1, Math.round(retentionDays))) : 90,
   };
 }
@@ -1795,7 +1808,7 @@ function formatMailAccountStatus(account = {}) {
   if (!imap.host || !imap.user || !imap.hasPassword) return "IMAP 尚未完成配置";
   if (!account.lastSyncAt) return "IMAP 已配置，尚未同步";
   const status = account.lastSyncStatus || "已完成";
-  const details = `扫描 ${Number(summary.scanned || 0)}，归档 ${Number(summary.matched || 0)}，待处理 ${Number(summary.pending || 0)}，跳过重复 ${Number(summary.skipped || 0)}`;
+  const details = `扫描 ${Number(summary.scanned || 0)}，归档 ${Number(summary.matched || 0)}，新回信 ${Number(summary.repliesMarkedUnread || 0)}，待处理 ${Number(summary.pending || 0)}，跳过重复 ${Number(summary.skipped || 0)}`;
   return `${status} · ${formatDateTime(account.lastSyncAt)} · ${details}${summary.warnings?.length ? ` · ${summary.warnings.join("；")}` : ""}`;
 }
 
@@ -2415,8 +2428,16 @@ function renderForm() {
       }
 
       if (field.type === "reference") {
-        const sourceRows = rows(field.reference);
-        const selectedValue = text(value);
+        let sourceRows = rows(field.reference);
+        let selectedValue = text(value);
+        let extraOptions = "";
+        if (state.activeTab === "followups" && field.key === "creator_id") {
+          const lead = rows("leads").find((row) => text(row.id) === text(current?.lead_id));
+          if (!selectedValue && lead && ["已联系待回复", "待回复"].includes(text(current?.stage))) {
+            selectedValue = `__lead__${lead.id}`;
+            extraOptions = `<option value="${escapeHtml(selectedValue)}" selected>${escapeHtml(`${lead.name || lead.handle || "未命名达人"} · ${lead.email || "邮箱待补充"} · 待开发`)}</option>`;
+          }
+        }
         if (state.activeTab === "cooperations" && field.key === "product_id") {
           return [...section, renderProductReferencePicker(field, selectedValue, `${fieldClass} field-wide`, mark, required)];
         }
@@ -2424,7 +2445,7 @@ function renderForm() {
           ...section,
           `<div class="${fieldClass}"><label for="${field.key}">${field.label}${mark}</label><select id="${field.key}" name="${field.key}" ${required}><option value="">不关联</option>${sourceRows
             .map((row) => `<option value="${escapeHtml(row.id)}" ${selectedValue === row.id ? "selected" : ""}>${escapeHtml(referenceLabel(field.reference, row))}</option>`)
-            .join("")}</select></div>`,
+            .join("")}${extraOptions}</select></div>`,
         ];
       }
 
@@ -3430,14 +3451,93 @@ function markLeadAsContacted(leadId, channel) {
   return true;
 }
 
+function findActiveLeadFollowUp(leadId, brandId) {
+  return (state.data.followUps || [])
+    .filter((followUp) =>
+      text(followUp.lead_id) === text(leadId) &&
+      text(followUp.brand_id) === text(brandId) &&
+      !FOLLOW_UP_TERMINAL_STAGES.has(text(followUp.stage)),
+    )
+    .sort((left, right) => new Date(right.updatedAt || right.createdAt || 0) - new Date(left.updatedAt || left.createdAt || 0))[0] || null;
+}
+
+function ensureLeadWaitingFollowUp(lead, now = new Date().toISOString()) {
+  if (!lead?.id || !text(lead.brand_id)) return { followUp: null, created: false };
+  const followUp = findActiveLeadFollowUp(lead.id, lead.brand_id) || {
+    id: uid("FU"),
+    brand_id: text(lead.brand_id),
+    brand: text(lead.brand),
+    lead_id: text(lead.id),
+    creator_id: "",
+    creator_name: text(lead.name || lead.handle || lead.social_url || "待开发达人"),
+    stage: "已联系待回复",
+    priority: ["高", "中", "低"].includes(text(lead.priority)) ? text(lead.priority) : "中",
+    cooperation_mode: "待确认",
+    next_action: "等待达人回复",
+    shipping_status: "未寄样",
+    last_email_at: "",
+    has_unread_reply: false,
+    notes: "由待开发达人打开默认邮箱客户端并人工标记联系；实际邮件发送后请同步已发送邮件。",
+    createdAt: now,
+    updatedAt: now,
+  };
+  const created = !state.data.followUps.includes(followUp);
+  if (created) state.data.followUps = [followUp, ...(state.data.followUps || [])];
+  else if (["", "待开发", "待回复"].includes(text(followUp.stage))) {
+    followUp.stage = "已联系待回复";
+    followUp.next_action = "等待达人回复";
+    followUp.updatedAt = now;
+  }
+
+  const email = text(lead.email).toLowerCase();
+  const existingTrack = (state.data.contactTracks || []).find((track) =>
+    text(track.brand_id) === text(lead.brand_id) &&
+    text(track.person_type) === "lead" &&
+    text(track.person_id) === text(lead.id) &&
+    (!email || text(track.email).toLowerCase() === email),
+  );
+  const nextTrack = {
+    id: existingTrack?.id || uid("CT"),
+    brand_id: text(lead.brand_id),
+    brand: text(lead.brand),
+    person_type: "lead",
+    person_id: text(lead.id),
+    person_name: text(lead.name || lead.handle || lead.social_url || "待开发达人"),
+    email,
+    mailbox_account_id: text(existingTrack?.mailbox_account_id),
+    last_outbound_at: now,
+    last_outbound_subject: text(existingTrack?.last_outbound_subject),
+    status: "waiting_reply",
+    follow_up_id: followUp.id,
+    source: "manual_mail_client",
+    createdAt: existingTrack?.createdAt || now,
+    updatedAt: now,
+  };
+  if (existingTrack) Object.assign(existingTrack, nextTrack);
+  else state.data.contactTracks = [nextTrack, ...(state.data.contactTracks || [])];
+  return { followUp, created };
+}
+
 async function persistLeadContactStatus(leadId, channel) {
+  const lead = rows("leads").find((item) => item.id === leadId);
+  if (!lead) return false;
+  const snapshot = clone(state.data);
   if (!markLeadAsContacted(leadId, channel)) return false;
   try {
-    await persist();
+    await withActivity("正在记录联系状态", "正在建立“已联系待回复”跟进；这不会代替实际邮件发送...", async () => {
+      const ensured = ensureLeadWaitingFollowUp(
+        state.data.leads.find((item) => item.id === leadId),
+      );
+      if (!ensured.followUp) {
+        throw new Error("该待开发达人尚未绑定品牌，无法建立合作跟进；请先补充所属品牌。");
+      }
+      await persist();
+    });
     if (state.activeTab === "leads") render();
     return true;
   } catch (error) {
-    elements.importStatus.textContent = error.message || "开发状态保存失败，仍将尝试打开邮件客户端。";
+    state.data = snapshot;
+    elements.importStatus.textContent = error.message || "联系状态保存失败，未打开邮件客户端。";
     return false;
   }
 }
@@ -3446,8 +3546,8 @@ async function launchLeadMailClient(leadId) {
   const lead = rows("leads").find((item) => item.id === leadId);
   const email = text(lead?.email);
   if (!email) return;
-  await persistLeadContactStatus(leadId, "邮件客户端");
-  window.location.href = `mailto:${encodeURIComponent(email)}`;
+  const saved = await persistLeadContactStatus(leadId, "邮件客户端");
+  if (saved) window.location.href = `mailto:${encodeURIComponent(email)}`;
 }
 
 async function copyPlainText(value, promptMessage) {
@@ -3765,8 +3865,25 @@ function isFollowUpOverdue(row, now = Date.now()) {
 }
 
 function followUpCreator(row) {
-  return rows("creators").find((creator) => text(creator.id) === text(row.creator_id)) ||
-    rows("creators").find((creator) => text(creator.name) === text(row.creator_name));
+  const brandId = text(row?.brand_id);
+  const exactBrand = (person) => !brandId || text(person?.brand_id) === brandId;
+  const legacyBrand = (person) => !brandId || !text(person?.brand_id);
+  const creatorById = text(row?.creator_id)
+    ? rows("creators").find((creator) => text(creator.id) === text(row.creator_id) && exactBrand(creator))
+    : null;
+  if (creatorById) return creatorById;
+
+  const leadById = text(row?.lead_id)
+    ? rows("leads").find((lead) => text(lead.id) === text(row.lead_id) && exactBrand(lead))
+    : null;
+  if (leadById) return leadById;
+
+  // A stable ID that no longer resolves must not fall back to a same-name person.
+  if (text(row?.creator_id)) return null;
+  const sameName = rows("creators").filter((creator) =>
+    text(creator.name) === text(row?.creator_name),
+  );
+  return sameName.find(exactBrand) || (sameName.length === 1 ? sameName[0] : sameName.find(legacyBrand)) || null;
 }
 
 function followUpProduct(row) {
@@ -3777,6 +3894,20 @@ function followUpEventsFor(followUpId) {
   return (state.data.followUpEvents || [])
     .filter((event) => text(event.follow_up_id) === text(followUpId) && belongsToActiveBrand(event))
     .sort((a, b) => new Date(b.occurred_at || b.createdAt || 0) - new Date(a.occurred_at || a.createdAt || 0));
+}
+
+function syncFollowUpContactTracksForStage(followUp, stage, now = new Date().toISOString()) {
+  if (!followUp) return;
+  const nextStatus = stage === "已联系待回复"
+    ? "waiting_reply"
+    : stage === "暂停跟进"
+      ? "paused"
+      : "replied";
+  state.data.contactTracks = (state.data.contactTracks || []).map((track) => {
+    if (text(track.follow_up_id) !== text(followUp.id)) return track;
+    if (text(followUp.brand_id) && text(track.brand_id) !== text(followUp.brand_id)) return track;
+    return { ...track, status: nextStatus, updatedAt: now };
+  });
 }
 
 async function deleteFollowUpRecord(followUpId) {
@@ -3836,7 +3967,7 @@ async function deleteFollowUpRecord(followUpId) {
 }
 
 function latestFollowUpEmail(followUpId) {
-  return followUpEventsFor(followUpId).find((event) => event.type === "email");
+  return followUpEventsFor(followUpId).find((event) => event.type === "email" || event.type === "mail_sent");
 }
 
 function latestInboundFollowUpEmail(followUpId) {
@@ -3851,6 +3982,7 @@ function contactTrackPerson(track) {
 function contactTrackSourceLabel(source) {
   return {
     manual: "人工记录",
+    manual_mail_client: "人工打开邮箱",
     smtp: "系统发信",
     imap_sent: "已发送邮件同步",
   }[text(source)] || "邮件联系";
@@ -3886,7 +4018,7 @@ function contactTrackPersonOptions() {
     .filter((row) => text(row.email))
     .map((row) => ({ ...row, person_type: "creator" }));
   const leadOptions = rows("leads")
-    .filter((row) => text(row.email))
+    .filter((row) => text(row.email) && text(row.status) !== "已转达人库")
     .map((row) => ({ ...row, person_type: "lead" }));
   return [...creatorOptions, ...leadOptions].sort((left, right) => text(left.name).localeCompare(text(right.name), "zh-CN"));
 }
@@ -4039,6 +4171,37 @@ function mailInboxRowMarkup(message) {
     </article>`;
 }
 
+function applyInboundReplyToFollowUp(followUp, message, now = new Date().toISOString()) {
+  if (!followUp || text(message?.direction) !== "inbound") return { stageAdvanced: false, terminal: false };
+
+  followUp.has_unread_reply = true;
+  const currentStage = text(followUp.stage);
+  const terminal = FOLLOW_UP_TERMINAL_STAGES.has(currentStage);
+  const stageAdvanced = !terminal && (!currentStage || currentStage === "已联系待回复" || currentStage === "待回复") && currentStage !== "初步沟通";
+  if (stageAdvanced) followUp.stage = "初步沟通";
+  followUp.updatedAt = now;
+
+  const creator = followUpCreator(followUp);
+  const senderEmails = String(message.sender || "").match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)?.map((email) => email.toLowerCase()) || [];
+  if (creator && senderEmails.length) {
+    const creatorEmails = String(creator.email || "").match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)?.map((email) => email.toLowerCase()) || [];
+    const track = (state.data.contactTracks || []).find((item) =>
+      text(item.brand_id) === text(followUp.brand_id) &&
+      text(item.person_type || "creator") === "creator" &&
+      text(item.person_id) === text(creator.id) &&
+      creatorEmails.some((email) => senderEmails.includes(email)) &&
+      (!text(item.follow_up_id) || text(item.follow_up_id) === text(followUp.id)),
+    );
+    if (track) {
+      track.status = "replied";
+      track.follow_up_id = followUp.id;
+      track.replied_at = text(message.occurred_at) || now;
+      track.updatedAt = now;
+    }
+  }
+  return { stageAdvanced, terminal };
+}
+
 function archiveMailIntoFollowUp(message, followUp) {
   if (text(message.brand_id) && text(followUp.brand_id) && text(message.brand_id) !== text(followUp.brand_id)) {
     throw new Error("邮件与合作跟进不属于同一品牌，已阻止归档。");
@@ -4065,6 +4228,7 @@ function archiveMailIntoFollowUp(message, followUp) {
   const followUpIndex = (state.data.followUps || []).findIndex((row) => text(row.id) === text(followUp.id));
   if (followUpIndex >= 0) {
     const current = state.data.followUps[followUpIndex];
+    applyInboundReplyToFollowUp(current, message, now);
     const currentLatest = text(current.last_email_at);
     state.data.followUps[followUpIndex] = {
       ...current,
@@ -4315,6 +4479,7 @@ function handlePendingMailAction(event) {
 async function confirmPendingMailBrand(mailId, brandId) {
   if (state.followUpInboxBusyId) return;
   state.followUpInboxBusyId = text(mailId);
+  const snapshot = clone(state.data);
   setFollowUpInboxNotice("正在确认邮件归属品牌...", "info");
   renderFollowUpPage();
   try {
@@ -4364,6 +4529,7 @@ async function confirmPendingMailBrand(mailId, brandId) {
     await persist();
     setFollowUpInboxNotice(`已确认归属「${brand.name}」，可继续新建或归档到 ${creator.name || "该达人"} 的合作跟进。`, "success");
   } catch (error) {
+    state.data = snapshot;
     setFollowUpInboxNotice(error.message || "确认邮件归属品牌失败。", "error");
   } finally {
     state.followUpInboxBusyId = "";
@@ -4547,6 +4713,21 @@ function simpleMailHash(value) {
   return (hash >>> 0).toString(16).padStart(8, "0");
 }
 
+function normalizeEmlMessageId(value) {
+  return decodeMimeHeader(text(value)).replace(/[<>]/g, "").trim();
+}
+
+function emlMessageReferences(value) {
+  const raw = decodeMimeHeader(text(value));
+  if (!raw) return [];
+  const angleIds = [...raw.matchAll(/<([^>]+)>/g)].map((match) => normalizeEmlMessageId(match[1]));
+  const plainIds = raw
+    .replace(/<[^>]+>/g, " ")
+    .split(/\s+/)
+    .map(normalizeEmlMessageId);
+  return [...new Set([...angleIds, ...plainIds].filter(Boolean))];
+}
+
 async function parseEmlFile(file, followUp, creator) {
   const raw = await readMailSource(file);
   const { headers } = splitMimeEntity(raw);
@@ -4565,7 +4746,9 @@ async function parseEmlFile(file, followUp, creator) {
   const occurred = new Date(headers.date || file.lastModified || Date.now());
   const occurredAt = Number.isNaN(occurred.getTime()) ? new Date(file.lastModified || Date.now()).toISOString() : occurred.toISOString();
   const subject = decodeMimeHeader(headers.subject || file.name.replace(/\.eml$/i, ""));
-  const messageId = decodeMimeHeader(headers["message-id"] || "").replace(/[<>]/g, "").trim();
+  const messageId = normalizeEmlMessageId(headers["message-id"] || "");
+  const inReplyTo = normalizeEmlMessageId(headers["in-reply-to"] || "");
+  const references = emlMessageReferences(headers.references || "");
   const fingerprintSource = [occurredAt, sender, recipients, subject, excerpt].join("|").toLowerCase();
   return {
     id: uid("EM"),
@@ -4585,6 +4768,8 @@ async function parseEmlFile(file, followUp, creator) {
     body_retention_until: cachedAt ? mailBodyRetentionUntil(policy.retentionDays, new Date(cachedAt)) : "",
     body_truncated: cached.truncated,
     message_id: messageId,
+    in_reply_to: inReplyTo,
+    references,
     fingerprint: simpleMailHash(fingerprintSource),
     source: "Foxmail .eml",
     filename: file.name,
@@ -4648,21 +4833,44 @@ async function previewMailImport(files) {
 async function confirmMailImport() {
   const followUp = rows("followups").find((row) => row.id === state.mailImport.followUpId);
   if (!followUp || !state.mailImport.messages.length) return;
-  const existingEvents = (state.data.followUpEvents || []).filter((event) => text(event.brand_id) === text(followUp.brand_id));
+  const snapshot = clone(state.data);
+  const allEvents = Array.isArray(state.data.followUpEvents) ? state.data.followUpEvents : [];
+  const followUpId = text(followUp.id);
+  const brandId = text(followUp.brand_id);
+  const existingEvents = allEvents.filter((event) =>
+    text(event.follow_up_id) === followUpId ||
+    (brandId && text(event.brand_id) === brandId),
+  );
   const knownKeys = new Set(existingEvents.flatMap((event) => [text(event.message_id), text(event.fingerprint)]).filter(Boolean));
   const additions = state.mailImport.messages.filter((message) => {
     const keys = [text(message.message_id), text(message.fingerprint)].filter(Boolean);
     if (keys.some((key) => knownKeys.has(key))) return false;
     keys.forEach((key) => knownKeys.add(key));
     return true;
-  });
-  state.data.followUpEvents = [...additions, ...existingEvents];
+  }).map((message) => ({
+    ...message,
+    follow_up_id: followUp.id,
+    brand_id: followUp.brand_id || text(message.brand_id),
+    brand: followUp.brand || text(message.brand),
+    updatedAt: new Date().toISOString(),
+  }));
+  const now = new Date().toISOString();
+  // Keep every brand's history; importing into one follow-up must be append-only.
+  state.data.followUpEvents = [...additions, ...allEvents];
   const followUpIndex = state.data.followUps.findIndex((row) => row.id === followUp.id);
   if (followUpIndex >= 0) {
+    const current = state.data.followUps[followUpIndex];
+    additions.filter((item) => text(item.direction) === "inbound").forEach((item) => {
+      applyInboundReplyToFollowUp(current, item, now);
+    });
+    const latestImportedAt = additions.map((item) => Date.parse(text(item.occurred_at))).filter(Number.isFinite).sort((a, b) => a - b).at(-1);
+    const currentLatestAt = Date.parse(text(current.last_email_at));
     state.data.followUps[followUpIndex] = {
-      ...state.data.followUps[followUpIndex],
-      last_email_at: additions.map((item) => item.occurred_at).sort().at(-1) || state.data.followUps[followUpIndex].last_email_at || "",
-      updatedAt: new Date().toISOString(),
+      ...current,
+      last_email_at: Number.isFinite(latestImportedAt) && (!Number.isFinite(currentLatestAt) || latestImportedAt >= currentLatestAt)
+        ? new Date(latestImportedAt).toISOString()
+        : current.last_email_at || "",
+      updatedAt: now,
     };
   }
   try {
@@ -4672,7 +4880,10 @@ async function confirmMailImport() {
     renderFollowUpPage();
     renderCreatorDrawer();
   } catch (error) {
+    state.data = snapshot;
     elements.mailImportStatus.textContent = error.message || "邮件导入保存失败。";
+    renderFollowUpPage();
+    renderCreatorDrawer();
   }
 }
 
@@ -4685,7 +4896,7 @@ function followUpCardMarkup(row) {
   const meta = [row.brand, product?.name, row.cooperation_mode].filter(Boolean).join(" · ");
   const followUpAt = row.next_follow_up_at ? formatDateTime(row.next_follow_up_at) : "未设置";
   const selected = state.followUpSelectedIds.has(text(row.id));
-  const unread = Boolean(row.has_unread_reply);
+  const unread = parseFlag(row.has_unread_reply);
   return `
     <article class="followup-card ${overdue ? "is-overdue" : ""}" data-followup-card="${escapeHtml(row.id)}" role="button" tabindex="0" aria-label="打开 ${escapeHtml(creatorLabel)} 的合作跟进详情">
       <div class="followup-card-head">
@@ -4719,6 +4930,23 @@ function followUpCardMarkup(row) {
 
 function followUpSmtpAccounts(followUp) {
   const brandId = text(followUp?.brand_id);
+  return (state.mailSettings.accounts || []).filter((account) => {
+    const imap = account.imap || {};
+    const smtp = account.smtp || {};
+    const passwordReady = smtp.useImapPassword !== false ? imap.hasPassword : smtp.hasPassword;
+    return (
+      account.enabled &&
+      smtp.enabled !== false &&
+      mailAccountBrandIds(account).includes(brandId) &&
+      Boolean(smtp.host || imap.host) &&
+      Boolean(smtp.user || imap.user) &&
+      Boolean(passwordReady)
+    );
+  });
+}
+
+function outreachSmtpAccounts(lead) {
+  const brandId = text(lead?.brand_id);
   return (state.mailSettings.accounts || []).filter((account) => {
     const imap = account.imap || {};
     const smtp = account.smtp || {};
@@ -4875,6 +5103,27 @@ function openFollowUpDetail(followUpId) {
   elements.followUpDetailModal.classList.remove("hidden");
   elements.followUpDetailModal.setAttribute("aria-hidden", "false");
   renderFollowUpDetail();
+  void markFollowUpReplyRead(followUp.id);
+}
+
+async function markFollowUpReplyRead(followUpId) {
+  const followUp = allRows("followups").find((row) => text(row.id) === text(followUpId));
+  if (!followUp || !parseFlag(followUp.has_unread_reply)) return;
+  const previous = {
+    has_unread_reply: followUp.has_unread_reply,
+    updatedAt: followUp.updatedAt,
+  };
+  followUp.has_unread_reply = false;
+  followUp.updatedAt = new Date().toISOString();
+  try {
+    await persist();
+    renderFollowUpPage();
+  } catch (error) {
+    Object.assign(followUp, previous);
+    state.followUpDetail.status = error.message || "新回复已读状态保存失败";
+    renderFollowUpPage();
+    renderFollowUpDetail();
+  }
 }
 
 function closeFollowUpDetail() {
@@ -5033,6 +5282,7 @@ async function applyFollowUpAnalysisSuggestion(followUpId, analysis) {
         has_unread_reply: false,
         updatedAt: now,
       });
+      syncFollowUpContactTracksForStage(followUp, suggestedStage, now);
       state.data.followUpEvents = [{
         id: uid("FUE"),
         follow_up_id: followUp.id,
@@ -5047,6 +5297,7 @@ async function applyFollowUpAnalysisSuggestion(followUpId, analysis) {
         createdAt: now,
         updatedAt: now,
       }, ...(state.data.followUpEvents || [])];
+      syncCompletedCooperation(followUp);
       await persist();
     });
     state.followUpDetail.status = `已由人工应用建议：${suggestedStage}。邮件不会自动发送。`;
@@ -5397,6 +5648,7 @@ async function manuallyUpdateFollowUpStage(followUpId, stage) {
       followUp.stage = stage;
       followUp.has_unread_reply = false;
       followUp.updatedAt = now;
+      syncFollowUpContactTracksForStage(followUp, stage, now);
       state.data.followUpEvents = [{
         id: uid("FUE"),
         follow_up_id: followUp.id,
@@ -5411,6 +5663,7 @@ async function manuallyUpdateFollowUpStage(followUpId, stage) {
         createdAt: now,
         updatedAt: now,
       }, ...(state.data.followUpEvents || [])];
+      syncCompletedCooperation(followUp);
       await persist();
     });
     renderFollowUpPage();
@@ -5855,6 +6108,10 @@ function renderOutreachModal() {
   }
   const products = rows("products");
   const savedOptions = loadOutreachOptions();
+  const smtpAccounts = leads.length ? outreachSmtpAccounts(leads[0]) : [];
+  const savedAccount = smtpAccounts.some((account) => text(account.id) === savedOptions.mailboxAccountId)
+    ? savedOptions.mailboxAccountId
+    : text(smtpAccounts[0]?.id);
   const validProductIds = new Set(products.map((product) => product.id));
   const selectedProductIds = new Set(savedOptions.productIds.filter((id) => validProductIds.has(id)));
   elements.outreachModal.classList.remove("hidden");
@@ -5902,6 +6159,32 @@ function renderOutreachModal() {
         <label><input type="checkbox" name="includeProductLinks" ${savedOptions.includeProductLinks ? "checked" : ""} /> 附上产品链接</label>
         <label><input type="checkbox" name="mentionProductBenefits" ${savedOptions.mentionProductBenefits ? "checked" : ""} /> 提及产品卖点</label>
       </fieldset>
+      <section class="outreach-mailbox">
+        <label class="field field-wide">
+          <span>官方发信邮箱</span>
+          <select name="mailboxAccountId" ${smtpAccounts.length ? "" : "disabled"}>
+            ${
+              smtpAccounts.length
+                ? smtpAccounts
+                    .map(
+                      (account) =>
+                        `<option value="${escapeHtml(account.id)}" ${text(account.id) === savedAccount ? "selected" : ""}>${escapeHtml(
+                          [account.brand_name || leads[0].brand || "当前品牌", account.label || account.smtp?.user || account.imap?.user || "官方邮箱", account.smtp?.user || account.imap?.user]
+                            .filter(Boolean)
+                            .join(" · "),
+                        )}</option>`,
+                    )
+                    .join("")
+                : `<option value="">未找到可用 SMTP 官方邮箱</option>`
+            }
+          </select>
+        </label>
+        <p class="outreach-mailbox-hint">${
+          smtpAccounts.length
+            ? "发送前会再次确认收件人、主题和发信账户；SMTP 成功后自动进入“已联系 / 待回复”，并建立邮件上下文轨迹。"
+            : "当前品牌暂无已配置且可用的 SMTP 官方邮箱。仍可生成草稿并复制到邮件客户端，但这种备用发送不会自动写入首发邮件事件。"
+        }</p>
+      </section>
       <label class="field field-wide"><span>补充规则</span><textarea name="customRules" placeholder="例如：本次不提及付费合作；不要推荐某类产品；必须保持简短。">${escapeHtml(savedOptions.customRules)}</textarea></label>
     </section>
     <div class="form-actions outreach-actions">
@@ -5913,7 +6196,10 @@ function renderOutreachModal() {
   renderOutreachResults();
   elements.outreachForm.querySelector("[data-close-outreach]")?.addEventListener("click", closeOutreachModal);
   const rememberOptions = () => saveOutreachOptions(outreachOptionsFromForm(elements.outreachForm));
-  elements.outreachForm.addEventListener("change", rememberOptions);
+  elements.outreachForm.addEventListener("change", (event) => {
+    rememberOptions();
+    if (event.target?.name === "mailboxAccountId") renderOutreachResults();
+  });
   elements.outreachForm.addEventListener("input", rememberOptions);
 }
 
@@ -5931,9 +6217,18 @@ function renderOutreachResults() {
     ${output.drafts
       .map((draft, index) => {
         const lead = leadMap.get(draft.lead_id) || {};
+        const smtpAccounts = outreachSmtpAccounts(lead);
+        const selectedAccountId = text(new FormData(elements.outreachForm).get("mailboxAccountId"));
+        const canSendBySmtp = Boolean(lead.email && selectedAccountId && smtpAccounts.some((account) => text(account.id) === selectedAccountId));
         return `
           <article class="outreach-draft" data-outreach-draft="${index}">
-            <header><div><strong>${escapeHtml(lead.name || lead.social_url || "达人")}</strong><span>${escapeHtml(draft.recommended_cooperation || "请人工确认合作方式")}${draft.reason ? ` · ${escapeHtml(draft.reason)}` : ""}</span></div>${lead.email ? `<a class="ghost mail-link" data-send-outreach="${index}" href="#">打开邮件并复制排版正文</a>` : `<span class="outreach-no-email">暂无可验证邮箱</span>`}</header>
+            <header><div><strong>${escapeHtml(lead.name || lead.social_url || "达人")}</strong><span>${escapeHtml(draft.recommended_cooperation || "请人工确认合作方式")}${draft.reason ? ` · ${escapeHtml(draft.reason)}` : ""}</span></div>${
+              lead.email
+                ? canSendBySmtp
+                  ? `<button type="button" class="ghost mail-link" data-send-outreach="${index}">通过官方邮箱发送</button>`
+                  : `<button type="button" class="ghost mail-link" data-copy-open-outreach="${index}">复制并打开邮件客户端</button>`
+                : `<span class="outreach-no-email">暂无可验证邮箱</span>`
+            }</header>
             <label>主题<input data-outreach-subject="${index}" value="${escapeHtml(draft.subject)}" /></label>
             <label>正文<textarea data-outreach-body="${index}">${escapeHtml(draft.body)}</textarea></label>
             <div class="outreach-draft-actions">
@@ -6070,15 +6365,55 @@ async function launchOutreachMail(index) {
   const lead = selectedLeadsForOutreach(state.outreach.leadIds).find((item) => item.id === draft?.lead_id);
   if (!lead?.email) return;
   const subject = text(elements.outreachResult.querySelector(`[data-outreach-subject="${index}"]`)?.value || draft.subject);
-  const copiedRichText = await copyOutreachDraft(index, false);
-  await persistLeadContactStatus(lead.id, "AI 开发邮件");
-  window.location.href = `mailto:${encodeURIComponent(lead.email)}?subject=${encodeURIComponent(subject)}`;
-  setOutreachDraftNote(
-    index,
-    copiedRichText
-      ? "邮件客户端已打开。带短链接的排版正文已复制，点正文后按 Ctrl+V 即可粘贴可点击的产品名称链接。"
-      : "邮件客户端已打开。请使用上方“复制主题和排版正文”后粘贴，可得到产品名称形式的可点击链接。",
-  );
+  const body = normalizeOutreachBody(elements.outreachResult.querySelector(`[data-outreach-body="${index}"]`)?.value || draft.body);
+  const accountId = text(new FormData(elements.outreachForm).get("mailboxAccountId"));
+  const account = outreachSmtpAccounts(lead).find((item) => text(item.id) === accountId);
+  if (!account) {
+    const copiedRichText = await copyOutreachDraft(index, false);
+    const saved = await persistLeadContactStatus(lead.id, "邮件客户端");
+    if (!saved) {
+      setOutreachDraftNote(index, "联系状态保存失败，未打开邮件客户端；请先补充所属品牌或检查数据保存状态。");
+      return;
+    }
+    window.location.href = `mailto:${encodeURIComponent(lead.email)}?subject=${encodeURIComponent(subject)}`;
+    setOutreachDraftNote(
+      index,
+      copiedRichText
+        ? "当前没有可用 SMTP，邮件客户端已打开。排版正文已复制，请粘贴后手动发送；系统已建立“已联系待回复”，发送后请同步已发送邮件以补齐真实轨迹。"
+        : "当前没有可用 SMTP，邮件客户端已打开。请复制上方正文后粘贴并手动发送；系统已建立“已联系待回复”，发送后请同步已发送邮件以补齐真实轨迹。",
+    );
+    return;
+  }
+  if (!window.confirm(`确认通过「${account.label || account.smtp?.user || account.imap?.user || "官方邮箱"}」发送开发邮件？\n\n收件人：${lead.email}\n主题：${subject}`)) return;
+  const sendButton = elements.outreachResult.querySelector(`[data-send-outreach="${index}"]`);
+  if (sendButton) sendButton.disabled = true;
+  setOutreachDraftNote(index, "正在通过官方邮箱发送，成功后会进入“已联系 / 待回复”...");
+  try {
+    await withActivity("正在发送开发邮件", "正在通过当前品牌的 SMTP 官方邮箱发送，并建立首发邮件轨迹...", async () => {
+      const response = await apiFetch(API_MAIL_SEND, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          leadId: lead.id,
+          brandId: lead.brand_id,
+          accountId,
+          to: lead.email,
+          subject,
+          text: body,
+        }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok || payload.ok === false) throw new Error(payload.error || "官方邮箱发送失败");
+      state.data = ensureStateShape(payload.state);
+      render();
+      setOutreachDraftNote(index, "已通过官方邮箱发送。达人已进入“已联系 / 待回复”，同步到回信后会自动进入“初步沟通”。");
+    });
+  } catch (error) {
+    setOutreachDraftNote(index, error.message || "官方邮箱发送失败，草稿未改变。");
+  } finally {
+    const currentButton = elements.outreachResult.querySelector(`[data-send-outreach="${index}"]`);
+    if (currentButton) currentButton.disabled = false;
+  }
 }
 
 function renderEntityPage() {
@@ -6228,6 +6563,66 @@ function syncFollowUpReferences() {
   }
 }
 
+function syncCompletedCooperation(followUp) {
+  if (!followUp || text(followUp.stage) !== "已结案") return { created: false, cooperation: null };
+
+  const creator = followUpCreator(followUp);
+  const product = followUpProduct(followUp);
+  const followUpBrandId = text(followUp.brand_id);
+  const sameBrand = (row) => followUpBrandId
+    ? text(row.brand_id) === followUpBrandId
+    : !text(row.brand_id);
+  const byFollowUp = allRows("cooperations").filter((row) => {
+    if (text(row.follow_up_id) !== text(followUp.id)) return false;
+    return sameBrand(row);
+  });
+  const byCooperationId = allRows("cooperations").filter((row) =>
+    text(followUp.cooperation_id) &&
+    text(row.id) === text(followUp.cooperation_id) &&
+    sameBrand(row),
+  );
+  // Stable follow_up_id is preferred. Legacy cooperation_id fallback is only
+  // reused when it resolves to exactly one row.
+  const existing = byFollowUp[0] || (byFollowUp.length === 0 && byCooperationId.length === 1 ? byCooperationId[0] : null);
+  const now = new Date().toISOString();
+  const cooperation = {
+    ...(existing || {
+      id: uid("CO"),
+      cooperation_no: `CO-${now.slice(0, 10).replace(/-/g, "")}-${String(followUp.id || "").slice(-6)}`,
+      createdAt: now,
+    }),
+    follow_up_id: followUp.id,
+    brand_id: text(followUp.brand_id),
+    brand: text(followUp.brand),
+    creator_id: text(followUp.creator_id || creator?.id),
+    creator_name: text(followUp.creator_name || creator?.name),
+    product_id: text(followUp.product_id || product?.id),
+    product: text(product?.name || followUp.product),
+    model: text(followUp.cooperation_mode) || "待确认",
+    budget: toNumber(followUp.budget),
+    tracking_no: text(followUp.tracking_no),
+    shipping_status: text(followUp.shipping_status) || "未寄样",
+    post_date: text(followUp.publish_due_at),
+    link: text(followUp.publish_url),
+    result: text(existing?.result) || "合作完成，待复盘",
+    notes: text(followUp.notes),
+    updatedAt: now,
+  };
+  const list = state.data.cooperations || [];
+  const index = list.findIndex((row) => text(row.id) === text(cooperation.id));
+  if (index >= 0) list[index] = cooperation;
+  else list.unshift(cooperation);
+  state.data.cooperations = list;
+  followUp.cooperation_id = cooperation.id;
+  followUp.updatedAt = now;
+
+  if (creator && text(creator.status) !== "沉淀") {
+    creator.status = "已合作";
+    creator.updatedAt = now;
+  }
+  return { created: !existing, cooperation };
+}
+
 function syncCooperationName(kind) {
   if (state.activeTab !== "cooperations") return;
   const idField = `${kind}_id`;
@@ -6349,7 +6744,21 @@ function readFormRecord(options = {}) {
   }
 
   if (state.activeTab === "cooperations") resolveCooperationLinks(record);
-  if (state.activeTab === "followups") resolveFollowUpLinks(record);
+  if (state.activeTab === "followups") {
+    const creatorSelection = text(record.creator_id);
+    if (creatorSelection.startsWith("__lead__")) {
+      const leadId = creatorSelection.slice("__lead__".length);
+      const lead = rows("leads").find((row) => text(row.id) === leadId);
+      record.lead_id = lead?.id || "";
+      record.creator_id = "";
+      record.creator_name = text(lead?.name || lead?.handle || record.creator_name);
+      if (lead) {
+        record.brand_id = text(record.brand_id || lead.brand_id);
+        record.brand = text(record.brand || lead.brand);
+      }
+    }
+    resolveFollowUpLinks(record);
+  }
   if (BRANDED_TYPES.has(state.activeTab)) applyRecordBrand(record);
   record.updatedAt = new Date().toISOString();
   if (shouldApply) applyRecommendations(record, state.activeTab);
@@ -6366,7 +6775,13 @@ function hasMeaningfulRecordContent(record) {
 }
 
 function focusFirstMissingRequired(record) {
-  const required = config().fields.find((field) => field.required && !text(record[field.key]));
+  const required = config().fields.find((field) => {
+    if (!field.required || text(record[field.key])) return false;
+    if (state.activeTab === "followups" && field.key === "creator_id") {
+      return !(["已联系待回复", "待回复"].includes(text(record.stage)) && text(record.lead_id));
+    }
+    return true;
+  });
   elements.form.elements[required?.key]?.focus();
 }
 
@@ -6392,7 +6807,13 @@ async function commitEditor({ close = false, showError = false } = {}) {
     return true;
   }
 
-  const missingRequired = config().fields.find((field) => field.required && !text(record[field.key]));
+  const missingRequired = config().fields.find((field) => {
+    if (!field.required || text(record[field.key])) return false;
+    if (state.activeTab === "followups" && field.key === "creator_id") {
+      return !(["已联系待回复", "待回复"].includes(text(record.stage)) && text(record.lead_id));
+    }
+    return true;
+  });
   if (missingRequired) {
     elements.editorStatus.textContent = `请填写必填项：${missingRequired.label}。`;
     focusFirstMissingRequired(record);
@@ -6438,6 +6859,7 @@ async function commitEditor({ close = false, showError = false } = {}) {
         createdAt: new Date().toISOString(),
       });
     }
+    syncCompletedCooperation(record);
   }
 
   state.editorSaving = true;
@@ -7360,6 +7782,12 @@ function bindEvents() {
     if (mailLink) {
       event.preventDefault();
       launchOutreachMail(mailLink.dataset.sendOutreach);
+      return;
+    }
+    const fallbackMailLink = event.target.closest("[data-copy-open-outreach]");
+    if (fallbackMailLink) {
+      event.preventDefault();
+      launchOutreachMail(fallbackMailLink.dataset.copyOpenOutreach);
     }
   });
   elements.resetMatchBtn.addEventListener("click", () => {

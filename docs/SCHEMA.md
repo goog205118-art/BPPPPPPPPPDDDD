@@ -132,10 +132,11 @@
 
 - `id`
 - `creator_id`（关联 `creators.id`，稳定关联）
+- `lead_id`（关联 `leads.id`；达人仍在待开发阶段时使用，收到回信转入达人库后保留历史关联）
 - `cooperation_id`（关联 `cooperations.id`，可选）
 - `brand`
 - `product_id`（关联 `products.id`，可选）
-- `stage`（初步沟通、已回复、谈合作方式 / 报价、条款确认、待寄样、运输中、已签收、待发布、已发布、数据回收、已结案、暂停跟进、未谈妥）
+- `stage`（已联系待回复、初步沟通、已回复、谈合作方式 / 报价、条款确认、待寄样、运输中、已签收、待发布、已发布、数据回收、已结案、暂停跟进、未谈妥）
 - `priority`（高、中、低）
 - `cooperation_mode`（待确认、置换、付费、CPS、混合）
 - `next_action`
@@ -144,6 +145,8 @@
 - `tracking_no`
 - `publish_due_at`
 - `publish_url`
+- `last_email_at`
+- `has_unread_reply`（布尔值；`true` 表示同步到达人新回信，打开跟进详情或人工处理后可清除）
 - `notes`
 - `createdAt`
 - `updatedAt`
@@ -163,7 +166,15 @@
 - `sender`
 - `recipients`
 - `excerpt`
+- `brand_id`（所属品牌工作区）
+- `mailbox_account_id`（来源官方邮箱账户）
+- `body`（按缓存策略保存的纯文本正文；默认为空）
+- `body_cached_at`
+- `body_retention_until`
+- `body_truncated`
 - `message_id`
+- `in_reply_to`
+- `references`（线程引用的 Message-ID 列表）
 - `fingerprint`（无 Message-ID 时用于去重）
 - `source`（例如 `Foxmail .eml` 或 `IMAP · 官邮 IMAP`）
 - `filename`
@@ -172,7 +183,7 @@
 - `imap_uid`
 - `createdAt`
 
-邮件导入只解析并保存标题、时间、收发方向、地址和正文摘要，不保存原始 `.eml` 文件、附件或完整邮件内容。相同 `Message-ID`、相同指纹或同一 IMAP 服务器 UID 的邮件会跳过，避免重复导入。
+邮件导入会保存标题、时间、收发方向、地址、正文摘要，并按邮箱正文缓存策略保存完整纯文本正文；不保存原始 `.eml` 文件、HTML 原文或附件。相同 `Message-ID`、相同指纹或同一 IMAP 服务器 UID 的邮件会跳过，避免重复导入；摘要再次同步到完整正文时会升级原记录，旧的截断正文也允许被后续完整正文替换，不新增重复事件。完整正文仍受保留期限、单封长度和 AI 总上下文预算限制。
 
 ## mailInbox
 
@@ -186,7 +197,15 @@
 - `sender`
 - `recipients`
 - `excerpt`
+- `brand_id`（已确认归属时写入）
+- `mailbox_account_id`
+- `body`
+- `body_cached_at`
+- `body_retention_until`
+- `body_truncated`
 - `message_id`
+- `in_reply_to`
+- `references`
 - `fingerprint`
 - `source`
 - `mailbox`
@@ -202,7 +221,7 @@
 - `createdAt`
 - `updatedAt`
 
-当 `status` 为 `needs_followup` 且没有活跃跟进时，可新建一条默认合作跟进后归档；当同一达人有多条活跃跟进时，必须先选择具体跟进。无法自动确认达人或匹配多个达人时，不提供自动归档，但前端可从当前品牌达人库人工绑定已有达人后继续处理；品牌不一致时始终阻止归档。
+当 `status` 为 `needs_followup` 且没有活跃跟进时，可新建一条默认合作跟进后归档；当同一达人有多条活跃跟进时，必须先选择具体跟进。无法自动确认达人或匹配多个达人时，不提供自动归档，但前端可从当前品牌达人库人工绑定已有达人后继续处理；品牌不一致时始终阻止归档。人工确认或 Foxmail 导入保存失败时，页面内存状态会恢复到操作前快照。
 
 邮件同步会先匹配现有“已联系待回复”轨迹；若历史首发邮件未同步为轨迹，但能唯一匹配当前品牌中的达人或待开发达人，并且该资料的 `last_outreach_at` 距来信不超过 30 天，则会自动建立“初步沟通”合作跟进。超过 30 天、来信早于发件时间、同邮箱跨品牌或匹配多人时，邮件仍停留在待人工归档区。30 天窗口只用于首次自动建入合作跟进；已经明确关联到某条合作跟进的邮件线程，后续来信会持续归档到原跟进，不会因合作周期较长而中断。
 
