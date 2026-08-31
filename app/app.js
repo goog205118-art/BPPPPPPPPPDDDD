@@ -2428,6 +2428,23 @@ function renderForm() {
         ];
       }
 
+      if (field.type === "brand") {
+        const brands = [...(state.data.brands || [])]
+          .filter((brand) => text(brand.id) && text(brand.name))
+          .sort((a, b) => text(a.name).localeCompare(text(b.name), "zh-CN", { sensitivity: "base" }));
+        const selectedBrand = brands.find((brand) => text(brand.id) === text(current?.brand_id))
+          || brands.find((brand) => brandKey(brand.name) === brandKey(value));
+        const legacyBrand = !selectedBrand && text(value)
+          ? `<option value="${escapeHtml(value)}" selected>${escapeHtml(value)}（旧数据）</option>`
+          : "";
+        return [
+          ...section,
+          `<div class="${fieldClass}"><label for="${field.key}">${field.label}${mark}</label><select id="${field.key}" name="${field.key}" ${required}><option value="">请选择品牌</option>${legacyBrand}${brands
+            .map((brand) => `<option value="${escapeHtml(brand.id)}" ${selectedBrand?.id === brand.id ? "selected" : ""}>${escapeHtml(brand.name)}</option>`)
+            .join("")}</select></div>`,
+        ];
+      }
+
       if (isConfigurableField(state.activeTab, field.key)) {
         const listId = `option-list-${state.activeTab}-${field.key}`;
         const options = getOptionValues(state.activeTab, field.key).map((option) => `<option value="${escapeHtml(option)}"></option>`).join("");
@@ -6324,6 +6341,11 @@ function readFormRecord(options = {}) {
 
   for (const field of config().fields) {
     record[field.key] = fieldValue(field, formData.get(field.key));
+    if (field.type === "brand") {
+      const selectedBrand = brandByIdFromData(record[field.key]);
+      record.brand_id = selectedBrand?.id || "";
+      record.brand = selectedBrand?.name || text(record[field.key]);
+    }
   }
 
   if (state.activeTab === "cooperations") resolveCooperationLinks(record);
