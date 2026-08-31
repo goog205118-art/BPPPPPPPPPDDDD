@@ -5101,6 +5101,44 @@ body.access-locked .app-shell {
   line-height: 1.45;
 }
 
+.mail-signature-image-tools {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+}
+
+.mail-signature-image-tools input[type="file"] {
+  min-width: 0;
+  max-width: 280px;
+  color: #b9cce0;
+  font-size: 0.7rem;
+}
+
+.mail-signature-image-preview {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 44px;
+  margin-top: 8px;
+  padding: 7px 9px;
+  border: 1px solid #304256;
+  border-radius: 5px;
+  background: #111b27;
+}
+
+.mail-signature-image-preview img {
+  display: block;
+  max-width: 240px;
+  max-height: 72px;
+  object-fit: contain;
+}
+
+.mail-signature-image-preview span {
+  color: #93a9bc;
+  font-size: 0.68rem;
+}
+
 .mail-protocol-title {
   padding-top: 3px;
   border-top: 1px solid #2c3d4f;

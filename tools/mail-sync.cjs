@@ -12,6 +12,9 @@ const DEFAULT_MAIL_ACCOUNT = {
   label: "官方邮箱",
   fromName: "",
   signatureText: "",
+  signatureImageUrl: "",
+  signatureImageData: "",
+  signatureImageAlt: "HSU Shop",
   imap: {
     host: "",
     port: 993,
@@ -162,6 +165,9 @@ function legacyAccountToModern(account = {}, settings = {}) {
     label: text(source.label || "官邮 IMAP").slice(0, 80),
     fromName: text(source.fromName).slice(0, 120),
     signatureText: compactBody(source.signatureText).slice(0, 4000),
+    signatureImageUrl: normalizeSignatureImageUrl(source.signatureImageUrl),
+    signatureImageData: normalizeSignatureImageData(source.signatureImageData),
+    signatureImageAlt: text(source.signatureImageAlt || "HSU Shop").slice(0, 160),
     brand_id: text(source.brand_id),
     brand_name: text(source.brand_name),
     brand_ids: uniqueTextList(source.brand_ids || source.brand_id),
@@ -221,6 +227,9 @@ function normalizeAccount(input = {}, previous = {}, keyMaterial) {
     label: text(source.label || old.label || DEFAULT_MAIL_ACCOUNT.label).slice(0, 80),
     fromName: text(source.fromName ?? old.fromName).slice(0, 120),
     signatureText: compactBody(source.signatureText ?? old.signatureText).slice(0, 4000),
+    signatureImageUrl: normalizeSignatureImageUrl(source.signatureImageUrl ?? old.signatureImageUrl),
+    signatureImageData: normalizeSignatureImageData(source.signatureImageData ?? old.signatureImageData),
+    signatureImageAlt: text(source.signatureImageAlt ?? old.signatureImageAlt ?? "HSU Shop").slice(0, 160),
     imap: {
       ...DEFAULT_MAIL_ACCOUNT.imap,
       ...oldImap,
@@ -296,6 +305,9 @@ function publicMailSettings(settings = {}) {
       label: text(account.label),
       fromName: text(account.fromName),
       signatureText: text(account.signatureText),
+      signatureImageUrl: text(account.signatureImageUrl),
+      signatureImageData: text(account.signatureImageData),
+      signatureImageAlt: text(account.signatureImageAlt || "HSU Shop"),
       imap: {
         host: text(account.imap.host),
         port: account.imap.port,
@@ -1387,6 +1399,18 @@ function compactBody(value) {
   return String(value || "").replace(/\r\n?/g, "\n").trim().slice(0, 16000);
 }
 
+function normalizeSignatureImageUrl(value) {
+  const source = text(value);
+  return /^https:\/\/[^\s<>"']+$/i.test(source) ? source.slice(0, 4000000) : "";
+}
+
+function normalizeSignatureImageData(value) {
+  const source = text(value);
+  return /^data:image\/(?:png|jpe?g|gif|webp);base64,[a-z0-9+/=\s]+$/i.test(source) && source.length <= 4000000
+    ? source.replace(/\s/g, "")
+    : "";
+}
+
 function removeGeneratedSignature(value) {
   const lines = compactBody(value).split("\n");
   const marker = lines.findIndex((line) =>
@@ -1423,25 +1447,53 @@ function linkifyEmailHtml(value) {
   });
 }
 
-function buildEmailHtml(body, signature = "") {
+function signatureImageDetails(source = {}) {
+  const imageData = normalizeSignatureImageData(source.signatureImageData);
+  const imageUrl = normalizeSignatureImageUrl(source.signatureImageUrl);
+  if (imageData) {
+    const match = imageData.match(/^data:(image\/(?:png|jpe?g|gif|webp));base64,(.+)$/i);
+    if (match) {
+      const cid = `signature-${createHash("sha256").update(imageData).digest("hex").slice(0, 16)}@resource-workbench`;
+      return {
+        src: `cid:${cid}`,
+        cid,
+        attachment: {
+          filename: `signature.${match[1].split("/")[1].replace("jpeg", "jpg")}`,
+          content: Buffer.from(match[2], "base64"),
+          cid,
+          contentType: match[1],
+        },
+      };
+    }
+  }
+  return imageUrl ? { src: imageUrl, cid: "", attachment: null } : { src: "", cid: "", attachment: null };
+}
+
+function buildEmailHtml(body, signature = "", signatureImage = {}) {
   const bodyParagraphs = removeGeneratedSignature(body).split(/\n\s*\n/).filter(Boolean);
   const paragraphHtml = bodyParagraphs
     .map((paragraph) => `<p style="margin:0 0 16px;line-height:1.6;">${linkifyEmailHtml(paragraph).replace(/\n/g, "<br>")}</p>`)
     .join("");
   const signatureText = compactBody(signature).slice(0, 4000);
-  const signatureHtml = signatureText
+  const image = signatureImageDetails(signatureImage);
+  const imageHtml = image.src
+    ? `<div style="margin-top:16px;"><img src="${escapeEmailHtml(image.src)}" alt="${escapeEmailHtml(signatureImage.signatureImageAlt || "Email signature")}" style="display:block;max-width:600px;height:auto;border:0;" /></div>`
+    : "";
+  const textHtml = signatureText
     ? `<div style="margin-top:20px;line-height:1.55;">${linkifyEmailHtml(signatureText).replace(/\n/g, "<br>")}</div>`
     : "";
-  return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:11pt;line-height:1.6;color:#111827;">${paragraphHtml || "<p></p>"}${signatureHtml}</div>`;
+  return `<div style="font-family:Arial,Helvetica,sans-serif;font-size:11pt;line-height:1.6;color:#111827;">${paragraphHtml || "<p></p>"}${imageHtml}${textHtml}</div>`;
 }
 
-function formatEmailContent(body, signature = "") {
+function formatEmailContent(body, signature = "", signatureImage = {}) {
   const cleanBody = removeGeneratedSignature(body);
   const cleanSignature = compactBody(signature).slice(0, 4000);
   const plainText = [cleanBody, cleanSignature].filter(Boolean).join("\n\n");
+  const image = signatureImageDetails(signatureImage);
   return {
     text: plainText,
-    html: buildEmailHtml(cleanBody, cleanSignature),
+    html: buildEmailHtml(cleanBody, cleanSignature, signatureImage),
+    attachments: image.attachment ? [image.attachment] : [],
   };
 }
 
@@ -1453,7 +1505,7 @@ function replyHeaderMessageId(value) {
 async function sendMailAccount(settings, state, keyMaterial, input = {}) {
   const account = resolveMailAccount(settings, keyMaterial, input.accountId, "smtp");
   const subject = text(input.subject).slice(0, 500);
-  const formatted = formatEmailContent(input.text, account.signatureText);
+  const formatted = formatEmailContent(input.text, account.signatureText, account);
   const body = formatted.text;
   const followUpId = text(input.followUpId);
   const leadId = text(input.leadId);
@@ -1494,6 +1546,7 @@ async function sendMailAccount(settings, state, keyMaterial, input = {}) {
     subject,
     text: body,
     html: formatted.html,
+    attachments: formatted.attachments,
     inReplyTo: referenceId || undefined,
     references: referenceId || undefined,
   });

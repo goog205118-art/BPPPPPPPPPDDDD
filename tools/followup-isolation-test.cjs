@@ -67,16 +67,33 @@ function assertEmailFormatting() {
   assert.match(formatted.html, /HSU Shop Team/);
   assert.equal((formatted.text.match(/Best Regards/g) || []).length, 1, "AI 签名和账户签名不能重复保存。");
 
+  const imageFormatted = formatEmailContent(
+    "Hi creator,\n\nPlease see the signature below.",
+    "Best Regards\nBrand Team",
+    {
+      signatureImageData: "data:image/png;base64,iVBORw0KGgo=",
+      signatureImageAlt: "Brand logo",
+    },
+  );
+  assert.match(imageFormatted.html, /cid:signature-[a-f0-9]+@resource-workbench/);
+  assert.equal(imageFormatted.attachments.length, 1, "本地签名图片应作为 SMTP 内嵌附件发送。");
+  assert.equal(imageFormatted.attachments[0].contentType, "image/png");
+  assert.equal(imageFormatted.attachments[0].cid, imageFormatted.html.match(/cid:([^"]+)/)?.[1]);
+
   const settings = normalizeMailSettings({
     accounts: [{
       id: "MB-SIGNATURE",
       brand_ids: ["BR-A"],
       label: "测试官方邮箱",
       signatureText: "Best Regards\nBrand Team",
+      signatureImageUrl: "http://insecure.example/logo.png",
+      signatureImageData: "data:image/png;base64,iVBORw0KGgo=",
     }],
   }, {}, "signature-test-key");
   const publicSettings = publicMailSettings(settings);
   assert.equal(publicSettings.accounts[0].signatureText, "Best Regards\nBrand Team");
+  assert.equal(publicSettings.accounts[0].signatureImageUrl, "", "签名图片地址必须使用 HTTPS。");
+  assert.match(publicSettings.accounts[0].signatureImageData, /^data:image\/png;base64,/);
 }
 
 function assertContactTrackRouting() {
