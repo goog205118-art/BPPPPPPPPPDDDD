@@ -685,6 +685,7 @@ const elements = {
   editorModal: document.getElementById("editorModal"),
   editorBackdrop: document.getElementById("editorBackdrop"),
   closeEditorBtn: document.getElementById("closeEditorBtn"),
+  cancelEditorBtn: document.getElementById("cancelEditorBtn"),
   editorStatus: document.getElementById("editorStatus"),
   assistantPanel: document.querySelector(".assistant"),
   searchInput: document.getElementById("searchInput"),
@@ -1728,6 +1729,21 @@ function normalizeAiSettingsPayload(payload = {}) {
   };
 }
 
+function assignedAiProfileKey(purpose) {
+  const assignments = state.aiSettings?.assignments || {};
+  const selected = text(assignments[purpose]);
+  const validProfiles = new Set(["standard", "advanced", "special"]);
+  return validProfiles.has(selected) ? selected : defaultAiSettings.assignments[purpose];
+}
+
+function aiProfileLabel(profileKey) {
+  return {
+    standard: "普通 AI",
+    advanced: "高能力 AI",
+    special: "特殊 AI",
+  }[profileKey] || "当前 AI";
+}
+
 function readAiSettingsForm() {
   const formData = new FormData(elements.aiSettingsForm);
   const profile = (key) => ({
@@ -2560,7 +2576,12 @@ function renderForm() {
 
   elements.formTitle.textContent = state.editingId ? `编辑 ${item.title}` : item.formTitle;
   elements.formHint.textContent = item.hint;
-  elements.editorStatus.textContent = "点击窗口外会自动保存并关闭。";
+  const creating = !state.editingId;
+  elements.editorStatus.textContent = creating
+    ? "暂不新增可点击“取消新增”或关闭窗口，内容不会保存。"
+    : "点击窗口外会自动保存并关闭。";
+  elements.cancelEditorBtn.classList.toggle("hidden", !creating);
+  elements.resetFormBtn.textContent = creating ? "重新填写" : "还原修改";
 
   elements.form.innerHTML = item.fields
     .flatMap((field) => {
@@ -2924,7 +2945,8 @@ async function handleCreatorAiEnrich() {
   const status = document.getElementById("creatorAiStatus");
   const current = readFormRecord({ applyRecommendations: false });
   const sourceUrl = text(current.social_url);
-  const profileKey = state.activeTab === "leads" ? "lead" : "creator";
+  const purpose = state.activeTab === "leads" ? "lead" : "creator";
+  const profileKey = assignedAiProfileKey(purpose);
   const profile = state.aiSettings?.profiles?.[profileKey];
 
   if (!sourceUrl) {
@@ -2932,7 +2954,8 @@ async function handleCreatorAiEnrich() {
     return;
   }
   if (!profile?.hasApiKey) {
-    if (status) status.textContent = `${state.activeTab === "leads" ? "快速录入" : "完整补全"} AI 尚未配置，请先在设置页填写该功能的 API Key。`;
+    const purposeLabel = state.activeTab === "leads" ? "待开发达人快速录入" : "达人库完整补全";
+    if (status) status.textContent = `${purposeLabel}当前分配的是${aiProfileLabel(profileKey)}，但该档位尚未配置 API Key，请先在设置页完成配置。`;
     return;
   }
 
@@ -2947,7 +2970,7 @@ async function handleCreatorAiEnrich() {
         const response = await apiFetch(API_CREATOR_ENRICH, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ url: sourceUrl, current, purpose: state.activeTab === "leads" ? "lead" : "creator" }),
+          body: JSON.stringify({ url: sourceUrl, current, purpose }),
         });
         const payload = await response.json().catch(() => ({}));
         if (!response.ok || payload.ok === false) {
@@ -7075,7 +7098,20 @@ async function handleSubmit(event) {
 }
 
 async function closeEditor() {
+  if (!state.editingId) {
+    await cancelNewEditor();
+    return;
+  }
   await commitEditor({ close: true });
+}
+
+async function cancelNewEditor() {
+  if (!state.editorOpen || state.editingId || state.editorSaving) return;
+  const record = readFormRecord({ applyRecommendations: false });
+  const changed = editableSnapshot(record) !== state.editorBaseline;
+  if (changed && !window.confirm("放弃本次新增？已填写的内容不会保存。")) return;
+  resetEditorState();
+  render();
 }
 
 async function handleEditorBackdropClick(event) {
@@ -7801,8 +7837,8 @@ async function importJson(file) {
 }
 
 function resetForm() {
-  state.editingId = null;
-  state.editorDraft = defaultRecord(state.activeTab);
+  const existing = state.editingId ? rows().find((row) => row.id === state.editingId) : null;
+  state.editorDraft = existing ? clone(existing) : defaultRecord(state.activeTab);
   state.editorBaseline = editableSnapshot(state.editorDraft);
   renderForm();
 }
@@ -7930,6 +7966,7 @@ function bindEvents() {
   bindKeySource(elements.advancedAiKeySource, elements.advancedAiApiKey);
   bindKeySource(elements.specialAiKeySource, elements.specialAiApiKey);
   elements.resetFormBtn.addEventListener("click", resetForm);
+  elements.cancelEditorBtn.addEventListener("click", cancelNewEditor);
   elements.newRecordBtn.addEventListener("click", () => openEditor());
   elements.outreachBtn.addEventListener("click", () => openOutreachModal());
   elements.editorBackdrop.addEventListener("click", handleEditorBackdropClick);

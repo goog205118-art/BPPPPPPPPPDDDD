@@ -26,6 +26,29 @@ let fakeAiServer;
 let fakeAiBaseUrl = "";
 const fakeAiRequests = [];
 
+function assertAssignedAiProfileRouting() {
+  assert.match(
+    appSource,
+    /function assignedAiProfileKey\(purpose\)[\s\S]*?assignments\[purpose\][\s\S]*?validProfiles/,
+    "前端应按功能分配读取普通/高能力/特殊 AI 档位。",
+  );
+  assert.match(
+    appSource,
+    /const purpose = state\.activeTab === "leads" \? "lead" : "creator";[\s\S]*?const profileKey = assignedAiProfileKey\(purpose\);/,
+    "达人补全应通过 purpose 解析实际分配的 AI 档位。",
+  );
+  assert.doesNotMatch(
+    appSource,
+    /const profileKey = state\.activeTab === "leads" \? "lead" : "creator";/,
+    "达人补全不得再把功能名直接当作 profiles 的键。",
+  );
+  assert.match(
+    appSource,
+    /当前分配的是\$\{aiProfileLabel\(profileKey\)\}，但该档位尚未配置 API Key/,
+    "未配置时应明确提示功能实际分配的 AI 档位。",
+  );
+}
+
 function emptyState() {
   return {
     meta: { version: 1, updatedAt: "2026-08-25T00:00:00.000Z" },
@@ -1462,6 +1485,7 @@ function jsonOptions(method, value) {
 async function run() {
   fs.mkdirSync(storageDir, { recursive: true });
   fs.writeFileSync(path.join(storageDir, "state.json"), JSON.stringify(emptyState(), null, 2), "utf8");
+  assertAssignedAiProfileRouting();
   assertEmailFormatting();
   assertFrontendMailImportGuards();
   assertContactTrackRouting();

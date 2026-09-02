@@ -572,11 +572,12 @@
             <h2 id="formTitle">编辑记录</h2>
             <p class="panel-hint" id="formHint"></p>
           </div>
-          <button type="button" class="close-editor" id="closeEditorBtn" aria-label="关闭编辑窗口" title="关闭并自动保存">×</button>
+          <button type="button" class="close-editor" id="closeEditorBtn" aria-label="关闭编辑窗口" title="关闭编辑窗口">×</button>
         </header>
         <form id="recordForm" class="form editor-form"></form>
         <div class="form-actions editor-actions">
           <button type="submit" form="recordForm" class="primary">保存并关闭</button>
+          <button type="button" id="cancelEditorBtn" class="ghost hidden">取消新增</button>
           <button type="button" id="resetFormBtn" class="ghost">重新填写</button>
           <p class="editor-status" id="editorStatus"></p>
         </div>
