@@ -287,6 +287,10 @@ function normalizeBusinessState(rawState) {
         match_score: Number(row.match_score) || 0,
         match_reasons: Array.isArray(row.match_reasons) ? row.match_reasons.map(textValue).filter(Boolean) : [],
         match_candidates: Array.isArray(row.match_candidates) ? row.match_candidates : [],
+        triage_status: textValue(row.triage_status),
+        triage_reason: textValue(row.triage_reason),
+        triage_resolved_at: textValue(row.triage_resolved_at),
+        triage_resolved_by: textValue(row.triage_resolved_by),
         body: textValue(row.body),
       }))
     : [];

@@ -182,6 +182,32 @@ function assertSameBrand(caseRow, mailRow) {
   }
 }
 
+function isTerminalCase(caseRow) {
+  return ["合作终止", "已结案", "未谈妥"].includes(text(caseRow?.stage));
+}
+
+function triageCandidateCases(state, mailRow) {
+  const candidateIds = new Set(
+    (Array.isArray(mailRow?.candidate_case_ids) ? mailRow.candidate_case_ids : [])
+      .map(text)
+      .filter(Boolean),
+  );
+  if (!candidateIds.size) return [];
+  return (Array.isArray(state?.cases) ? state.cases : [])
+    .filter((caseRow) => text(caseRow.brand_id) === text(mailRow?.brand_id))
+    .filter((caseRow) => !isTerminalCase(caseRow))
+    .filter((caseRow) => candidateIds.has(text(caseRow.id)));
+}
+
+function ensureOpenTriageMail(mailRow) {
+  if (text(mailRow?.status) === "已归档" || text(mailRow?.triage_status) === "archived") {
+    throw new Error("该邮件已归档，不能再次处理。");
+  }
+  if (text(mailRow?.triage_status) === "ignored") {
+    throw new Error("该邮件已忽略；如需重新处理，请先恢复邮件分诊状态。");
+  }
+}
+
 function archiveTriageMail(state, input = {}, now = new Date().toISOString()) {
   const mailId = text(input.mail_id);
   const caseId = text(input.case_id);
@@ -190,10 +216,11 @@ function archiveTriageMail(state, input = {}, now = new Date().toISOString()) {
   if (mailIndex < 0) throw new Error("未找到待分诊邮件。");
   const selectedCase = caseById(state, caseId);
   const mailRow = inbox[mailIndex];
+  ensureOpenTriageMail(mailRow);
   assertSameBrand(selectedCase, mailRow);
 
   const candidateIds = Array.isArray(mailRow.candidate_case_ids) ? mailRow.candidate_case_ids.map(text).filter(Boolean) : [];
-  if (candidateIds.length && !candidateIds.includes(caseId)) {
+  if (!candidateIds.length || !candidateIds.includes(caseId)) {
     throw new Error("所选 Case 不在该邮件的候选范围内。");
   }
 
@@ -203,6 +230,10 @@ function archiveTriageMail(state, input = {}, now = new Date().toISOString()) {
     case_id: caseId,
     status: "已归档",
     match_type: "manual",
+    triage_status: "archived",
+    triage_reason: text(input.reason) || "人工确认归档",
+    triage_resolved_at: timestamp,
+    triage_resolved_by: text(input.actor_name) || "人工",
     resolved_at: timestamp,
     updatedAt: timestamp,
   };
@@ -228,6 +259,87 @@ function archiveTriageMail(state, input = {}, now = new Date().toISOString()) {
   }
 
   return { mail: nextMail, case: selectedCase, eventCreated: !existing };
+}
+
+function ignoreTriageMail(state, input = {}, now = new Date().toISOString()) {
+  const mailId = text(input.mail_id);
+  const reason = text(input.reason);
+  if (!reason) throw new Error("忽略邮件必须填写原因。");
+  const inbox = Array.isArray(state?.mailInbox) ? state.mailInbox : [];
+  const mailIndex = inbox.findIndex((item) => text(item.id) === mailId);
+  if (mailIndex < 0) throw new Error("未找到待分诊邮件。");
+  const mailRow = inbox[mailIndex];
+  ensureOpenTriageMail(mailRow);
+
+  const timestamp = iso(now);
+  const ignored = {
+    ...mailRow,
+    triage_status: "ignored",
+    triage_reason: reason,
+    triage_resolved_at: timestamp,
+    triage_resolved_by: text(input.actor_name) || "人工",
+    updatedAt: timestamp,
+  };
+  inbox[mailIndex] = ignored;
+  return { mail: ignored };
+}
+
+function createTriageCase(state, input = {}, now = new Date().toISOString()) {
+  const mailId = text(input.mail_id);
+  const creatorId = text(input.creator_id);
+  const inbox = Array.isArray(state?.mailInbox) ? state.mailInbox : [];
+  const mailRow = inbox.find((item) => text(item.id) === mailId);
+  if (!mailRow) throw new Error("未找到待分诊邮件。");
+  ensureOpenTriageMail(mailRow);
+  const creator = (Array.isArray(state?.creators) ? state.creators : [])
+    .find((item) => text(item.id) === creatorId) || null;
+  if (!creator) throw new Error("只能基于已有达人资料新建 Case。");
+  if (text(creator.brand_id) !== text(mailRow.brand_id)) {
+    throw new Error("邮件与达人品牌不一致，禁止跨品牌新建 Case。");
+  }
+
+  const candidateCreatorIds = (Array.isArray(mailRow.candidate_creator_ids) ? mailRow.candidate_creator_ids : [])
+    .map(text)
+    .filter(Boolean);
+  if (candidateCreatorIds.length !== 1 || candidateCreatorIds[0] !== creatorId) {
+    throw new Error("新建 Case 仅允许用于已唯一识别的已有达人。");
+  }
+
+  const existingActiveCase = (Array.isArray(state?.cases) ? state.cases : [])
+    .find((caseRow) => text(caseRow.brand_id) === text(creator.brand_id)
+      && text(caseRow.creator_id) === creatorId
+      && !isTerminalCase(caseRow));
+  if (existingActiveCase) {
+    throw new Error("该达人已有活跃 Case，请先确认归档到既有 Case。");
+  }
+
+  const caseRow = createCase({
+    id: input.case_id,
+    brand_id: creator.brand_id,
+    creator_id: creatorId,
+    product_ids: Array.isArray(input.product_ids) ? input.product_ids : [],
+    priority: text(input.priority) || "中",
+    // New triage cases must never skip directly to a high-risk stage.
+    stage: "初步沟通",
+    next_action: text(input.next_action) || "阅读回信并确认下一步",
+  }, now);
+  const cases = Array.isArray(state?.cases) ? state.cases : (state.cases = []);
+  cases.push(caseRow);
+  const mailIndex = inbox.findIndex((item) => text(item.id) === mailId);
+  inbox[mailIndex] = {
+    ...mailRow,
+    // The Case was created through the unique-creator triage contract, so it
+    // becomes the sole explicit archive candidate before the archive step.
+    candidate_case_ids: [caseRow.id],
+    updatedAt: iso(now),
+  };
+  const archived = archiveTriageMail(state, {
+    mail_id: mailId,
+    case_id: caseRow.id,
+    reason: text(input.archive_reason) || "人工新建 Case 并归档",
+    actor_name: input.actor_name,
+  }, now);
+  return { case: caseRow, mail: archived.mail, eventCreated: archived.eventCreated };
 }
 
 function taskKey(caseId, type, sourceId = "") {
@@ -739,11 +851,14 @@ module.exports = {
   completeTask,
   createActionTask,
   createCase,
+  createTriageCase,
   deferTask,
+  ignoreTriageMail,
   patchVersionedRecord,
   recordCaseStageChange,
   reconcileCaseTasks,
   skipTask,
   taskEventsForTask,
   taskKey,
+  triageCandidateCases,
 };

@@ -1621,6 +1621,10 @@ function ensureStateShape(nextState) {
         match_score: Number(row.match_score) || 0,
         match_reasons: Array.isArray(row.match_reasons) ? row.match_reasons.map(text).filter(Boolean) : [],
         match_candidates: Array.isArray(row.match_candidates) ? row.match_candidates : [],
+        triage_status: text(row.triage_status),
+        triage_reason: text(row.triage_reason),
+        triage_resolved_at: text(row.triage_resolved_at),
+        triage_resolved_by: text(row.triage_resolved_by),
       }, shaped))
     : [];
   shaped.actionTasks = Array.isArray(nextState?.actionTasks)
@@ -4623,6 +4627,82 @@ function pendingMailCreatorOptions(message) {
     });
 }
 
+function isTerminalTriageCase(caseRow) {
+  return ["合作终止", "已结案", "未谈妥"].includes(text(caseRow?.stage));
+}
+
+function pendingMailCaseCandidates(message) {
+  const followUps = allRows("followups");
+  const candidateIds = new Set((message.candidate_case_ids || []).map(text).filter(Boolean));
+  if (!candidateIds.size) {
+    (message.candidate_follow_up_ids || []).map(text).filter(Boolean).forEach((followUpId) => {
+      const caseId = text(followUps.find((row) => text(row.id) === followUpId)?.case_id);
+      if (caseId) candidateIds.add(caseId);
+    });
+  }
+  if (!candidateIds.size) return [];
+  return allRows("cases")
+    .filter((caseRow) => text(caseRow.brand_id) === text(message.brand_id))
+    .filter((caseRow) => candidateIds.has(text(caseRow.id)))
+    .filter((caseRow) => !isTerminalTriageCase(caseRow))
+    .slice()
+    .sort((left, right) => text(left.id).localeCompare(text(right.id), "zh-CN"));
+}
+
+function pendingMailFollowUpForCase(caseRow) {
+  return allRows("followups").find((followUp) =>
+    text(followUp.case_id) === text(caseRow?.id) &&
+    text(followUp.brand_id) === text(caseRow?.brand_id) &&
+    !FOLLOW_UP_TERMINAL_STAGES.has(text(followUp.stage)),
+  ) || null;
+}
+
+function mailTriageDispositionLabel(message) {
+  const disposition = text(message.match_disposition);
+  if (disposition === "unique") return "唯一匹配";
+  if (disposition === "ambiguous") return "存在歧义";
+  if (disposition === "unmatched") return "证据不足";
+  return "待人工判断";
+}
+
+function mailTriageEvidenceMarkup(message) {
+  const reasons = (message.match_reasons || []).map(text).filter(Boolean);
+  const candidates = Array.isArray(message.match_candidates) ? message.match_candidates : [];
+  const creatorMap = new Map(allRows("creators").map((creator) => [text(creator.id), creator]));
+  const caseMap = new Map(allRows("cases").map((caseRow) => [text(caseRow.id), caseRow]));
+  const candidateMarkup = candidates.length
+    ? candidates.map((candidate) => {
+      const caseRow = caseMap.get(text(candidate.case_id));
+      const creator = creatorMap.get(text(candidate.creator_id));
+      const label = [
+        creator?.name || creator?.handle || text(candidate.creator_id) || "未识别达人",
+        caseRow?.stage || "未建立 Case",
+      ].filter(Boolean).join(" · ");
+      const evidence = Array.isArray(candidate.evidence) ? candidate.evidence : [];
+      return `
+        <li class="mail-triage-candidate">
+          <div><strong>${escapeHtml(label)}</strong><span>${escapeHtml(`${Number(candidate.score) || 0} 分`)}</span></div>
+          ${evidence.length ? `<ul>${evidence.map((item) => `<li><b>${escapeHtml(item.rule || "规则")}</b>${escapeHtml(` +${Number(item.weight) || 0} · ${item.detail || ""}`)}</li>`).join("")}</ul>` : ""}
+        </li>`;
+    }).join("")
+    : "";
+  if (!reasons.length && !candidateMarkup) return "";
+  return `
+    <details class="mail-triage-evidence">
+      <summary>匹配依据${message.match_score ? ` · ${escapeHtml(String(message.match_score))} 分` : ""}</summary>
+      ${reasons.length ? `<p>${escapeHtml(reasons.join(" "))}</p>` : ""}
+      ${candidateMarkup ? `<ol>${candidateMarkup}</ol>` : ""}
+    </details>`;
+}
+
+function ignoredMailRowMarkup(message) {
+  return `
+    <article class="mail-triage-ignored-row">
+      <strong>${escapeHtml(message.subject || "无主题")}</strong>
+      <small>${escapeHtml([message.sender || "未知发件人", message.triage_reason || "未填写原因", formatDateTime(message.triage_resolved_at)].filter(Boolean).join(" · "))}</small>
+    </article>`;
+}
+
 function mailInboxRowMarkup(message) {
   const direction = message.direction === "inbound" ? "收件" : message.direction === "outbound" ? "已发送" : "待判断";
   const creator = message.matched_creator_name ? ` · ${message.matched_creator_name}` : "";
@@ -4633,9 +4713,14 @@ function mailInboxRowMarkup(message) {
   const candidateBrandNote = candidateBrandNames.length > 1 && ["needs_brand_confirmation", "unmatched", "ambiguous_creator"].includes(text(message.status))
     ? `<small class="mail-inbox-candidates">候选工作区：${escapeHtml(candidateBrandNames.join(" / "))}</small>`
     : "";
-  const candidateFollowUps = (message.candidate_follow_up_ids || [])
-    .map((id) => rows("followups").find((row) => text(row.id) === text(id)))
+  const candidateCases = pendingMailCaseCandidates(message);
+  const candidateFollowUps = candidateCases
+    .map(pendingMailFollowUpForCase)
     .filter(Boolean);
+  const legacyCandidateFollowUps = (message.candidate_follow_up_ids || [])
+    .map((id) => rows("followups").find((row) => text(row.id) === text(id)))
+    .filter((followUp) => followUp && !candidateFollowUps.some((item) => text(item.id) === text(followUp.id)));
+  const selectableFollowUps = candidateFollowUps.length ? candidateFollowUps : legacyCandidateFollowUps;
   const busy = Boolean(state.followUpInboxBusyId);
   const isCurrentBusy = text(state.followUpInboxBusyId) === text(message.id);
   let action = "";
@@ -4652,20 +4737,20 @@ function mailInboxRowMarkup(message) {
         </select>
         <button type="button" class="ghost" data-mail-confirm-brand="${escapeHtml(message.id)}" ${busy ? "disabled" : ""}>${isCurrentBusy ? "正在确认..." : "确认品牌"}</button>
       </div>`;
-  } else if (message.status === "needs_followup" && message.matched_creator_id && !candidateFollowUps.length) {
+  } else if (message.status === "needs_followup" && message.matched_creator_id && !selectableFollowUps.length) {
     action = `
       <div class="mail-inbox-actions">
         <button type="button" class="ghost" data-mail-create-followup="${escapeHtml(message.id)}" ${busy ? "disabled" : ""}>
-          ${isCurrentBusy ? "正在新建..." : "新建跟进并归档"}
+          ${isCurrentBusy ? "正在新建..." : "新建 Case 并归档"}
         </button>
       </div>`;
-  } else if (message.status === "needs_followup" && text(message.matched_creator_id) && candidateFollowUps.length) {
+  } else if (message.status === "needs_followup" && text(message.matched_creator_id) && selectableFollowUps.length) {
     action = `
       <div class="mail-inbox-actions">
         <select data-mail-followup-select="${escapeHtml(message.id)}" aria-label="选择合作跟进" ${busy ? "disabled" : ""}>
-          ${candidateFollowUps.map((followUp) => `<option value="${escapeHtml(followUp.id)}">${escapeHtml(`${followUp.creator_name || "未命名达人"} · ${followUp.stage || "初步沟通"} · ${followUp.next_action || "无下一步"}`)}</option>`).join("")}
+          ${selectableFollowUps.map((followUp) => `<option value="${escapeHtml(followUp.id)}">${escapeHtml(`${followUp.creator_name || "未命名达人"} · ${followUp.stage || "初步沟通"} · ${followUp.next_action || "无下一步"}`)}</option>`).join("")}
         </select>
-        <button type="button" class="ghost" data-mail-archive="${escapeHtml(message.id)}" ${busy ? "disabled" : ""}>${isCurrentBusy ? "正在归档..." : "归档到跟进"}</button>
+        <button type="button" class="ghost" data-mail-archive="${escapeHtml(message.id)}" ${busy ? "disabled" : ""}>${isCurrentBusy ? "正在归档..." : "确认归档"}</button>
       </div>`;
   } else if (canManuallyAssignCreator) {
     const creators = pendingMailCreatorOptions(message);
@@ -4689,12 +4774,13 @@ function mailInboxRowMarkup(message) {
     <article class="mail-inbox-row">
       <div class="mail-inbox-row-head">
         <strong>${escapeHtml(message.subject || "无主题")}</strong>
-        <span>${escapeHtml(mailInboxStatusLabel(message.status, message))}</span>
+        <span>${escapeHtml(mailTriageDispositionLabel(message))}</span>
       </div>
       <small>${escapeHtml([direction, message.sender || "未知发件人", formatDateTime(message.occurred_at), message.mailbox].filter(Boolean).join(" · "))}${escapeHtml(creator)}</small>
       ${candidateBrandNote}
       <p>${escapeHtml(message.excerpt || "没有可提取的正文摘要")}</p>
-      ${action}
+      ${mailTriageEvidenceMarkup(message)}
+      <div class="mail-inbox-actions-wrap">${action}<button type="button" class="ghost mail-triage-ignore" data-mail-ignore="${escapeHtml(message.id)}" ${busy ? "disabled" : ""}>忽略</button></div>
     </article>`;
 }
 
@@ -4734,10 +4820,17 @@ function archiveMailIntoFollowUp(message, followUp) {
     throw new Error("邮件与合作跟进不属于同一品牌，已阻止归档。");
   }
   const now = new Date().toISOString();
-  const event = {
+  const archivedMessage = {
     ...message,
+    triage_status: "archived",
+    triage_reason: text(message.triage_reason) || "人工确认归档",
+    triage_resolved_at: now,
+    triage_resolved_by: text(message.triage_resolved_by) || "人工",
+  };
+  const event = {
+    ...archivedMessage,
     follow_up_id: followUp.id,
-    case_id: followUp.case_id || text(message.case_id),
+    case_id: followUp.case_id || text(archivedMessage.case_id),
     brand_id: followUp.brand_id,
     brand: followUp.brand,
     updatedAt: now,
@@ -4778,6 +4871,7 @@ async function archivePendingMail(mailId, followUpId) {
     if (!message) throw new Error("找不到这封待归档邮件，可能已被其他操作处理。");
     if (!followUp) throw new Error("找不到所选合作跟进，请刷新后重新选择。");
     if (!belongsToActiveBrand(message) || !belongsToActiveBrand(followUp)) throw new Error("当前工作区与所选邮件或合作跟进不一致。");
+    if (text(message.triage_status) === "ignored") throw new Error("该邮件已忽略；如需归档，请先恢复邮件分诊状态。");
     if (message.status !== "needs_followup" || !text(message.matched_creator_id)) {
       throw new Error("该邮件尚未匹配唯一达人，不能直接归档。请先补充或修正达人邮箱。");
     }
@@ -4786,6 +4880,12 @@ async function archivePendingMail(mailId, followUpId) {
     }
     if (text(message.brand_id) && text(message.brand_id) !== text(followUp.brand_id)) {
       throw new Error("邮件与所选合作跟进的品牌不一致，已阻止归档。");
+    }
+    const targetCase = followUpCase(followUp);
+    if (!targetCase) throw new Error("所选合作跟进没有可用的 Case，无法安全归档。");
+    const candidateCaseIds = pendingMailCaseCandidates(message).map((caseRow) => text(caseRow.id));
+    if (!candidateCaseIds.length || !candidateCaseIds.includes(text(targetCase.id))) {
+      throw new Error("所选 Case 不在该邮件的候选范围内，已阻止错误归档。");
     }
     if (isMailAlreadyArchived(message, followUp)) {
       throw new Error("该邮件已存在于合作跟进时间线，未重复归档。");
@@ -4817,6 +4917,7 @@ async function createFollowUpAndArchiveMail(mailId) {
     const message = (state.data.mailInbox || []).find((item) => text(item.id) === text(mailId));
     if (!message) throw new Error("找不到这封待归档邮件，可能已被其他操作处理。");
     if (!belongsToActiveBrand(message)) throw new Error("该邮件不属于当前工作区，请切换到对应品牌后处理。");
+    if (text(message.triage_status) === "ignored") throw new Error("该邮件已忽略；如需新建 Case，请先恢复邮件分诊状态。");
     if (message.status !== "needs_followup" || !text(message.matched_creator_id)) {
       throw new Error("该邮件尚未匹配唯一达人，不能自动新建跟进。请先补充或修正达人邮箱。");
     }
@@ -4825,6 +4926,10 @@ async function createFollowUpAndArchiveMail(mailId) {
     if (!belongsToActiveBrand(creator)) throw new Error("邮件与达人资料不属于当前工作区，已阻止新建跟进。");
     if (text(message.brand_id) && text(creator.brand_id) && text(message.brand_id) !== text(creator.brand_id)) {
       throw new Error("邮件与达人资料不属于同一品牌，已阻止新建跟进。");
+    }
+    const candidateCreatorIds = (message.candidate_creator_ids || []).map(text).filter(Boolean);
+    if (candidateCreatorIds.length !== 1 || candidateCreatorIds[0] !== text(creator.id)) {
+      throw new Error("新建 Case 仅允许用于已唯一识别的已有达人。");
     }
     const existing = allRows("followups").find((followUp) => {
       return text(followUp.creator_id) === text(creator.id) &&
@@ -4908,6 +5013,7 @@ async function assignPendingMailCreator(mailId, creatorId) {
       candidate_creator_ids: [creator.id],
       candidate_lead_ids: [],
       candidate_follow_up_ids: activeFollowUps.map((row) => row.id),
+      candidate_case_ids: activeFollowUps.map((row) => text(row.case_id)).filter(Boolean),
       updatedAt: new Date().toISOString(),
     });
 
@@ -4964,14 +5070,54 @@ async function assignPendingMailCreator(mailId, creatorId) {
   }
 }
 
+async function ignorePendingMail(mailId) {
+  if (state.followUpInboxBusyId) return;
+  const reason = text(window.prompt("填写忽略原因（必填）。该邮件会保留在分诊记录中，不会写入 Case 时间线。", ""));
+  if (!reason) return;
+  state.followUpInboxBusyId = text(mailId);
+  setFollowUpInboxNotice("正在保留邮件并记录忽略原因...", "info");
+  renderFollowUpPage();
+  let snapshot = null;
+  try {
+    const message = (state.data.mailInbox || []).find((item) => text(item.id) === text(mailId));
+    if (!message) throw new Error("找不到这封待处理邮件，可能已被其他操作处理。");
+    if (!belongsToActiveBrand(message)) throw new Error("该邮件不属于当前工作区，请切换到对应品牌后处理。");
+    if (text(message.status) === "已归档" || text(message.triage_status) === "archived") throw new Error("该邮件已归档，不能再忽略。");
+    if (text(message.triage_status) === "ignored") throw new Error("该邮件已忽略。");
+
+    snapshot = clone(state.data);
+    await withActivity("正在忽略邮件", "原邮件将保留，仅记录人工分诊决定...", async () => {
+      Object.assign(message, {
+        triage_status: "ignored",
+        triage_reason: reason,
+        triage_resolved_at: new Date().toISOString(),
+        triage_resolved_by: "人工",
+        updatedAt: new Date().toISOString(),
+      });
+      await persist();
+    });
+    setFollowUpInboxNotice("邮件已忽略并保留原始记录；未写入任何 Case 或合作跟进时间线。", "success");
+  } catch (error) {
+    if (snapshot) state.data = snapshot;
+    setFollowUpInboxNotice(error.message || "忽略邮件失败。", "error");
+  } finally {
+    state.followUpInboxBusyId = "";
+    renderFollowUpPage();
+  }
+}
+
 function handlePendingMailAction(event) {
-  const trigger = event.currentTarget?.matches?.("[data-mail-create-followup], [data-mail-archive], [data-mail-confirm-brand], [data-mail-assign-creator]")
+  const trigger = event.currentTarget?.matches?.("[data-mail-create-followup], [data-mail-archive], [data-mail-confirm-brand], [data-mail-assign-creator], [data-mail-ignore]")
     ? event.currentTarget
-    : event.target.closest("[data-mail-create-followup], [data-mail-archive], [data-mail-confirm-brand], [data-mail-assign-creator]");
+    : event.target.closest("[data-mail-create-followup], [data-mail-archive], [data-mail-confirm-brand], [data-mail-assign-creator], [data-mail-ignore]");
   if (!trigger) return;
 
   event.preventDefault();
   event.stopPropagation();
+  if (trigger.dataset.mailIgnore) {
+    void ignorePendingMail(trigger.dataset.mailIgnore);
+    return;
+  }
   if (trigger.dataset.mailConfirmBrand) {
     const row = trigger.closest(".mail-inbox-row");
     const brandId = text(row?.querySelector("[data-mail-brand-select]")?.value);
@@ -5029,6 +5175,7 @@ async function confirmPendingMailBrand(mailId, brandId) {
         status: people.length > 1 ? "ambiguous_creator" : "unmatched",
         candidate_creator_ids: matchedCreators.map((row) => row.id),
         candidate_lead_ids: matchedLeads.map((row) => row.id),
+        candidate_case_ids: [],
         matched_creator_id: "",
         matched_creator_name: "",
         updatedAt: new Date().toISOString(),
@@ -5052,6 +5199,7 @@ async function confirmPendingMailBrand(mailId, brandId) {
       candidate_creator_ids: [creator.id],
       candidate_lead_ids: [],
       candidate_follow_up_ids: followUps.map((row) => row.id),
+      candidate_case_ids: followUps.map((row) => text(row.case_id)).filter(Boolean),
       updatedAt: new Date().toISOString(),
     });
     await persist();
@@ -6305,9 +6453,13 @@ function renderFollowUpPage() {
   const todayCount = allRows.filter((row) => isSameLocalDay(followUpDisplayModel(row).nextActionAt, new Date())).length;
   const overdueCount = allRows.filter((row) => isFollowUpOverdue(row)).length;
   const pendingMail = (state.data.mailInbox || [])
-    .filter(belongsToActiveBrand)
+    .filter((message) => belongsToActiveBrand(message) && !text(message.triage_status))
     .slice()
     .sort((a, b) => new Date(b.occurred_at || b.createdAt || 0) - new Date(a.occurred_at || a.createdAt || 0));
+  const ignoredMail = (state.data.mailInbox || [])
+    .filter((message) => belongsToActiveBrand(message) && text(message.triage_status) === "ignored")
+    .slice()
+    .sort((a, b) => new Date(b.triage_resolved_at || b.updatedAt || 0) - new Date(a.triage_resolved_at || a.updatedAt || 0));
   const contactTracks = (state.data.contactTracks || [])
     .filter((track) => belongsToActiveBrand(track) && ["waiting_reply", "paused"].includes(text(track.status)))
     .slice()
@@ -6376,17 +6528,18 @@ function renderFollowUpPage() {
     </section>
     <section class="mail-inbox">
       <header class="mail-inbox-head">
-        <div><strong>待人工归档邮件</strong><small>仅在无法唯一关联到一条活跃合作跟进时保留在此处，避免把邮件写错到其他达人。</small></div>
+        <div><strong>邮件分诊台</strong><small>查看候选达人、Case 和评分证据后，由人工确认归档、忽略或新建 Case，避免错写合作历史。</small></div>
         <span>${pendingMail.length}</span>
       </header>
       ${inboxNotice}
       <div class="mail-inbox-list">${pendingMail.length ? pendingMail.slice(0, 24).map(mailInboxRowMarkup).join("") : `<p class="followup-column-empty">暂无待人工处理邮件</p>`}</div>
+      ${ignoredMail.length ? `<details class="mail-triage-ignored"><summary>已忽略 ${ignoredMail.length} 封</summary><div>${ignoredMail.slice(0, 12).map(ignoredMailRowMarkup).join("")}</div></details>` : ""}
     </section>
     ${!allRows.length ? `<section class="followup-empty"><strong>还没有合作跟进</strong><p>把已进入达人库的达人按实际进度建立跟进记录，之后就能在看板上持续追踪。</p><button type="button" class="primary" data-followup-new>新增第一条跟进</button></section>` : ""}
   `;
 
   elements.followUpPage.querySelectorAll("[data-followup-new]").forEach((button) => button.addEventListener("click", () => openFollowUpEditor()));
-  elements.followUpPage.querySelectorAll("[data-mail-create-followup], [data-mail-archive], [data-mail-confirm-brand], [data-mail-assign-creator]").forEach((button) => {
+  elements.followUpPage.querySelectorAll("[data-mail-create-followup], [data-mail-archive], [data-mail-confirm-brand], [data-mail-assign-creator], [data-mail-ignore]").forEach((button) => {
     button.addEventListener("click", handlePendingMailAction);
   });
   elements.followUpPage.querySelector("[data-contact-track-form]")?.addEventListener("submit", (event) => {

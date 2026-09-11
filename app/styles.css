@@ -4992,6 +4992,122 @@ body.access-locked .app-shell {
   padding-top: 2px;
 }
 
+.mail-inbox-actions-wrap {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.mail-inbox-actions-wrap .mail-inbox-actions {
+  flex: 1 1 auto;
+  padding-top: 0;
+}
+
+.mail-triage-ignore {
+  flex: 0 0 auto;
+  min-height: 28px;
+  border-color: #604e47;
+  color: #d5b8ad;
+}
+
+.mail-triage-evidence {
+  border-top: 1px solid #2d4053;
+  padding-top: 5px;
+  color: #a9becf;
+  font-size: 0.64rem;
+  line-height: 1.45;
+}
+
+.mail-triage-evidence summary {
+  cursor: pointer;
+  color: #89bfe8;
+  font-size: 0.65rem;
+}
+
+.mail-triage-evidence p {
+  display: block;
+  margin: 5px 0;
+  color: #b8cad8;
+}
+
+.mail-triage-evidence ol,
+.mail-triage-evidence ul {
+  display: grid;
+  gap: 4px;
+  margin: 5px 0 0;
+  padding-left: 16px;
+}
+
+.mail-triage-candidate {
+  color: #a8bdce;
+}
+
+.mail-triage-candidate > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.mail-triage-candidate strong {
+  color: #dceaf5;
+  font-weight: 600;
+}
+
+.mail-triage-candidate span {
+  color: #e5bd68;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.mail-triage-candidate b {
+  margin-right: 4px;
+  color: #81b8df;
+  font-weight: 600;
+}
+
+.mail-triage-ignored {
+  border-top: 1px solid #304256;
+  padding: 7px 9px;
+  color: #91a8ba;
+  font-size: 0.66rem;
+}
+
+.mail-triage-ignored summary {
+  cursor: pointer;
+}
+
+.mail-triage-ignored > div {
+  display: grid;
+  gap: 4px;
+  margin-top: 7px;
+}
+
+.mail-triage-ignored-row {
+  display: grid;
+  gap: 2px;
+  padding: 6px 7px;
+  border: 1px solid #2f3f50;
+  border-radius: 4px;
+  background: #18232e;
+}
+
+.mail-triage-ignored-row strong {
+  overflow: hidden;
+  color: #c0d0dc;
+  font-size: 0.67rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mail-triage-ignored-row small {
+  overflow: hidden;
+  color: #8198aa;
+  font-size: 0.62rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .mail-inbox-actions select {
   min-width: 0;
   flex: 1 1 auto;
