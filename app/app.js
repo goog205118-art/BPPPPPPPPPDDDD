@@ -532,6 +532,7 @@ const emptyState = {
   cooperations: [],
   matches: [],
   followUps: [],
+  cases: [],
   followUpEvents: [],
   contactTracks: [],
   mailInbox: [],
@@ -1506,7 +1507,7 @@ function ensureStateShape(nextState) {
       updatedAt: text(brand?.updatedAt) || new Date().toISOString(),
     });
   }
-  for (const type of ["creators", "resources", "leads", "products", "cooperations", "matches", "followUps"]) {
+  for (const type of ["creators", "resources", "leads", "products", "cooperations", "matches", "cases", "followUps"]) {
     for (const row of Array.isArray(nextState?.[type]) ? nextState[type] : []) {
       if (text(row?.brand)) ensureBrand(shaped, row.brand);
     }
@@ -1527,18 +1528,76 @@ function ensureStateShape(nextState) {
   shaped.cooperations = Array.isArray(nextState?.cooperations)
     ? nextState.cooperations.map((row) => resolveCooperationLinks({ ...row }, shaped.creators, shaped.resources, shaped))
     : [];
+  shaped.cases = Array.isArray(nextState?.cases)
+    ? nextState.cases.map((row) => applyRecordBrand({
+        ...row,
+        product_ids: Array.isArray(row.product_ids) ? row.product_ids.map(text).filter(Boolean) : [],
+        stage: text(row.stage) || "待开发",
+        version: Math.max(1, Number(row.version) || 1),
+      }, shaped))
+    : [];
   shaped.followUps = Array.isArray(nextState?.followUps)
     ? nextState.followUps.map((row) => normalizeFollowUp({ ...row }, shaped.creators, shaped.cooperations, shaped))
     : [];
+  const caseById = new Map(shaped.cases.map((row) => [text(row.id), row]));
+  for (const followUp of shaped.followUps) {
+    if (caseById.has(text(followUp.case_id))) continue;
+    if (!text(followUp.creator_id) && !text(followUp.lead_id)) {
+      followUp.case_id = "";
+      continue;
+    }
+    const migratedCase = applyRecordBrand({
+      id: `CASE-FU-${text(followUp.id)}`,
+      brand_id: followUp.brand_id,
+      brand: followUp.brand,
+      creator_id: followUp.creator_id,
+      lead_id: followUp.lead_id,
+      cooperation_id: followUp.cooperation_id,
+      product_ids: text(followUp.product_id) ? [text(followUp.product_id)] : [],
+      stage: text(followUp.stage) || "待开发",
+      priority: text(followUp.priority) || "普通",
+      cooperation_mode: text(followUp.cooperation_mode),
+      budget: followUp.budget,
+      shipping_status: text(followUp.shipping_status),
+      tracking_no: text(followUp.tracking_no),
+      publish_due_at: text(followUp.publish_due_at),
+      publish_url: text(followUp.publish_url),
+      next_action: text(followUp.next_action),
+      next_action_at: text(followUp.next_follow_up_at),
+      last_outreach_at: text(followUp.last_email_at),
+      notes: text(followUp.notes),
+      version: 1,
+      createdAt: text(followUp.createdAt),
+      updatedAt: text(followUp.updatedAt),
+    }, shaped);
+    shaped.cases.push(migratedCase);
+    caseById.set(migratedCase.id, migratedCase);
+    followUp.case_id = migratedCase.id;
+  }
+  for (const cooperation of shaped.cooperations) {
+    const linkedCase = caseById.get(text(cooperation.case_id))
+      || shaped.cases.find((item) => text(item.cooperation_id) === text(cooperation.id));
+    cooperation.case_id = linkedCase ? linkedCase.id : "";
+  }
   const followUpById = new Map(shaped.followUps.map((row) => [text(row.id), row]));
   shaped.followUpEvents = Array.isArray(nextState?.followUpEvents)
-    ? nextState.followUpEvents.map((row) => applyRecordBrand({ ...row }, shaped, followUpById.get(text(row.follow_up_id))))
+    ? nextState.followUpEvents.map((row) => applyRecordBrand({
+        ...row,
+        case_id: text(row.case_id || followUpById.get(text(row.follow_up_id))?.case_id),
+      }, shaped, followUpById.get(text(row.follow_up_id))))
     : [];
   shaped.contactTracks = Array.isArray(nextState?.contactTracks)
-    ? nextState.contactTracks.map((row) => applyRecordBrand({ ...row }, shaped))
+    ? nextState.contactTracks.map((row) => applyRecordBrand({
+        ...row,
+        case_id: text(row.case_id || followUpById.get(text(row.follow_up_id))?.case_id),
+      }, shaped))
     : [];
   shaped.mailInbox = Array.isArray(nextState?.mailInbox)
-    ? nextState.mailInbox.map((row) => applyRecordBrand({ ...row }, shaped))
+    ? nextState.mailInbox.map((row) => applyRecordBrand({
+        ...row,
+        case_id: text(row.case_id),
+        candidate_case_ids: Array.isArray(row.candidate_case_ids) ? row.candidate_case_ids.map(text).filter(Boolean) : [],
+      }, shaped))
     : [];
   shaped.matches = Array.isArray(nextState?.matches)
     ? nextState.matches.map((row) => applyRecordBrand({

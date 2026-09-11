@@ -128,9 +128,10 @@
 
 ## followUps
 
-合作跟进主表，用于记录达人从初步沟通到发布、数据回收或终止的阶段进度。每条记录对应一个达人和一项具体合作，可选关联历史合作记录与产品。
+历史合作跟进兼容表。现有页面仍可读写本表；`cases` 上线后，一条跟进会稳定映射到一个 Case，后续的邮件、待办、分诊和审计会以 Case 为中心聚合。
 
 - `id`
+- `case_id`（关联 `cases.id`；旧数据首次读取时按 `CASE-FU-{follow_up_id}` 生成兼容 Case）
 - `creator_id`（关联 `creators.id`，稳定关联）
 - `lead_id`（关联 `leads.id`；达人仍在待开发阶段时使用，收到回信转入达人库后保留历史关联）
 - `cooperation_id`（关联 `cooperations.id`，可选）
@@ -153,12 +154,36 @@
 
 看板根据 `stage` 将记录分为初步沟通、合作协商、寄样、物流、待发布、发布与回收六列；已结案、暂停跟进和未谈妥会进入已结束 / 暂停区域。`creator_id`、`cooperation_id` 和 `product_id` 用于稳定追溯，展示名称仅作为冗余快照和兼容旧数据使用。
 
+## cases
+
+合作 Case 是一项具体合作的正式聚合实体：同一达人可在不同品牌、不同产品组合或不同合作轮次下拥有多个 Case。`followUps` 仍是旧页面兼容层，不能再作为跨邮件、待办和审计的唯一身份。
+
+- `id`
+- `brand_id`、`brand`
+- `creator_id` 或 `lead_id`（至少一个；待开发达人收到有效回信后可保留 `lead_id` 并关联正式达人）
+- `cooperation_id`
+- `product_ids`（产品 ID 数组）
+- `stage`
+- `priority`
+- `cooperation_mode`
+- `budget`、`quote_amount`
+- `shipping_address`、`shipping_status`、`tracking_no`
+- `publish_due_at`、`publish_url`
+- `next_action`、`next_action_at`
+- `last_outreach_at`
+- `notes`
+- `version`（记录级乐观锁版本；后续实体写入接口必须校验）
+- `createdAt`、`updatedAt`
+
+阶段契约为：`待开发 -> 已联系待回复 -> 初步沟通 -> 合作协商 -> 待寄样 -> 已寄样/运输中/已签收 -> 待发布 -> 已发布 -> 待数据回收 -> 合作完成 -> 已结案`。旧阶段名称在兼容期内继续允许读取；报价、条款、寄样、签收、发布和结案仍必须人工确认，不允许 AI 自动跨阶段。
+
 ## followUpEvents
 
 合作跟进事件表，用于保存从 Foxmail 导出的 `.eml` 或官邮 IMAP 同步的邮件摘要，形成单条跟进的沟通时间线。
 
 - `id`
 - `follow_up_id`（关联 `followUps.id`）
+- `case_id`（关联 `cases.id`；由历史 `follow_up_id` 兼容回填）
 - `type`（当前为 `email`）
 - `occurred_at`
 - `direction`（`inbound` 达人来信，`outbound` 我方发信）
@@ -198,6 +223,7 @@
 - `recipients`
 - `excerpt`
 - `brand_id`（已确认归属时写入）
+- `case_id`（人工或规则确认后的目标 Case）
 - `mailbox_account_id`
 - `body`
 - `body_cached_at`
@@ -218,6 +244,7 @@
 - `candidate_lead_ids`
 - `candidate_brand_ids`
 - `candidate_follow_up_ids`
+- `candidate_case_ids`
 - `createdAt`
 - `updatedAt`
 

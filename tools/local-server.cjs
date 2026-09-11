@@ -76,6 +76,7 @@ const defaultState = {
   cooperations: [],
   matches: [],
   followUps: [],
+  cases: [],
   followUpEvents: [],
   contactTracks: [],
   mailInbox: [],
@@ -135,7 +136,7 @@ function generatedBrandId(name) {
 
 function normalizeBusinessState(rawState) {
   const state = rawState && typeof rawState === "object" ? rawState : {};
-  const rawCollections = ["creators", "resources", "leads", "products", "cooperations", "matches", "followUps", "contactTracks"];
+  const rawCollections = ["creators", "resources", "leads", "products", "cooperations", "matches", "cases", "followUps", "contactTracks"];
   const brandsByKey = new Map();
   const brandsById = new Map();
   const addBrand = (raw) => {
@@ -213,6 +214,24 @@ function normalizeBusinessState(rawState) {
         selected_resource_ids: Array.isArray(row.selected_resource_ids) ? row.selected_resource_ids : [],
       }))
     : [];
+  const cases = Array.isArray(state.cases)
+    ? state.cases.map((row) => {
+        const creator = creators.find((item) => item.id === row.creator_id) || creatorByName.get(String(row.creator_name || "").trim());
+        const lead = leads.find((item) => item.id === row.lead_id);
+        const cooperation = cooperations.find((item) => item.id === row.cooperation_id);
+        return resolveBrand({
+          ...row,
+          creator_id: creator ? creator.id : textValue(row.creator_id),
+          lead_id: lead ? lead.id : textValue(row.lead_id),
+          cooperation_id: cooperation ? cooperation.id : textValue(row.cooperation_id),
+          product_ids: Array.isArray(row.product_ids) ? row.product_ids.map(textValue).filter(Boolean) : [],
+          stage: textValue(row.stage) || "待开发",
+          version: Math.max(1, Number(row.version) || 1),
+          brand: textValue(row.brand || creator?.brand || lead?.brand || cooperation?.brand),
+          brand_id: textValue(row.brand_id || creator?.brand_id || lead?.brand_id || cooperation?.brand_id),
+        }, brandsById.get(textValue(creator?.brand_id || lead?.brand_id || cooperation?.brand_id)));
+      })
+    : [];
   const followUps = Array.isArray(state.followUps)
     ? state.followUps.map((row) => {
         const creator = creators.find((item) => item.id === row.creator_id) || creatorByName.get(String(row.creator_name || "").trim());
@@ -227,21 +246,78 @@ function normalizeBusinessState(rawState) {
         }, brandsById.get(textValue(creator?.brand_id || cooperation?.brand_id)));
       })
     : [];
+  const caseById = new Map(cases.map((row) => [textValue(row.id), row]));
+  for (const followUp of followUps) {
+    const linkedCase = caseById.get(textValue(followUp.case_id));
+    if (linkedCase) {
+      followUp.case_id = linkedCase.id;
+      continue;
+    }
+    if (!textValue(followUp.creator_id) && !textValue(followUp.lead_id)) {
+      followUp.case_id = "";
+      continue;
+    }
+    const migratedCase = resolveBrand({
+      id: `CASE-FU-${textValue(followUp.id)}`,
+      brand_id: followUp.brand_id,
+      brand: followUp.brand,
+      creator_id: followUp.creator_id,
+      lead_id: followUp.lead_id,
+      cooperation_id: followUp.cooperation_id,
+      product_ids: textValue(followUp.product_id) ? [textValue(followUp.product_id)] : [],
+      stage: textValue(followUp.stage) || "待开发",
+      priority: textValue(followUp.priority) || "普通",
+      cooperation_mode: textValue(followUp.cooperation_mode),
+      budget: followUp.budget,
+      shipping_status: textValue(followUp.shipping_status),
+      tracking_no: textValue(followUp.tracking_no),
+      publish_due_at: textValue(followUp.publish_due_at),
+      publish_url: textValue(followUp.publish_url),
+      next_action: textValue(followUp.next_action),
+      next_action_at: textValue(followUp.next_follow_up_at),
+      last_outreach_at: textValue(followUp.last_email_at),
+      notes: textValue(followUp.notes),
+      version: 1,
+      createdAt: textValue(followUp.createdAt),
+      updatedAt: textValue(followUp.updatedAt),
+    }, brandsById.get(textValue(followUp.brand_id)));
+    cases.push(migratedCase);
+    caseById.set(migratedCase.id, migratedCase);
+    followUp.case_id = migratedCase.id;
+  }
+  for (const cooperation of cooperations) {
+    const linkedCase = caseById.get(textValue(cooperation.case_id))
+      || cases.find((item) => textValue(item.cooperation_id) === textValue(cooperation.id));
+    cooperation.case_id = linkedCase ? linkedCase.id : "";
+  }
   const followUpById = new Map(followUps.map((row) => [textValue(row.id), row]));
   const followUpEvents = Array.isArray(state.followUpEvents)
     ? state.followUpEvents.map((row) => {
         const followUp = followUpById.get(textValue(row.follow_up_id));
         return resolveBrand(
-          { ...row, brand_id: textValue(row.brand_id || followUp?.brand_id), body: textValue(row.body) },
+          { ...row, case_id: textValue(row.case_id || followUp?.case_id), brand_id: textValue(row.brand_id || followUp?.brand_id), body: textValue(row.body) },
           brandsById.get(textValue(followUp?.brand_id)),
         );
       })
     : [];
   const mailInbox = Array.isArray(state.mailInbox)
-    ? state.mailInbox.map((row) => resolveBrand({ ...row, body: textValue(row.body) }))
+    ? state.mailInbox.map((row) => resolveBrand({
+        ...row,
+        case_id: textValue(row.case_id),
+        candidate_case_ids: Array.isArray(row.candidate_case_ids) ? row.candidate_case_ids.map(textValue).filter(Boolean) : [],
+        body: textValue(row.body),
+      }))
     : [];
   const contactTracks = Array.isArray(state.contactTracks)
-    ? state.contactTracks.map((row) => resolveBrand({ ...row, email: textValue(row.email), person_type: textValue(row.person_type) || "creator" }))
+    ? state.contactTracks.map((row) => {
+        const followUp = followUpById.get(textValue(row.follow_up_id));
+        return resolveBrand({
+          ...row,
+          case_id: textValue(row.case_id || followUp?.case_id),
+          email: textValue(row.email),
+          person_type: textValue(row.person_type) || "creator",
+        });
+      })
     : [];
 
   return {
@@ -255,6 +331,7 @@ function normalizeBusinessState(rawState) {
     products,
     cooperations,
     matches,
+    cases,
     followUps,
     followUpEvents,
     contactTracks,

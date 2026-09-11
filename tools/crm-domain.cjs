@@ -4,13 +4,46 @@ const CASE_STAGES = new Set([
   "待开发",
   "已联系待回复",
   "初步沟通",
+  "已回复",
   "合作协商",
+  "谈合作方式 / 报价",
+  "条款确认",
   "待寄样",
   "已寄样",
+  "运输中",
+  "已签收",
   "待发布",
+  "已发布",
   "待数据回收",
+  "数据回收",
   "合作完成",
+  "已结案",
   "合作终止",
+  "暂停跟进",
+  "未谈妥",
+]);
+
+const CASE_STAGE_TRANSITIONS = new Map([
+  ["待开发", new Set(["已联系待回复", "合作终止", "未谈妥"])],
+  ["已联系待回复", new Set(["初步沟通", "合作终止", "暂停跟进", "未谈妥"])],
+  ["初步沟通", new Set(["合作协商", "待寄样", "合作终止", "暂停跟进", "未谈妥"])],
+  ["已回复", new Set(["初步沟通", "合作协商", "待寄样", "合作终止", "暂停跟进", "未谈妥"])],
+  ["合作协商", new Set(["谈合作方式 / 报价", "条款确认", "待寄样", "合作终止", "暂停跟进", "未谈妥"])],
+  ["谈合作方式 / 报价", new Set(["条款确认", "待寄样", "合作终止", "暂停跟进", "未谈妥"])],
+  ["条款确认", new Set(["待寄样", "合作终止", "暂停跟进", "未谈妥"])],
+  ["待寄样", new Set(["已寄样", "合作终止", "暂停跟进"])],
+  ["已寄样", new Set(["运输中", "已签收", "待发布", "合作终止", "暂停跟进"])],
+  ["运输中", new Set(["已签收", "待发布", "合作终止", "暂停跟进"])],
+  ["已签收", new Set(["待发布", "合作终止", "暂停跟进"])],
+  ["待发布", new Set(["已发布", "合作终止", "暂停跟进"])],
+  ["已发布", new Set(["待数据回收", "数据回收", "合作完成", "已结案"])],
+  ["待数据回收", new Set(["数据回收", "合作完成", "已结案"])],
+  ["数据回收", new Set(["合作完成", "已结案"])],
+  ["合作完成", new Set(["已结案"])],
+  ["暂停跟进", new Set(["已联系待回复", "初步沟通", "合作协商", "待寄样", "待发布", "合作终止", "未谈妥"])],
+  ["未谈妥", new Set(["初步沟通", "合作协商", "合作终止"])],
+  ["合作终止", new Set()],
+  ["已结案", new Set()],
 ]);
 
 function text(value) {
@@ -49,6 +82,12 @@ function createCase(input = {}, now = new Date().toISOString()) {
     createdAt: text(input.createdAt) || iso(now),
     updatedAt: text(input.updatedAt) || iso(now),
   };
+}
+
+function canTransitionCaseStage(fromStage, toStage) {
+  const from = text(fromStage);
+  const to = text(toStage);
+  return from === to || Boolean(CASE_STAGE_TRANSITIONS.get(from)?.has(to));
 }
 
 function caseById(state, caseId) {
@@ -265,7 +304,9 @@ function patchVersionedRecord(collection, id, expectedVersion, patch = {}, now =
 
 module.exports = {
   CASE_STAGES,
+  CASE_STAGE_TRANSITIONS,
   archiveTriageMail,
+  canTransitionCaseStage,
   completeTask,
   createCase,
   patchVersionedRecord,

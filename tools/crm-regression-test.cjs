@@ -1,6 +1,7 @@
 const assert = require("node:assert/strict");
 const {
   archiveTriageMail,
+  canTransitionCaseStage,
   completeTask,
   createCase,
   patchVersionedRecord,
@@ -64,6 +65,14 @@ function fixture() {
 
 function testCaseIsolationAndTriage() {
   const state = fixture();
+  state.cases.push(createCase({
+    id: "CASE-A-ROUND-2",
+    brand_id: "BR-A",
+    creator_id: "CR-A",
+    product_ids: ["PR-A-2"],
+    stage: "待开发",
+  }, now));
+  assert.equal(state.cases.filter((item) => item.brand_id === "BR-A" && item.creator_id === "CR-A").length, 2);
   const archived = archiveTriageMail(state, { mail_id: "MAIL-A", case_id: "CASE-A" }, now);
   assert.equal(archived.mail.status, "已归档");
   assert.equal(archived.mail.case_id, "CASE-A");
@@ -123,7 +132,17 @@ function testOptimisticLocking() {
   assert.equal(state.cases.find((item) => item.id === "CASE-A").priority, "普通");
 }
 
+function testCaseStageContract() {
+  const unknownStage = createCase({ id: "CASE-UNKNOWN", brand_id: "BR-A", creator_id: "CR-A", stage: "不存在阶段" }, now);
+  assert.equal(unknownStage.stage, "待开发");
+  assert.equal(canTransitionCaseStage("已联系待回复", "初步沟通"), true);
+  assert.equal(canTransitionCaseStage("待寄样", "已发布"), false, "Case 不能跳过人工确认的寄样和发布阶段。");
+  assert.equal(canTransitionCaseStage("合作完成", "已结案"), true);
+  assert.equal(canTransitionCaseStage("已结案", "初步沟通"), false);
+}
+
 testCaseIsolationAndTriage();
 testTaskLifecycle();
 testOptimisticLocking();
+testCaseStageContract();
 console.log("PASS CRM regression: Case isolation, manual mail triage, action task lifecycle, and optimistic locking.");

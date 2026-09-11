@@ -115,6 +115,7 @@ SCHEMA = {
     "cooperations": {
         "id": "TEXT PRIMARY KEY",
         "follow_up_id": "TEXT",
+        "case_id": "TEXT",
         "brand_id": "TEXT",
         "brand": "TEXT",
         "cooperation_no": "TEXT",
@@ -138,6 +139,32 @@ SCHEMA = {
         "createdAt": "TEXT",
         "updatedAt": "TEXT",
     },
+    "cases": {
+        "id": "TEXT PRIMARY KEY",
+        "brand_id": "TEXT",
+        "brand": "TEXT",
+        "creator_id": "TEXT",
+        "lead_id": "TEXT",
+        "cooperation_id": "TEXT",
+        "product_ids": "TEXT",
+        "stage": "TEXT",
+        "priority": "TEXT",
+        "cooperation_mode": "TEXT",
+        "budget": "REAL",
+        "quote_amount": "REAL",
+        "shipping_address": "TEXT",
+        "shipping_status": "TEXT",
+        "tracking_no": "TEXT",
+        "publish_due_at": "TEXT",
+        "publish_url": "TEXT",
+        "next_action": "TEXT",
+        "next_action_at": "TEXT",
+        "last_outreach_at": "TEXT",
+        "notes": "TEXT",
+        "version": "REAL",
+        "createdAt": "TEXT",
+        "updatedAt": "TEXT",
+    },
     "matches": {
         "id": "TEXT PRIMARY KEY",
         "brand_id": "TEXT",
@@ -158,6 +185,7 @@ SCHEMA = {
     },
     "followUps": {
         "id": "TEXT PRIMARY KEY",
+        "case_id": "TEXT",
         "brand_id": "TEXT",
         "creator_id": "TEXT",
         "lead_id": "TEXT",
@@ -185,6 +213,7 @@ SCHEMA = {
         "id": "TEXT PRIMARY KEY",
         "brand_id": "TEXT",
         "mailbox_account_id": "TEXT",
+        "case_id": "TEXT",
         "follow_up_id": "TEXT",
         "lead_id": "TEXT",
         "person_type": "TEXT",
@@ -226,6 +255,7 @@ SCHEMA = {
         "last_outbound_subject": "TEXT",
         "status": "TEXT",
         "follow_up_id": "TEXT",
+        "case_id": "TEXT",
         "replied_at": "TEXT",
         "source": "TEXT",
         "createdAt": "TEXT",
@@ -234,6 +264,7 @@ SCHEMA = {
     "mailInbox": {
         "id": "TEXT PRIMARY KEY",
         "brand_id": "TEXT",
+        "case_id": "TEXT",
         "mailbox_account_id": "TEXT",
         "type": "TEXT",
         "occurred_at": "TEXT",
@@ -259,6 +290,7 @@ SCHEMA = {
         "candidate_lead_ids": "TEXT",
         "candidate_brand_ids": "TEXT",
         "candidate_follow_up_ids": "TEXT",
+        "candidate_case_ids": "TEXT",
         "createdAt": "TEXT",
         "updatedAt": "TEXT",
     },
@@ -340,6 +372,7 @@ def rows_to_state(conn):
         "cooperations": [],
         "matches": [],
         "followUps": [],
+        "cases": [],
         "followUpEvents": [],
         "mailInbox": [],
         "contactTracks": [],
@@ -373,7 +406,7 @@ def row_to_dict(row):
     payload = {key: row[key] for key in row.keys()}
     if "has_unread_reply" in payload:
         payload["has_unread_reply"] = parse_flag(payload["has_unread_reply"])
-    for key in ("beforeCounts", "snapshot", "selected_resource_ids", "candidate_creator_ids", "candidate_lead_ids", "candidate_brand_ids", "candidate_follow_up_ids", "references"):
+    for key in ("beforeCounts", "snapshot", "selected_resource_ids", "product_ids", "candidate_creator_ids", "candidate_lead_ids", "candidate_brand_ids", "candidate_follow_up_ids", "candidate_case_ids", "references"):
         if payload.get(key):
             try:
                 payload[key] = json.loads(payload[key])

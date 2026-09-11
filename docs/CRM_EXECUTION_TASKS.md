@@ -37,10 +37,10 @@
 
 | 项目 | 当前值 |
 | --- | --- |
-| 当前任务 | `CRM-10-01` |
+| 当前任务 | `CRM-10-02` |
 | 当前状态 | `active` |
-| 当前目标 | 将已验证的 Case 契约接入正式状态模型，定义稳定字段、阶段状态机与关联规则。 |
-| 已完成前序 | `CRM-00-01` 固定台账；`CRM-00-02` 文档说明统一；`CRM-00-03` CRM 隔离回归基线。 |
+| 当前目标 | 完成从旧 `followUps` 到 Case 的兼容迁移、回滚快照和旧入口读取验证。 |
+| 已完成前序 | `CRM-00` 基线与执行治理；`CRM-10-01` Case 数据模型、阶段契约和稳定关联。 |
 | 禁止提前启动 | `CRM-60` 定时同步、自动发送、AI 自动推进高风险阶段。 |
 | 最近已验证基线 | `npm.cmd run check`、`npm.cmd run test:followup-isolation`、`git diff --check`（提交 `66eb6a1`）。 |
 
@@ -66,8 +66,8 @@
 
 | ID | 优先级 | 状态 | 工作项 | 前置 | 验收标准 |
 | --- | --- | --- | --- | --- | --- |
-| `CRM-10-01` | P1 | `active` | 定义 `cases` 的字段、阶段状态机、与品牌/达人/线索/产品/合作记录的稳定关联。 | `CRM-00-03` | 一条具体合作可有独立 Case；可区分同一达人不同品牌或同品牌多次合作。 |
-| `CRM-10-02` | P1 | `planned` | 设计并实现从现有 `followUps` 向 Case 的兼容迁移与回滚。 | `CRM-10-01` | 不丢失现有跟进、邮件事件、物流、产品和时间线；旧入口仍可读取。 |
+| `CRM-10-01` | P1 | `done` | 定义 `cases` 的字段、阶段状态机、与品牌/达人/线索/产品/合作记录的稳定关联。 | `CRM-00-03` | 一条具体合作可有独立 Case；可区分同一达人不同品牌或同品牌多次合作。 |
+| `CRM-10-02` | P1 | `active` | 设计并实现从现有 `followUps` 向 Case 的兼容迁移与回滚。 | `CRM-10-01` | 不丢失现有跟进、邮件事件、物流、产品和时间线；旧入口仍可读取。 |
 | `CRM-10-03` | P1 | `planned` | 将看板、详情抽屉和历史合作沉淀改为以 Case 为中心展示。 | `CRM-10-02` | Case 一屏汇总邮件线程、当前阶段、产品、报价、地址、寄样、发布日期、内部备注和历史动作。 |
 | `CRM-10-04` | P2 | `planned` | 为 Case 增加审计字段与人工阶段变更原因。 | `CRM-10-03` | 高风险阶段的变更人、时间、原因和证据可追溯。 |
 
@@ -146,6 +146,9 @@
 | 2026-09-11 | `CRM-00-03` | 保持 `active` | `docs/CRM_EXECUTION_TASKS.md` | 已执行 `npm.cmd run check`、`npm.cmd run test:followup-isolation`、`git diff --check`，均通过；现有回归确认了品牌隔离、共享邮箱路由、正文授权/过期清理、人工确认与跨品牌发信拦截。 | 待提交 | 启动基线已固化；下一小阶段只补 Case/任务/分诊/并发的可执行隔离测试骨架，不提前实现业务模型。 |
 | 2026-09-11 | `CRM-00-03` | `active -> done` | `tools/crm-domain.cjs`、`tools/crm-regression-test.cjs`、`package.json`、`docs/CRM_EXECUTION_TASKS.md` | `npm.cmd run test:crm-regression`、`npm.cmd run test:followup-isolation`、`npm.cmd run check`、`git diff --check` 均通过。新回归实际覆盖 Case 品牌隔离、人工归档、待办去重与关闭、乐观锁冲突。未读取或写入正式业务资料。 | 待提交 | 基线完成；只激活 `CRM-10-01`，下一步将 Case 字段和关联规则接入前后端状态与 SQLite。 |
 | 2026-09-11 | `CRM-10-01` | `planned -> active` | `docs/CRM_EXECUTION_TASKS.md` | 已核对前置任务和 Case 契约测试；当前仅有纯领域模块，尚未进入正式状态、SQLite 或界面，不能被当作已上线。 | 待提交 | 先完成最小数据模型、阶段规则和品牌/达人/线索/产品/合作稳定关联，再进行兼容迁移。 |
+| 2026-09-11 | `CRM-10-01` | `active -> done` | `tools/sqlite_store.py`、`tools/local-server.cjs`、`api/[...route].mjs`、`app/app.js`、`tools/crm-domain.cjs`、`docs/SCHEMA.md`、两套回归测试 | `npm.cmd run check`、`python -c` AST 解析、`npm.cmd run test:crm-regression`、`npm.cmd run test:followup-isolation`、`git diff --check` 全部通过。验证同品牌同达人多轮 Case、品牌隔离、产品/合作/邮件关联、版本号及旧跟进兼容 Case。正式资料未读取或写入；旧跟进仍保留。 | 待提交 | Case 正式数据契约完成；下一步仅做迁移快照与恢复验证，不能提前改看板界面。 |
+| 2026-09-11 | `CRM-10-02` | `planned -> active` | `docs/CRM_EXECUTION_TASKS.md` | 已完成 Case 模型前置条件；现有读取迁移已可生成兼容 Case，但尚未具备单独的迁移版本标记、备份快照和恢复回归。 | 待提交 | 先实现幂等迁移记录与恢复路径，确认不丢失跟进、邮件、物流和时间线后才可标记完成。 |
+| 2026-09-11 | `CRM-10-01` | 保持 `done`，提交前复验 | `api/[...route].mjs`、`app/app.js`、`tools/local-server.cjs`、`tools/sqlite_store.py`、`tools/crm-domain.cjs`、两套回归测试、`docs/SCHEMA.md` | 已再次执行 `npm.cmd run check`、`npm.cmd run test:crm-regression`、`npm.cmd run test:followup-isolation`、Python AST 解析和 `git diff --check`，全部通过。 | 待提交 | 本次提交冻结 Case 数据模型基线；提交后继续唯一激活任务 `CRM-10-02`，不触碰正式业务资料。 |
 
 ## 阶段完成记录模板
 

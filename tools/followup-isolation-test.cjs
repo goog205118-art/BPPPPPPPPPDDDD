@@ -1265,6 +1265,24 @@ function fixtureState() {
       { id: "PR-A", brand_id: "BR-A", brand: "品牌 A", name: "Product A", createdAt: now, updatedAt: now },
       { id: "PR-B", brand_id: "BR-B", brand: "品牌 B", name: "Product B", createdAt: now, updatedAt: now },
     ],
+    cooperations: [
+      { id: "CO-A", brand_id: "BR-A", brand: "品牌 A", creator_id: "CR-A", product_id: "PR-A", creator_name: "Creator A", createdAt: now, updatedAt: now },
+      { id: "CO-B", brand_id: "BR-B", brand: "品牌 B", creator_id: "CR-B", product_id: "PR-B", creator_name: "Creator B", createdAt: now, updatedAt: now },
+    ],
+    cases: [
+      {
+        id: "CASE-A-ROUND-2",
+        brand_id: "BR-A",
+        brand: "品牌 A",
+        creator_id: "CR-A",
+        product_ids: ["PR-A"],
+        stage: "待开发",
+        priority: "普通",
+        version: 3,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ],
     matches: [
       { id: "MA-A", brand_id: "BR-A", brand: "品牌 A", title: "Match A", createdAt: now, updatedAt: now },
       { id: "MA-B", brand_id: "BR-B", brand: "品牌 B", title: "Match B", createdAt: now, updatedAt: now },
@@ -1276,6 +1294,7 @@ function fixtureState() {
         brand: "品牌 A",
         creator_id: "CR-A",
         creator_name: "Creator A",
+        cooperation_id: "CO-A",
         product_id: "PR-A",
         stage: "初步沟通",
         priority: "中",
@@ -1292,6 +1311,7 @@ function fixtureState() {
         brand: "品牌 B",
         creator_id: "CR-B",
         creator_name: "Creator B",
+        cooperation_id: "CO-B",
         product_id: "PR-B",
         stage: "初步沟通",
         priority: "中",
@@ -1543,13 +1563,28 @@ async function run() {
   assert.equal(result.payload.creators.filter((row) => row.brand_id === "BR-B").length, 1);
   assert.equal(result.payload.products.filter((row) => row.brand_id === "BR-A").length, 1);
   assert.equal(result.payload.products.filter((row) => row.brand_id === "BR-B").length, 1);
+  assert.equal(result.payload.cases.filter((row) => row.brand_id === "BR-A").length, 2, "同一达人同一品牌的不同合作轮次应保留独立 Case。");
+  assert.equal(result.payload.cases.filter((row) => row.brand_id === "BR-B").length, 1, "旧跟进写入后应生成品牌 B 的兼容 Case。");
+  assert.equal(result.payload.cases.find((row) => row.id === "CASE-FU-FU-A").creator_id, "CR-A");
+  assert.deepEqual(result.payload.cases.find((row) => row.id === "CASE-FU-FU-A").product_ids, ["PR-A"]);
+  assert.equal(result.payload.cases.find((row) => row.id === "CASE-FU-FU-A").cooperation_id, "CO-A");
+  assert.equal(result.payload.cases.find((row) => row.id === "CASE-FU-FU-A").version, 1);
+  assert.deepEqual(
+    result.payload.cases.find((row) => row.id === "CASE-A-ROUND-2").product_ids,
+    ["PR-A"],
+    "显式创建的 Case 产品关联应经 SQLite 保留。",
+  );
+  assert.equal(result.payload.cases.find((row) => row.id === "CASE-A-ROUND-2").version, 3);
   assert.equal(result.payload.followUps.filter((row) => row.brand_id === "BR-A").length, 1);
   assert.equal(result.payload.followUps.filter((row) => row.brand_id === "BR-B").length, 1);
+  assert.equal(result.payload.followUps.find((row) => row.id === "FU-A").case_id, "CASE-FU-FU-A");
   assert.equal(result.payload.followUps.find((row) => row.id === "FU-A").budget, 1234.5, "跟进预算应经 SQLite 完整保存。");
   assert.equal(result.payload.followUps.find((row) => row.id === "FU-A").lead_id || "", "", "跟进的待开发达人关联字段应经 SQLite 完整保存。");
   assert.equal(result.payload.followUps.find((row) => row.id === "FU-A").has_unread_reply, true, "跟进的新回复高亮字段应经 SQLite 完整保存。");
   assert.equal(result.payload.followUpEvents.filter((row) => row.brand_id === "BR-A").length, 1);
   assert.equal(result.payload.followUpEvents.filter((row) => row.brand_id === "BR-B").length, 1);
+  assert.equal(result.payload.followUpEvents.find((row) => row.id === "EV-A").case_id, "CASE-FU-FU-A");
+  assert.equal(result.payload.cooperations.find((row) => row.id === "CO-A").case_id, "CASE-FU-FU-A");
   assert.equal(result.payload.mailInbox.filter((row) => row.brand_id === "BR-A").length, 1);
   assert.equal(result.payload.mailInbox.filter((row) => row.brand_id === "BR-B").length, 1);
   assert.equal(result.payload.followUpEvents.length, 2, "不同品牌的相同邮件标识不应互相去重。");
