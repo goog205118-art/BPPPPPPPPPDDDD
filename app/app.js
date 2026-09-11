@@ -4095,8 +4095,9 @@ function isSameLocalDay(value, referenceDate = new Date()) {
 }
 
 function isFollowUpOverdue(row, now = Date.now()) {
-  if (FOLLOW_UP_TERMINAL_STAGES.has(text(row.stage)) || !text(row.next_follow_up_at)) return false;
-  const time = new Date(row.next_follow_up_at).getTime();
+  const model = followUpDisplayModel(row);
+  if (FOLLOW_UP_TERMINAL_STAGES.has(text(model.stage)) || !text(model.nextActionAt)) return false;
+  const time = new Date(model.nextActionAt).getTime();
   return Number.isFinite(time) && time < now;
 }
 
@@ -4126,10 +4127,119 @@ function followUpProduct(row) {
   return rows("products").find((product) => text(product.id) === text(row.product_id));
 }
 
-function followUpEventsFor(followUpId) {
+function followUpCase(rowOrId) {
+  const followUp = typeof rowOrId === "object"
+    ? rowOrId
+    : allRows("followups").find((item) => text(item.id) === text(rowOrId));
+  if (!followUp || !text(followUp.case_id)) return null;
+  const caseRow = allRows("cases").find((item) => text(item.id) === text(followUp.case_id));
+  if (!caseRow) return null;
+  if (text(followUp.brand_id) && text(caseRow.brand_id) && text(followUp.brand_id) !== text(caseRow.brand_id)) return null;
+  return caseRow;
+}
+
+function followUpEventsFor(rowOrId) {
+  const followUp = typeof rowOrId === "object"
+    ? rowOrId
+    : allRows("followups").find((item) => text(item.id) === text(rowOrId));
+  const caseRow = followUpCase(followUp);
+  const followUpId = text(followUp?.id || rowOrId);
+  const caseId = text(caseRow?.id);
+  const seen = new Set();
   return (state.data.followUpEvents || [])
-    .filter((event) => text(event.follow_up_id) === text(followUpId) && belongsToActiveBrand(event))
+    .filter((event) => {
+      if (!belongsToActiveBrand(event)) return false;
+      const sameCase = caseId && text(event.case_id) === caseId;
+      const legacyFollowUp = followUpId && text(event.follow_up_id) === followUpId;
+      return sameCase || legacyFollowUp;
+    })
+    .filter((event) => {
+      const key = text(event.id) || text(event.message_id) || text(event.fingerprint);
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
     .sort((a, b) => new Date(b.occurred_at || b.createdAt || 0) - new Date(a.occurred_at || a.createdAt || 0));
+}
+
+function followUpCooperationsFor(row) {
+  const caseRow = followUpCase(row);
+  const caseId = text(caseRow?.id);
+  const followUpId = text(row?.id);
+  const explicitCooperationId = text(caseRow?.cooperation_id || row?.cooperation_id);
+  const seen = new Set();
+  return allRows("cooperations")
+    .filter((record) => {
+      if (!belongsToActiveBrand(record)) return false;
+      return (
+        (caseId && text(record.case_id) === caseId) ||
+        (followUpId && text(record.follow_up_id) === followUpId) ||
+        (explicitCooperationId && text(record.id) === explicitCooperationId)
+      );
+    })
+    .filter((record) => {
+      if (seen.has(text(record.id))) return false;
+      seen.add(text(record.id));
+      return true;
+    })
+    .sort((a, b) => new Date(b.post_date || b.updatedAt || 0) - new Date(a.post_date || a.updatedAt || 0));
+}
+
+function followUpProductsFor(row) {
+  const caseRow = followUpCase(row);
+  const cooperationRows = followUpCooperationsFor(row);
+  const candidates = [
+    ...(Array.isArray(caseRow?.product_ids) ? caseRow.product_ids : []),
+    row?.product_id,
+    ...cooperationRows.flatMap((record) => [
+      record.product_id,
+      ...(Array.isArray(record.product_ids) ? record.product_ids : []),
+      record.product,
+    ]),
+  ].flatMap((value) => splitList(value));
+  const products = rows("products");
+  const found = [];
+  for (const candidate of candidates) {
+    const normalized = normalizeHeader(candidate);
+    const product = products.find((item) =>
+      text(item.id) === candidate ||
+      normalizeHeader(item.name) === normalized ||
+      normalizeHeader(item.product_url) === normalized,
+    );
+    if (product && !found.some((item) => text(item.id) === text(product.id))) found.push(product);
+  }
+  return found;
+}
+
+function followUpDisplayModel(row) {
+  const caseRow = followUpCase(row);
+  const events = followUpEventsFor(row);
+  const cooperations = followUpCooperationsFor(row);
+  const products = followUpProductsFor(row);
+  const value = (caseKey, legacyKey = caseKey) => text(caseRow?.[caseKey]) || row?.[legacyKey] || "";
+  return {
+    case: caseRow,
+    caseId: text(caseRow?.id || row?.case_id),
+    stage: value("stage"),
+    priority: value("priority"),
+    brand: value("brand"),
+    brandId: text(caseRow?.brand_id || row?.brand_id),
+    cooperationMode: value("cooperation_mode"),
+    budget: caseRow?.budget ?? row?.budget,
+    quoteAmount: caseRow?.quote_amount ?? row?.quote_amount,
+    shippingAddress: value("shipping_address"),
+    shippingStatus: value("shipping_status"),
+    trackingNo: value("tracking_no"),
+    publishDueAt: value("publish_due_at", "publish_due_at"),
+    publishUrl: value("publish_url", "publish_url"),
+    nextAction: value("next_action"),
+    nextActionAt: value("next_action_at", "next_follow_up_at"),
+    lastOutreachAt: value("last_outreach_at", "last_email_at"),
+    notes: value("notes"),
+    events,
+    cooperations,
+    products,
+  };
 }
 
 function syncFollowUpContactTracksForStage(followUp, stage, now = new Date().toISOString()) {
@@ -4446,6 +4556,7 @@ function archiveMailIntoFollowUp(message, followUp) {
   const event = {
     ...message,
     follow_up_id: followUp.id,
+    case_id: followUp.case_id || text(message.case_id),
     brand_id: followUp.brand_id,
     brand: followUp.brand,
     updatedAt: now,
@@ -4989,6 +5100,7 @@ async function parseEmlFile(file, followUp, creator) {
   return {
     id: uid("EM"),
     follow_up_id: followUp.id,
+    case_id: followUp.case_id || "",
     brand_id: followUp.brand_id,
     brand: followUp.brand,
     mailbox_account_id: "",
@@ -5086,6 +5198,7 @@ async function confirmMailImport() {
   }).map((message) => ({
     ...message,
     follow_up_id: followUp.id,
+    case_id: followUp.case_id || text(message.case_id),
     brand_id: followUp.brand_id || text(message.brand_id),
     brand: followUp.brand || text(message.brand),
     updatedAt: new Date().toISOString(),
@@ -5125,12 +5238,13 @@ async function confirmMailImport() {
 
 function followUpCardMarkup(row) {
   const creator = followUpCreator(row);
-  const product = followUpProduct(row);
-  const latestMail = latestFollowUpEmail(row.id);
+  const model = followUpDisplayModel(row);
+  const latestMail = model.events.find((event) => event.type === "email" || event.type === "mail_sent");
   const overdue = isFollowUpOverdue(row);
   const creatorLabel = creator?.name || row.creator_name || "未关联达人";
-  const meta = [row.brand, product?.name, row.cooperation_mode].filter(Boolean).join(" · ");
-  const followUpAt = row.next_follow_up_at ? formatDateTime(row.next_follow_up_at) : "未设置";
+  const productLabel = model.products.map((product) => product.name).filter(Boolean).join("、");
+  const meta = [model.brand, productLabel || "产品待补充", model.cooperationMode].filter(Boolean).join(" · ");
+  const followUpAt = model.nextActionAt ? formatDateTime(model.nextActionAt) : "未设置";
   const selected = state.followUpSelectedIds.has(text(row.id));
   const unread = parseFlag(row.has_unread_reply);
   return `
@@ -5145,17 +5259,17 @@ function followUpCardMarkup(row) {
         </div>
         <button type="button" class="icon-button" data-followup-edit="${escapeHtml(row.id)}" aria-label="编辑合作跟进" title="编辑合作跟进">✎</button>
       </div>
-      <div class="followup-card-badges">${statusBadge(row.stage)}${statusBadge(row.priority, "中")}${unread ? `<span class="followup-unread-badge">待处理新回复</span>` : ""}</div>
+      <div class="followup-card-badges">${statusBadge(model.stage)}${statusBadge(model.priority, "中")}${model.caseId ? `<span class="followup-case-badge">${escapeHtml(model.caseId)}</span>` : ""}${unread ? `<span class="followup-unread-badge">待处理新回复</span>` : ""}</div>
       <p class="followup-card-meta">${escapeHtml(meta || "品牌 / 产品待补充")}</p>
       <div class="followup-card-next">
-        <span>下一步</span><strong>${escapeHtml(row.next_action || "待补充动作")}</strong>
+        <span>下一步</span><strong>${escapeHtml(model.nextAction || "待补充动作")}</strong>
         <time class="${overdue ? "is-overdue" : ""}">${overdue ? "已逾期 · " : ""}${escapeHtml(followUpAt)}</time>
       </div>
       <div class="followup-card-foot">
-        <span>${latestMail ? `最近邮件 ${escapeHtml(formatDateTime(latestMail.occurred_at))}` : "暂无邮件记录"}</span>
+        <span>${latestMail ? `最近邮件 ${escapeHtml(formatDateTime(latestMail.occurred_at))}` : model.cooperations.length ? `历史合作 ${model.cooperations.length} 条` : "暂无邮件记录"}</span>
         <div class="followup-card-actions">
           <select data-followup-stage="${escapeHtml(row.id)}" aria-label="手动推进合作阶段" title="手动推进合作阶段">
-            ${FOLLOW_UP_STAGES.map((stage) => `<option value="${escapeHtml(stage)}" ${text(row.stage) === stage ? "selected" : ""}>${escapeHtml(stage)}</option>`).join("")}
+            ${FOLLOW_UP_STAGES.map((stage) => `<option value="${escapeHtml(stage)}" ${text(model.stage) === stage ? "selected" : ""}>${escapeHtml(stage)}</option>`).join("")}
           </select>
           <button type="button" class="ghost icon-action" data-followup-mail="${escapeHtml(row.id)}" aria-label="导入 Foxmail 邮件" title="导入 Foxmail 邮件">✉</button>
           <button type="button" class="ghost icon-action" data-followup-delete="${escapeHtml(row.id)}" aria-label="删除合作跟进" title="删除合作跟进">×</button>
@@ -5209,8 +5323,8 @@ function followUpEventScopeLabel(event) {
   return "完整正文已缓存";
 }
 
-function followUpBodyContextSummary(followUpId) {
-  const events = followUpEventsFor(followUpId).filter((event) => event.type === "email" || event.type === "mail_sent");
+function followUpBodyContextSummary(followUpOrId) {
+  const events = followUpEventsFor(followUpOrId).filter((event) => event.type === "email" || event.type === "mail_sent");
   const policy = normalizedMailContentPolicy();
   const counts = { full: 0, summary: 0, withheld: 0, expired: 0, legacy: 0 };
   events.forEach((event) => {
@@ -5378,18 +5492,17 @@ function renderFollowUpDetail() {
   }
 
   const creator = followUpCreator(followUp);
-  const product = followUpProduct(followUp);
-  const events = followUpEventsFor(followUp.id);
-  const inbound = latestInboundFollowUpEmail(followUp.id);
+  const model = followUpDisplayModel(followUp);
+  const events = model.events;
+  const inbound = events.find((event) => event.direction === "inbound" && text(event.message_id));
   const smtpAccounts = followUpSmtpAccounts(followUp);
   const selectedStrategy = text(state.followUpDetail.strategyId) || text(state.followUpDetail.analysis?.recommended_options?.[0]?.id);
-  const productUrl = safeExternalUrl(product?.product_url);
-  const publishUrl = safeExternalUrl(followUp.publish_url);
+  const publishUrl = safeExternalUrl(model.publishUrl);
   const creatorUrl = safeExternalUrl(creator?.social_url);
   const recipient = text(state.followUpDetail.recipient || creator?.email);
 
   elements.followUpDetailTitle.textContent = creator?.name || followUp.creator_name || "合作跟进详情";
-  elements.followUpDetailHint.textContent = `${followUp.brand || "未绑定品牌"} · ${creator?.platform || "平台待补充"} · 当前阶段 ${followUp.stage || "待确认"}`;
+  elements.followUpDetailHint.textContent = `${model.brand || "未绑定品牌"} · ${creator?.platform || "平台待补充"} · 当前阶段 ${model.stage || "待确认"}${model.caseId ? ` · ${model.caseId}` : ""}`;
   elements.followUpDetailBody.innerHTML = `
     <div class="followup-detail-layout">
       <section class="followup-detail-main">
@@ -5407,33 +5520,57 @@ function renderFollowUpDetail() {
               <button type="button" class="icon-button" data-followup-detail-import="${escapeHtml(followUp.id)}" aria-label="导入 Foxmail 邮件" title="导入 Foxmail 邮件">✉</button>
             </div>
           </div>
-          <div class="followup-detail-badges">${statusBadge(followUp.stage)}${statusBadge(followUp.priority, "中")}<span class="detail-brand-badge">${escapeHtml(followUp.brand || "未绑定品牌")}</span></div>
+          <div class="followup-detail-badges">${statusBadge(model.stage)}${statusBadge(model.priority, "中")}<span class="detail-brand-badge">${escapeHtml(model.brand || "未绑定品牌")}</span>${model.caseId ? `<span class="followup-case-badge">${escapeHtml(model.caseId)}</span>` : ""}</div>
           <dl class="followup-detail-facts">
-            <div><dt>合作方式</dt><dd>${escapeHtml(followUp.cooperation_mode || "待确认")}</dd></div>
-            <div><dt>下一步</dt><dd>${escapeHtml(followUp.next_action || "待补充")}</dd></div>
-            <div><dt>下次跟进</dt><dd>${escapeHtml(formatDateTime(followUp.next_follow_up_at) || "未设置")}</dd></div>
-            <div><dt>寄样物流</dt><dd>${escapeHtml([followUp.shipping_status || "未寄样", followUp.tracking_no].filter(Boolean).join(" · "))}</dd></div>
-            <div><dt>预计发布</dt><dd>${escapeHtml(followUp.publish_due_at || "未设置")}</dd></div>
+            <div><dt>合作方式</dt><dd>${escapeHtml(model.cooperationMode || "待确认")}</dd></div>
+            <div><dt>报价 / 预算</dt><dd>${escapeHtml([model.quoteAmount, model.budget].filter((value) => value !== "" && value != null).map((value) => value || "0").join(" · ") || "待确认")}</dd></div>
+            <div><dt>下一步</dt><dd>${escapeHtml(model.nextAction || "待补充")}</dd></div>
+            <div><dt>下次跟进</dt><dd>${escapeHtml(formatDateTime(model.nextActionAt) || "未设置")}</dd></div>
+            <div><dt>寄样物流</dt><dd>${escapeHtml([model.shippingStatus || "未寄样", model.trackingNo].filter(Boolean).join(" · "))}</dd></div>
+            <div><dt>寄样地址</dt><dd title="${escapeHtml(model.shippingAddress)}">${escapeHtml(model.shippingAddress || "待补充")}</dd></div>
+            <div><dt>预计发布</dt><dd>${escapeHtml(model.publishDueAt || "未设置")}</dd></div>
             <div><dt>发布链接</dt><dd>${publishUrl ? `<a href="${escapeHtml(publishUrl)}" target="_blank" rel="noreferrer">打开链接</a>` : "待补充"}</dd></div>
           </dl>
-          ${text(followUp.notes) ? `<p class="followup-detail-notes"><b>内部备注</b>${escapeHtml(followUp.notes)}</p>` : ""}
+          ${text(model.notes) ? `<p class="followup-detail-notes"><b>内部备注</b>${escapeHtml(model.notes)}</p>` : ""}
         </section>
 
         <section class="followup-detail-section">
-          <header><div><span>PRODUCT</span><h3>关联产品</h3></div></header>
-          ${product ? `<article class="followup-detail-product">${productImageMarkup(product)}<div><strong>${escapeHtml(product.name || "未命名产品")}</strong><span>${escapeHtml([product.country, product.category, product.store].filter(Boolean).join(" · ") || "产品资料待补充")}</span>${productUrl ? `<a href="${escapeHtml(productUrl)}" target="_blank" rel="noreferrer">打开产品页面</a>` : ""}</div></article>` : `<p class="followup-detail-empty">尚未关联产品。</p>`}
+          <header><div><span>PRODUCTS</span><h3>关联产品</h3></div><small>${model.products.length} 个</small></header>
+          ${model.products.length
+            ? `<div class="followup-detail-products">${model.products.map((product) => {
+                const productUrl = safeExternalUrl(product.product_url);
+                return `<article class="followup-detail-product">${productImageMarkup(product)}<div><strong>${escapeHtml(product.name || "未命名产品")}</strong><span>${escapeHtml([product.country, product.category, product.store].filter(Boolean).join(" · ") || "产品资料待补充")}</span>${productUrl ? `<a href="${escapeHtml(productUrl)}" target="_blank" rel="noreferrer">打开产品页面</a>` : ""}</div></article>`;
+              }).join("")}</div>`
+            : `<p class="followup-detail-empty">尚未关联产品。</p>`}
         </section>
 
         <section class="followup-detail-section">
           <header><div><span>MAIL TIMELINE</span><h3>邮件与推进记录</h3></div><small>${events.length} 条</small></header>
           ${followUpTimelineMarkup(events)}
         </section>
+
+        <section class="followup-detail-section">
+          <header><div><span>CASE HISTORY</span><h3>阶段与历史合作</h3></div><small>${model.cooperations.length} 条合作</small></header>
+          ${model.cooperations.length
+            ? `<div class="followup-detail-history">${model.cooperations.map((record) => `
+                <article class="followup-detail-history-row">
+                  <div><strong>${escapeHtml(record.cooperation_no || record.no || record.id || "合作记录")}</strong>${statusBadge(record.result || record.status, "待复盘")}</div>
+                  <span>${escapeHtml([record.product, record.model, record.post_date].filter(Boolean).join(" · ") || "合作资料待补充")}</span>
+                  <small>${escapeHtml([record.tracking_no && `物流 ${record.tracking_no}`, record.orders != null && `订单 ${record.orders}`, record.clicks != null && `点击 ${record.clicks}`].filter(Boolean).join(" · "))}</small>
+                </article>`).join("")}</div>`
+            : `<p class="followup-detail-empty">暂无已沉淀的历史合作记录。</p>`}
+          <div class="followup-detail-action-history">
+            ${events.filter((event) => event.direction === "internal" || event.type === "stage" || event.type === "stage_update").slice(0, 12).map((event) => `
+              <div><span>${escapeHtml(event.subject || "阶段动作")}</span><time>${escapeHtml(formatDateTime(event.occurred_at || event.createdAt) || "时间未知")}</time></div>
+            `).join("") || `<span class="muted">暂无阶段动作记录</span>`}
+          </div>
+        </section>
       </section>
 
       <aside class="followup-detail-side">
         <section class="followup-detail-section followup-ai-panel">
           <header><div><span>AI REVIEW</span><h3>沟通研判</h3></div></header>
-          <p class="followup-context-scope">${followUpBodyContextSummary(followUp.id).map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</p>
+          <p class="followup-context-scope">${followUpBodyContextSummary(followUp).map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</p>
           <label class="followup-ai-note-label">本次关注点 / 人工备注<textarea data-followup-ai-note rows="4" maxlength="1600" placeholder="例如：确认对方是否接受置换，或说明我希望先确认报价。">${escapeHtml(state.followUpDetail.userNote || "")}</textarea></label>
           <button type="button" class="primary" data-followup-ai-analyze>AI 分析沟通状态</button>
           ${followUpAnalysisMarkup(state.followUpDetail.analysis, selectedStrategy)}
@@ -5522,6 +5659,7 @@ async function applyFollowUpAnalysisSuggestion(followUpId, analysis) {
       state.data.followUpEvents = [{
         id: uid("FUE"),
         follow_up_id: followUp.id,
+        case_id: followUp.case_id || "",
         brand_id: followUp.brand_id,
         brand: followUp.brand,
         type: "stage_update",
@@ -5888,6 +6026,7 @@ async function manuallyUpdateFollowUpStage(followUpId, stage) {
       state.data.followUpEvents = [{
         id: uid("FUE"),
         follow_up_id: followUp.id,
+        case_id: followUp.case_id || "",
         brand_id: followUp.brand_id,
         brand: followUp.brand,
         type: "stage_update",
@@ -5942,22 +6081,27 @@ function renderFollowUpPage() {
   elements.productPage.classList.add("hidden");
   elements.followUpPage.classList.remove("hidden");
 
-  const allRows = rows("followups").slice().sort((a, b) => new Date(a.next_follow_up_at || "2999-01-01") - new Date(b.next_follow_up_at || "2999-01-01"));
+  const allRows = rows("followups").slice().sort((a, b) => {
+    const aAt = followUpDisplayModel(a).nextActionAt || "2999-01-01";
+    const bAt = followUpDisplayModel(b).nextActionAt || "2999-01-01";
+    return new Date(aAt) - new Date(bAt);
+  });
   const boardFilter = state.followUpBoardFilter;
   const query = text(boardFilter.query).toLowerCase();
   const visibleRows = allRows.filter((row) => {
     const creator = followUpCreator(row);
-    const haystack = [row.id, row.creator_name, creator?.name, row.brand, row.stage, row.priority, row.next_action, row.notes].map(text).join(" ").toLowerCase();
+    const model = followUpDisplayModel(row);
+    const haystack = [row.id, row.creator_name, creator?.name, model.brand, model.stage, model.priority, model.nextAction, model.notes].map(text).join(" ").toLowerCase();
     if (query && !haystack.includes(query)) return false;
-    if (boardFilter.stage && text(row.stage) !== boardFilter.stage) return false;
-    if (boardFilter.priority && text(row.priority) !== boardFilter.priority) return false;
+    if (boardFilter.stage && text(model.stage) !== boardFilter.stage) return false;
+    if (boardFilter.priority && text(model.priority) !== boardFilter.priority) return false;
     if (boardFilter.overdueOnly && !isFollowUpOverdue(row)) return false;
     return true;
   });
-  const activeRows = visibleRows.filter((row) => !FOLLOW_UP_TERMINAL_STAGES.has(text(row.stage)));
-  const terminalRows = visibleRows.filter((row) => FOLLOW_UP_TERMINAL_STAGES.has(text(row.stage)));
+  const activeRows = visibleRows.filter((row) => !FOLLOW_UP_TERMINAL_STAGES.has(text(followUpDisplayModel(row).stage)));
+  const terminalRows = visibleRows.filter((row) => FOLLOW_UP_TERMINAL_STAGES.has(text(followUpDisplayModel(row).stage)));
   const metrics = getMetrics("followups", allRows);
-  const todayCount = allRows.filter((row) => isSameLocalDay(row.next_follow_up_at, new Date())).length;
+  const todayCount = allRows.filter((row) => isSameLocalDay(followUpDisplayModel(row).nextActionAt, new Date())).length;
   const overdueCount = allRows.filter((row) => isFollowUpOverdue(row)).length;
   const pendingMail = (state.data.mailInbox || [])
     .filter(belongsToActiveBrand)
@@ -6834,11 +6978,18 @@ function syncCompletedCooperation(followUp) {
   if (!followUp || text(followUp.stage) !== "已结案") return { created: false, cooperation: null };
 
   const creator = followUpCreator(followUp);
-  const product = followUpProduct(followUp);
+  const caseRow = followUpCase(followUp);
+  const caseId = text(caseRow?.id || followUp.case_id);
+  const products = followUpProductsFor(followUp);
+  const product = products[0] || followUpProduct(followUp);
   const followUpBrandId = text(followUp.brand_id);
   const sameBrand = (row) => followUpBrandId
     ? text(row.brand_id) === followUpBrandId
     : !text(row.brand_id);
+  const byCase = allRows("cooperations").filter((row) => {
+    if (!caseId || text(row.case_id) !== caseId) return false;
+    return sameBrand(row);
+  });
   const byFollowUp = allRows("cooperations").filter((row) => {
     if (text(row.follow_up_id) !== text(followUp.id)) return false;
     return sameBrand(row);
@@ -6848,9 +6999,11 @@ function syncCompletedCooperation(followUp) {
     text(row.id) === text(followUp.cooperation_id) &&
     sameBrand(row),
   );
-  // Stable follow_up_id is preferred. Legacy cooperation_id fallback is only
-  // reused when it resolves to exactly one row.
-  const existing = byFollowUp[0] || (byFollowUp.length === 0 && byCooperationId.length === 1 ? byCooperationId[0] : null);
+  // Case is the stable identity. Legacy follow_up_id and cooperation_id remain
+  // fallbacks for records created before Case migration.
+  const existing = byCase[0]
+    || (byCase.length === 0 && byFollowUp[0])
+    || (byCase.length === 0 && byFollowUp.length === 0 && byCooperationId.length === 1 ? byCooperationId[0] : null);
   const now = new Date().toISOString();
   const cooperation = {
     ...(existing || {
@@ -6859,11 +7012,13 @@ function syncCompletedCooperation(followUp) {
       createdAt: now,
     }),
     follow_up_id: followUp.id,
+    case_id: caseId,
     brand_id: text(followUp.brand_id),
     brand: text(followUp.brand),
     creator_id: text(followUp.creator_id || creator?.id),
     creator_name: text(followUp.creator_name || creator?.name),
     product_id: text(followUp.product_id || product?.id),
+    product_ids: products.map((item) => text(item.id)).filter(Boolean),
     product: text(product?.name || followUp.product),
     model: text(followUp.cooperation_mode) || "待确认",
     budget: toNumber(followUp.budget),
@@ -7115,6 +7270,7 @@ async function commitEditor({ close = false, showError = false } = {}) {
       state.data.followUpEvents.unshift({
         id: uid("EV"),
         follow_up_id: record.id,
+        case_id: record.case_id || "",
         brand_id: record.brand_id,
         brand: record.brand,
         type: "stage",

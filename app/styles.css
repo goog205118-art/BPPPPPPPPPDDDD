@@ -5349,6 +5349,24 @@ body.access-locked .app-shell {
   white-space: nowrap;
 }
 
+.followup-case-badge {
+  display: inline-flex;
+  min-height: 21px;
+  max-width: 100%;
+  align-items: center;
+  padding: 0.16rem 0.44rem;
+  overflow: hidden;
+  border: 1px solid #48637e;
+  border-radius: 999px;
+  background: #172536;
+  color: #9fc4e5;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.61rem;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .followup-detail-facts {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -5449,6 +5467,84 @@ body.access-locked .app-shell {
 .followup-detail-product a {
   color: #9bb2c5;
   font-size: 0.67rem;
+}
+
+.followup-detail-products {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 7px;
+}
+
+.followup-detail-history {
+  display: grid;
+  gap: 6px;
+}
+
+.followup-detail-history-row {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 7px 8px;
+  border: 1px solid #2e4154;
+  border-radius: 4px;
+  background: #141f2a;
+}
+
+.followup-detail-history-row > div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.followup-detail-history-row strong,
+.followup-detail-history-row span,
+.followup-detail-history-row small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.followup-detail-history-row strong {
+  color: #e8f2fb;
+  font-size: 0.72rem;
+}
+
+.followup-detail-history-row span,
+.followup-detail-history-row small {
+  color: #9bb2c5;
+  font-size: 0.65rem;
+}
+
+.followup-detail-action-history {
+  display: grid;
+  gap: 4px;
+  margin-top: 2px;
+  padding-top: 7px;
+  border-top: 1px solid #2d4053;
+}
+
+.followup-detail-action-history > div {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.followup-detail-action-history span,
+.followup-detail-action-history time {
+  overflow: hidden;
+  color: #9bb2c5;
+  font-size: 0.65rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.followup-detail-action-history time {
+  color: #71869b;
+  font-variant-numeric: tabular-nums;
 }
 
 .followup-detail-timeline {

@@ -37,12 +37,12 @@
 
 | 项目 | 当前值 |
 | --- | --- |
-| 当前任务 | `CRM-10-03` |
+| 当前任务 | `CRM-10-04` |
 | 当前状态 | `planned` |
-| 当前目标 | 将看板、详情抽屉和历史合作沉淀改为以 Case 为中心展示。 |
+| 当前目标 | 为 Case 增加审计字段与人工阶段变更原因。 |
 | 已完成前序 | `CRM-00` 基线与执行治理；`CRM-10-01` Case 数据模型、阶段契约和稳定关联。 |
 | 禁止提前启动 | `CRM-60` 定时同步、自动发送、AI 自动推进高风险阶段。 |
-| 最近已验证基线 | `npm.cmd run check`、`npm.cmd run test:followup-isolation`、`git diff --check`（提交 `66eb6a1`）。 |
+| 最近已验证基线 | `npm.cmd run check`、`npm.cmd run test:case-display`、`npm.cmd run test:crm-regression`、`npm.cmd run test:followup-isolation`、Python AST 解析、`git diff --check`（本阶段提交待生成）。 |
 
 ## 总体闭环与完成定义
 
@@ -68,7 +68,7 @@
 | --- | --- | --- | --- | --- | --- |
 | `CRM-10-01` | P1 | `done` | 定义 `cases` 的字段、阶段状态机、与品牌/达人/线索/产品/合作记录的稳定关联。 | `CRM-00-03` | 一条具体合作可有独立 Case；可区分同一达人不同品牌或同品牌多次合作。 |
 | `CRM-10-02` | P1 | `done` | 设计并实现从现有 `followUps` 向 Case 的兼容迁移与回滚。 | `CRM-10-01` | 不丢失现有跟进、邮件事件、物流、产品和时间线；旧入口仍可读取。 |
-| `CRM-10-03` | P1 | `planned` | 将看板、详情抽屉和历史合作沉淀改为以 Case 为中心展示。 | `CRM-10-02` | Case 一屏汇总邮件线程、当前阶段、产品、报价、地址、寄样、发布日期、内部备注和历史动作。 |
+| `CRM-10-03` | P1 | `done` | 将看板、详情抽屉和历史合作沉淀改为以 Case 为中心展示。 | `CRM-10-02` | Case 一屏汇总邮件线程、当前阶段、产品、报价、地址、寄样、发布日期、内部备注和历史动作。 |
 | `CRM-10-04` | P2 | `planned` | 为 Case 增加审计字段与人工阶段变更原因。 | `CRM-10-03` | 高风险阶段的变更人、时间、原因和证据可追溯。 |
 
 ### CRM-20：今日推进与任务生命周期
@@ -149,7 +149,9 @@
 | 2026-09-11 | `CRM-10-01` | `active -> done` | `tools/sqlite_store.py`、`tools/local-server.cjs`、`api/[...route].mjs`、`app/app.js`、`tools/crm-domain.cjs`、`docs/SCHEMA.md`、两套回归测试 | `npm.cmd run check`、`python -c` AST 解析、`npm.cmd run test:crm-regression`、`npm.cmd run test:followup-isolation`、`git diff --check` 全部通过。验证同品牌同达人多轮 Case、品牌隔离、产品/合作/邮件关联、版本号及旧跟进兼容 Case。正式资料未读取或写入；旧跟进仍保留。 | `16765f0` | Case 正式数据契约完成；下一步仅做迁移快照与恢复验证，不能提前改看板界面。 |
 | 2026-09-11 | `CRM-10-02` | `planned -> active` | `docs/CRM_EXECUTION_TASKS.md` | 已完成 Case 模型前置条件；现有读取迁移已可生成兼容 Case，但尚未具备单独的迁移版本标记、备份快照和恢复回归。 | `16765f0` | 先实现幂等迁移记录与恢复路径，确认不丢失跟进、邮件、物流和时间线后才可标记完成。 |
 | 2026-09-11 | `CRM-10-01` | 保持 `done`，提交前复验 | `api/[...route].mjs`、`app/app.js`、`tools/local-server.cjs`、`tools/sqlite_store.py`、`tools/crm-domain.cjs`、两套回归测试、`docs/SCHEMA.md` | 已再次执行 `npm.cmd run check`、`npm.cmd run test:crm-regression`、`npm.cmd run test:followup-isolation`、Python AST 解析和 `git diff --check`，全部通过。 | `16765f0` | Case 数据模型基线已冻结；继续唯一激活任务 `CRM-10-02`，不触碰正式业务资料。 |
-| 2026-09-11 | `CRM-10-02` | `active -> done` | `tools/case-migration.cjs`、`tools/local-server.cjs`、`api/[...route].mjs`、`app/app.js`、`tools/sqlite_store.py`、`tools/followup-isolation-test.cjs`、`docs/SCHEMA.md`、`docs/CRM_EXECUTION_TASKS.md` | `npm.cmd run check`、`npm.cmd run test:crm-regression`、`npm.cmd run test:followup-isolation`、Python AST 解析和 `git diff --check` 全部通过。回归覆盖兼容 Case 创建、物流/备注/产品/邮件正文保留、邮件事件与联系人轨迹关联、幂等、回滚、回滚后不自动重建、显式恢复及人工修改拒绝回滚。 | `待提交` | 迁移闭环完成；正式资料未读取或写入。下一门槛为 `CRM-10-03`：仅将界面展示改为 Case 中心，不启动任务队列、分诊台、AI 自动推进或定时同步。 |
+| 2026-09-11 | `CRM-10-02` | `active -> done` | `tools/case-migration.cjs`、`tools/local-server.cjs`、`api/[...route].mjs`、`app/app.js`、`tools/sqlite_store.py`、`tools/followup-isolation-test.cjs`、`docs/SCHEMA.md`、`docs/CRM_EXECUTION_TASKS.md` | `npm.cmd run check`、`npm.cmd run test:crm-regression`、`npm.cmd run test:followup-isolation`、Python AST 解析和 `git diff --check` 全部通过。回归覆盖兼容 Case 创建、物流/备注/产品/邮件正文保留、邮件事件与联系人轨迹关联、幂等、回滚、回滚后不自动重建、显式恢复及人工修改拒绝回滚。 | `fd2e096` | 迁移闭环完成；正式资料未读取或写入。下一门槛为 `CRM-10-03`：仅将界面展示改为 Case 中心，不启动任务队列、分诊台、AI 自动推进或定时同步。 |
+| 2026-09-11 | `CRM-10-03` | `planned -> active` | `docs/CRM_EXECUTION_TASKS.md` | 已确认 `CRM-10-02` 已完成且提交为 `fd2e096`；本阶段只审查并调整合作跟进看板、详情抽屉和历史合作展示，不启动 `CRM-20`、`CRM-30`、`CRM-40`、`CRM-50` 或 `CRM-60`。 | 待提交 | 计划：以兼容生成后的 Case 作为展示聚合源，保留旧 `followUps` 编辑/保存入口；验证 Case/旧跟进一致、品牌隔离、邮件正文授权范围和历史合作关联。下一门槛为完成展示改动并通过现有回归。 |
+| 2026-09-11 | `CRM-10-03` | `active -> done` | `app/app.js`、`app/styles.css`、`tools/case-display-regression-test.cjs`、`package.json`、`docs/CRM_EXECUTION_TASKS.md` | `npm.cmd run test:case-display`、`npm.cmd run check`、`npm.cmd run test:crm-regression`、`npm.cmd run test:followup-isolation`、Python AST 解析和 `git diff --check` 全部通过。验证 Case 优先展示、旧 FollowUp 回退、邮件/合作/多产品关联、阶段事件写入 `case_id`、品牌隔离和紧凑详情样式。未读取或写入正式业务资料，未调用真实邮箱或 AI。 | 待提交 | Case 中心展示闭环完成；回滚本阶段提交即可，旧 FollowUp 字段仍可读取。下一门槛为 `CRM-10-04`：增加审计字段与人工阶段变更原因；不提前启动任务队列、分诊台、自动跟进、并发重构或定时同步。 |
 
 ## 阶段完成记录模板
 
