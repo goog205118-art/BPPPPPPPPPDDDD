@@ -6194,6 +6194,7 @@ body.access-locked .app-shell {
 
 .followup-ai-grid section,
 .followup-ai-evidence,
+.followup-ai-scope,
 .followup-ai-warnings,
 .followup-ai-strategies {
   display: grid;
@@ -6206,6 +6207,7 @@ body.access-locked .app-shell {
 
 .followup-ai-grid h4,
 .followup-ai-evidence h4,
+.followup-ai-scope h4,
 .followup-ai-warnings h4,
 .followup-ai-strategies h4 {
   margin: 0;
@@ -6223,6 +6225,100 @@ body.access-locked .app-shell {
   color: #aebfd0;
   font-size: 0.65rem;
   line-height: 1.45;
+}
+
+.followup-ai-scope {
+  gap: 7px;
+  border-color: #386079;
+  background: #102431;
+}
+
+.followup-ai-scope header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.followup-ai-scope header > span {
+  color: #8ec6d6;
+  font-size: 0.58rem;
+  font-weight: 700;
+  letter-spacing: 0;
+  text-transform: uppercase;
+}
+
+.followup-ai-scope-meta,
+.followup-ai-scope-groups {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.followup-ai-scope-meta span,
+.followup-ai-scope-groups p span,
+.followup-ai-scope-missing span {
+  color: #bdd1df;
+  font-size: 0.62rem;
+  line-height: 1.35;
+}
+
+.followup-ai-scope-meta span {
+  padding: 3px 5px;
+  border: 1px solid #34576c;
+  border-radius: 4px;
+  background: #0d1d28;
+}
+
+.followup-ai-scope-meta b {
+  color: #edf6fb;
+  font-weight: 650;
+}
+
+.followup-ai-scope-groups {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.followup-ai-scope-groups > div,
+.followup-ai-scope-missing {
+  display: grid;
+  gap: 3px;
+}
+
+.followup-ai-scope small {
+  color: #82aabe;
+  font-size: 0.59rem;
+  font-weight: 700;
+}
+
+.followup-ai-scope-groups p,
+.followup-ai-scope-missing {
+  margin: 0;
+}
+
+.followup-ai-scope-groups p,
+.followup-ai-scope-missing {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.followup-ai-scope-groups p span,
+.followup-ai-scope-missing span {
+  padding: 2px 4px;
+  border-radius: 3px;
+  background: #183342;
+}
+
+.followup-ai-scope-missing {
+  padding-top: 5px;
+  border-top: 1px solid #29475a;
+}
+
+.followup-ai-scope-missing span {
+  color: #d8c28d;
+  background: #2c291e;
 }
 
 .followup-ai-warnings {

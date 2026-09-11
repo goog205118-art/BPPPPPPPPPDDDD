@@ -1897,6 +1897,7 @@ function isTruthyFlag(value) {
 
 function followUpBodyState(event, policy, nowMs = Date.now()) {
   const body = followUpText(event?.body);
+  if (!body && followUpText(event?.body_expired_at)) return "expired";
   if (!body) return "summary";
   const retentionUntil = Date.parse(followUpText(event?.body_retention_until));
   if (Number.isFinite(retentionUntil) && retentionUntil <= nowMs) return "expired";
@@ -1923,17 +1924,70 @@ function followUpAiContext(state, followUpId, settings = {}) {
   const id = followUpText(followUpId);
   const followUp = (Array.isArray(state?.followUps) ? state.followUps : []).find((row) => followUpText(row.id) === id);
   if (!followUp) throw new Error("未找到对应合作跟进。请刷新页面后重试。");
-  const creator = (Array.isArray(state?.creators) ? state.creators : []).find((row) => followUpText(row.id) === followUpText(followUp.creator_id)) || {};
-  const cooperation = (Array.isArray(state?.cooperations) ? state.cooperations : []).find((row) => followUpText(row.id) === followUpText(followUp.cooperation_id)) || {};
-  const brandId = followUpText(followUp.brand_id || creator.brand_id || cooperation.brand_id);
-  const products = (Array.isArray(state?.products) ? state.products : []).filter((row) => {
-    const referenced = followUpText(row.id) === followUpText(followUp.product_id) || followUpText(row.id) === followUpText(cooperation.product_id);
-    return referenced && (!brandId || !followUpText(row.brand_id) || followUpText(row.brand_id) === brandId);
-  });
+  const caseId = followUpText(followUp.case_id);
+  if (!caseId) throw new Error("当前合作跟进未关联 Case，不能交给 AI 分析。请先完成 Case 迁移或人工关联。");
+
+  const caseRow = (Array.isArray(state?.cases) ? state.cases : []).find((row) => followUpText(row.id) === caseId);
+  if (!caseRow) throw new Error("当前合作跟进关联的 Case 不存在，已阻止 AI 分析。请先修复关联。");
+
+  const brandId = followUpText(followUp.brand_id);
+  const caseBrandId = followUpText(caseRow.brand_id);
+  if (!brandId || !caseBrandId || brandId !== caseBrandId) {
+    throw new Error("合作跟进与 Case 品牌不一致，已阻止 AI 跨品牌读取上下文。");
+  }
+  for (const field of ["creator_id", "lead_id", "cooperation_id"]) {
+    const followUpValue = followUpText(followUp[field]);
+    const caseValue = followUpText(caseRow[field]);
+    if (followUpValue && caseValue && followUpValue !== caseValue) {
+      throw new Error(`合作跟进与 Case 的${field}不一致，已阻止 AI 读取可能错误的上下文。`);
+    }
+  }
+
+  const creators = Array.isArray(state?.creators) ? state.creators : [];
+  const leads = Array.isArray(state?.leads) ? state.leads : [];
+  const productsAll = Array.isArray(state?.products) ? state.products : [];
+  const cooperations = Array.isArray(state?.cooperations) ? state.cooperations : [];
+  const creator = followUpText(caseRow.creator_id)
+    ? creators.find((row) => followUpText(row.id) === followUpText(caseRow.creator_id) && followUpText(row.brand_id) === brandId) || null
+    : null;
+  const lead = followUpText(caseRow.lead_id)
+    ? leads.find((row) => followUpText(row.id) === followUpText(caseRow.lead_id) && followUpText(row.brand_id) === brandId) || null
+    : null;
+  const person = creator || lead || {};
+  const cooperationCandidate = followUpText(caseRow.cooperation_id)
+    ? cooperations.find((row) => followUpText(row.id) === followUpText(caseRow.cooperation_id)) || null
+    : null;
+  const cooperation = cooperationCandidate && followUpText(cooperationCandidate.brand_id) === brandId
+    ? cooperationCandidate
+    : null;
+  const caseProductIds = [...new Set((Array.isArray(caseRow.product_ids) ? caseRow.product_ids : []).map(followUpText).filter(Boolean))];
+  const products = productsAll.filter((row) => caseProductIds.includes(followUpText(row.id)) && followUpText(row.brand_id) === brandId);
   const policy = mailContentPolicy(settings);
   const nowMs = Date.now();
-  const rawEvents = (Array.isArray(state?.followUpEvents) ? state.followUpEvents : [])
-    .filter((event) => followUpText(event.follow_up_id) === id && (!brandId || followUpText(event.brand_id) === brandId))
+  const excluded = {
+    cross_brand: 0,
+    cross_case: 0,
+    unlinked: 0,
+    context_limited: 0,
+  };
+  const candidateEvents = (Array.isArray(state?.followUpEvents) ? state.followUpEvents : [])
+    .filter((event) => followUpText(event.follow_up_id) === id);
+  const rawEvents = candidateEvents
+    .filter((event) => {
+      if (followUpText(event.brand_id) !== brandId) {
+        excluded.cross_brand += 1;
+        return false;
+      }
+      if (!followUpText(event.case_id)) {
+        excluded.unlinked += 1;
+        return false;
+      }
+      if (followUpText(event.case_id) !== caseId) {
+        excluded.cross_case += 1;
+        return false;
+      }
+      return true;
+    })
     .sort((a, b) => new Date(b.occurred_at || b.createdAt || 0) - new Date(a.occurred_at || a.createdAt || 0))
     .reverse();
   const summaryBudget = rawEvents.length
@@ -1953,9 +2007,9 @@ function followUpAiContext(state, followUpId, settings = {}) {
   let usedChars = descriptors.reduce((total, item) => total + item.content.length, 0);
   let remainingChars = Math.max(0, FOLLOWUP_AI_MAX_CHARS - usedChars);
   const eventStats = {
-    total_events: descriptors.length,
+    total_events: candidateEvents.length,
     included_events: descriptors.length,
-    omitted_count: 0,
+    omitted_count: excluded.cross_brand + excluded.cross_case + excluded.unlinked,
     full_body_count: 0,
     summary_count: 0,
     withheld_count: 0,
@@ -1986,6 +2040,7 @@ function followUpAiContext(state, followUpId, settings = {}) {
       descriptor.mode = "truncated";
       eventStats.limited_count += 1;
       eventStats.body_truncated_count += 1;
+      excluded.context_limited += 1;
     } else {
       descriptor.mode = "full";
       eventStats.full_body_count += 1;
@@ -2000,8 +2055,27 @@ function followUpAiContext(state, followUpId, settings = {}) {
       if (bodyState === "withheld" || bodyState === "disabled") eventStats.withheld_count += 1;
       if (bodyState === "expired") eventStats.expired_count += 1;
       if (bodyState === "legacy") eventStats.legacy_count += 1;
+      if (bodyState === "full") {
+        eventStats.limited_count += 1;
+        excluded.context_limited += 1;
+      }
     }
+    const scopeCode = descriptor.mode === "full"
+      ? "full_body"
+      : descriptor.mode === "truncated"
+        ? "truncated"
+        : bodyState === "withheld"
+          ? "withheld"
+          : bodyState === "expired"
+            ? "expired"
+            : bodyState === "legacy"
+              ? "legacy"
+              : bodyState === "disabled"
+                ? "disabled"
+                : "summary_only";
     return {
+      id: followUpText(event.id),
+      case_id: caseId,
       occurred_at: followUpText(event.occurred_at || event.createdAt),
       direction: followUpText(event.direction) || "unknown",
       subject: followUpText(event.subject, 500),
@@ -2014,15 +2088,68 @@ function followUpAiContext(state, followUpId, settings = {}) {
         : descriptor.mode === "truncated"
           ? "完整正文受上下文长度限制，已截断"
           : followUpEventScope(event, policy, nowMs),
+      scope_code: scopeCode,
+      body_authorized: bodyState === "full",
       body_truncated: descriptor.mode === "truncated",
       message_id: followUpText(event.message_id, 320),
     };
   });
+  const eventScopeCounts = events.reduce((counts, event) => {
+    const key = followUpText(event.scope_code) || "summary_only";
+    counts[key] = Number(counts[key] || 0) + 1;
+    return counts;
+  }, {});
+  const missing = [];
+  if (!creator && !lead) missing.push("关联达人资料缺失");
+  if (!caseProductIds.length) missing.push("当前 Case 未关联产品");
+  else if (products.length !== caseProductIds.length) missing.push("部分关联产品资料缺失或品牌不一致，已排除");
+  if (!followUpText(caseRow.cooperation_id)) missing.push("当前 Case 未关联合作记录");
+  else if (!cooperation) missing.push("关联合作记录资料缺失或品牌不一致，已排除");
+  if (!events.length) missing.push("没有可归档到当前 Case 的邮件");
+  if (!policy.cacheBodies) missing.push("完整正文缓存未开启");
+  else if (!policy.allowAiContext) missing.push("邮件正文未授权给 AI");
+  if (eventStats.expired_count) missing.push("部分正文已过期");
+  missing.push("附件、原始 MIME、外部沟通不可见");
+  const contextScope = {
+    source: "server_persisted_case_context",
+    brand_id: brandId,
+    case_id: caseId,
+    follow_up_id: id,
+    evidence_event_ids: events.map((event) => event.id).filter(Boolean),
+    evidence_count: events.length,
+    event_scope_counts: eventScopeCounts,
+    excluded,
+    missing,
+  };
   return {
+    case: {
+      id: caseId,
+      brand_id: brandId,
+      brand: followUpText(caseRow.brand || followUp.brand),
+      creator_id: followUpText(caseRow.creator_id),
+      lead_id: followUpText(caseRow.lead_id),
+      cooperation_id: followUpText(caseRow.cooperation_id),
+      product_ids: caseProductIds,
+      stage: followUpText(caseRow.stage),
+      priority: followUpText(caseRow.priority),
+      cooperation_mode: followUpText(caseRow.cooperation_mode),
+      budget: caseRow.budget ?? null,
+      quote_amount: caseRow.quote_amount ?? null,
+      shipping_address: followUpText(caseRow.shipping_address, 1800),
+      shipping_status: followUpText(caseRow.shipping_status),
+      tracking_no: followUpText(caseRow.tracking_no),
+      publish_due_at: followUpText(caseRow.publish_due_at),
+      publish_url: followUpText(caseRow.publish_url, 1200),
+      next_action: followUpText(caseRow.next_action, 500),
+      next_action_at: followUpText(caseRow.next_action_at),
+      last_outreach_at: followUpText(caseRow.last_outreach_at),
+      notes: followUpText(caseRow.notes, 1800),
+    },
     followUp: {
       id: followUpText(followUp.id),
       brand_id: brandId,
-      brand: followUpText(followUp.brand || creator.brand),
+      case_id: caseId,
+      brand: followUpText(followUp.brand || caseRow.brand),
       stage: followUpText(followUp.stage),
       priority: followUpText(followUp.priority),
       cooperation_mode: followUpText(followUp.cooperation_mode),
@@ -2035,21 +2162,36 @@ function followUpAiContext(state, followUpId, settings = {}) {
       notes: followUpText(followUp.notes, 1800),
     },
     creator: {
-      name: followUpText(creator.name || followUp.creator_name, 200),
-      handle: followUpText(creator.handle, 200),
-      platform: followUpText(creator.platform, 120),
-      country: followUpText(creator.country, 120),
-      language: followUpText(creator.language, 120),
-      niche: followUpText(creator.niche, 240),
-      followers: followUpText(creator.followers, 80),
-      email: followUpText(creator.email, 320),
+      entity_type: creator ? "creator" : lead ? "lead" : "unknown",
+      id: followUpText(person.id),
+      name: followUpText(person.name || followUp.creator_name, 200),
+      handle: followUpText(person.handle, 200),
+      platform: followUpText(person.platform, 120),
+      country: followUpText(person.country, 120),
+      language: followUpText(person.language, 120),
+      niche: followUpText(person.niche, 240),
+      followers: followUpText(person.followers, 80),
+      email: followUpText(person.email, 320),
     },
     products: products.map((product) => ({
+      id: followUpText(product.id),
       name: followUpText(product.name, 300),
       url: followUpText(product.product_url, 1200),
       description: followUpText(product.description, 1200),
       tags: followUpText(product.tags, 360),
     })),
+    cooperation: cooperation ? {
+      id: followUpText(cooperation.id),
+      cooperation_no: followUpText(cooperation.cooperation_no || cooperation.no, 200),
+      status: followUpText(cooperation.status || cooperation.result, 120),
+      product: followUpText(cooperation.product, 300),
+      budget: cooperation.budget ?? null,
+      post_date: followUpText(cooperation.post_date),
+      publish_url: followUpText(cooperation.link || cooperation.publish_url, 1200),
+      tracking_no: followUpText(cooperation.tracking_no),
+      clicks: cooperation.clicks ?? null,
+      orders: cooperation.orders ?? null,
+    } : null,
     context_meta: {
       ...eventStats,
       max_events: descriptors.length,
@@ -2057,21 +2199,27 @@ function followUpAiContext(state, followUpId, settings = {}) {
       cache_bodies: policy.cacheBodies,
       allow_ai_context: policy.allowAiContext,
     },
+    context_scope: contextScope,
     events,
   };
 }
 
 function followUpContextNotice(context) {
   const meta = context.context_meta || {};
+  const scope = context.context_scope || {};
+  const excluded = scope.excluded || {};
   const summaryOnly = Number(meta.summary_count || 0);
   const fullBody = Number(meta.full_body_count || 0);
   const totalEvents = Number(meta.total_events || meta.max_events || context.events.length || 0);
   const includedEvents = Number(meta.included_events || context.events.length || 0);
   const omittedEvents = Number(meta.omitted_count || 0);
-  if (!context.events.length) return "当前没有归档邮件，不能判断实际沟通进展；仅可基于跟进字段提出准备建议。";
-  const coverage = `共 ${totalEvents} 封，已纳入 ${includedEvents} 封`;
-  if (!meta.cache_bodies) return `${coverage}；完整正文缓存未开启，当前仅按 ${summaryOnly} 封归档摘要分析；附件、原始 MIME 和外部沟通均不可见。`;
-  if (!meta.allow_ai_context) return `${coverage}；完整正文已按保留策略缓存，但未授权给 AI；当前仅按 ${summaryOnly} 封摘要分析。`;
+  const scopeLabel = `当前品牌 ${scope.brand_id || context.case?.brand_id || "未知"}、Case ${scope.case_id || context.case?.id || "未知"}`;
+  const exclusionCount = Number(excluded.cross_brand || 0) + Number(excluded.cross_case || 0) + Number(excluded.unlinked || 0);
+  const excludedNotice = exclusionCount ? `已排除 ${exclusionCount} 封不属于当前 Case 的邮件` : "";
+  if (!context.events.length) return `${scopeLabel}；当前没有可归档到此 Case 的邮件，不能判断实际沟通进展；仅可基于跟进字段提出准备建议。附件、原始 MIME 和外部沟通均不可见。`;
+  const coverage = `归档候选 ${totalEvents} 封，实际纳入 ${includedEvents} 封`;
+  if (!meta.cache_bodies) return `${scopeLabel}；${coverage}；完整正文缓存未开启，当前仅按 ${summaryOnly} 封归档摘要分析${excludedNotice ? `；${excludedNotice}` : ""}。附件、原始 MIME 和外部沟通均不可见。`;
+  if (!meta.allow_ai_context) return `${scopeLabel}；${coverage}；完整正文已按保留策略缓存，但未授权给 AI；当前仅按 ${summaryOnly} 封摘要分析${excludedNotice ? `；${excludedNotice}` : ""}。附件、原始 MIME 和外部沟通均不可见。`;
   if (fullBody) {
     const extras = [
       summaryOnly ? `${summaryOnly} 封仅摘要` : "",
@@ -2079,16 +2227,18 @@ function followUpContextNotice(context) {
       meta.legacy_count ? `${meta.legacy_count} 封历史正文未纳入` : "",
       meta.limited_count ? `${meta.limited_count} 封受上下文长度限制，使用摘要或截断正文` : "",
       omittedEvents ? `${omittedEvents} 封未纳入` : "",
+      excludedNotice,
     ].filter(Boolean);
-    return `当前 AI 使用同品牌、同合作跟进的 ${coverage}，其中 ${fullBody} 封为完整正文（约 ${Number(meta.body_characters || 0)} 字）${extras.length ? `；另有 ${extras.join("、")}` : ""}。附件、原始 MIME 和外部沟通均不可见。`;
+    return `${scopeLabel}；${coverage}，其中 ${fullBody} 封为完整正文（约 ${Number(meta.body_characters || 0)} 字）${extras.length ? `；另有 ${extras.join("、")}` : ""}。附件、原始 MIME 和外部沟通均不可见。`;
   }
   const unavailable = [
     meta.expired_count ? `${meta.expired_count} 封正文已过期` : "",
     meta.legacy_count ? `${meta.legacy_count} 封历史正文未纳入` : "",
     meta.limited_count ? `${meta.limited_count} 封受上下文长度限制，仅使用摘要或截断正文` : "",
     omittedEvents ? `${omittedEvents} 封未纳入` : "",
+    excludedNotice,
   ].filter(Boolean);
-  return `当前没有可用完整正文，AI 仅按 ${coverage}中的归档摘要分析${unavailable.length ? `；${unavailable.join("、")}` : ""}。请检查正文缓存、AI 授权和保留期限。`;
+  return `${scopeLabel}；当前没有可用完整正文，AI 仅按 ${coverage}中的归档摘要分析${unavailable.length ? `；${unavailable.join("、")}` : ""}。请检查正文缓存、AI 授权和保留期限；附件、原始 MIME 和外部沟通均不可见。`;
 }
 
 function followUpEvidence(context) {
@@ -2211,6 +2361,7 @@ function sanitizeFollowUpAnalysis(raw, context) {
     recommended_follow_up_days: Math.min(30, Math.max(0, Number(raw?.recommended_follow_up_days) || 3)),
     warnings: [...warningSet].slice(0, 8),
     context_notice: notice,
+    context_scope: context.context_scope,
   };
 }
 
@@ -2223,7 +2374,14 @@ function sanitizeFollowUpDraft(raw, context) {
   if (Number(context.context_meta?.summary_count || 0) || Number(context.context_meta?.withheld_count || 0) || Number(context.context_meta?.expired_count || 0) || Number(context.context_meta?.legacy_count || 0) || Number(context.context_meta?.limited_count || 0)) {
     warnings.push("草稿对仅摘要、未授权或过期邮件不会补造细节；请人工核对完整邮件。");
   }
-  return { ok: true, subject, body, warnings: [...new Set(warnings)].slice(0, 8), context_notice: followUpContextNotice(context) };
+  return {
+    ok: true,
+    subject,
+    body,
+    warnings: [...new Set(warnings)].slice(0, 8),
+    context_notice: followUpContextNotice(context),
+    context_scope: context.context_scope,
+  };
 }
 
 async function requestFollowUpAi(prompt) {

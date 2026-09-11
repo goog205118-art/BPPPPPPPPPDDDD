@@ -443,12 +443,13 @@ function retentionUntil(now, retentionDays) {
   return until.toISOString();
 }
 
-function clearCachedMailBody(event) {
+function clearCachedMailBody(event, options = {}) {
   const hadBody = Boolean(text(event?.body));
   event.body = "";
   event.body_cached_at = "";
   event.body_retention_until = "";
   event.body_truncated = false;
+  event.body_expired_at = options.expiredAt || "";
   return hadBody;
 }
 
@@ -473,13 +474,14 @@ function applyMailContentPolicy(state, settings, now = new Date()) {
         return;
       }
       if (isExpiredMailBody(event, nowMs)) {
-        if (clearCachedMailBody(event)) result.expired += 1;
+        if (clearCachedMailBody(event, { expiredAt: nowIso })) result.expired += 1;
         return;
       }
       if (!text(event.body_retention_until)) {
         event.body_cached_at = text(event.body_cached_at) || nowIso;
         event.body_retention_until = retentionUntil(now, policy.retentionDays);
         event.body_truncated = Boolean(event.body_truncated);
+        event.body_expired_at = "";
         event.updatedAt = nowIso;
         result.migrated += 1;
       }
@@ -1260,6 +1262,7 @@ function cacheBodyOnExistingRecord(existing, record, now) {
   existing.body_cached_at = record.body_cached_at || now.toISOString();
   existing.body_retention_until = record.body_retention_until;
   existing.body_truncated = incomingTruncated;
+  existing.body_expired_at = "";
   existing.updatedAt = now.toISOString();
   return true;
 }

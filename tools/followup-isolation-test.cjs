@@ -1811,6 +1811,7 @@ async function run() {
         id: `EV-LONG-${sequence}`,
         brand_id: "BR-A",
         follow_up_id: "FU-A",
+        case_id: "CASE-FU-FU-A",
         type: "email",
         direction: sequence % 2 ? "inbound" : "outbound",
         subject: `Long context ${sequence}`,
@@ -1837,7 +1838,7 @@ async function run() {
   assert.match(fakeAiRequests[0].prompt, /EARLIEST-EVENT-1/, "最早邮件摘要不能因固定条数限制而消失。");
   assert.match(fakeAiRequests[0].prompt, /LATEST-EVENT-12/, "最新邮件正文应优先纳入 AI 上下文。");
   assert.match(fakeAiRequests[0].prompt, /"total_events":\s*13/, "AI 上下文应报告全部事件数量。");
-  assert.match(result.payload.context_notice, /共 13 封/);
+  assert.match(result.payload.context_notice, /归档候选 13 封/);
 
   const expiredState = (await request("/api/state")).payload;
   const expiredEvent = expiredState.followUpEvents.find((row) => row.id === "EV-A");

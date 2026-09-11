@@ -258,6 +258,7 @@
 - `body_cached_at`
 - `body_retention_until`
 - `body_truncated`
+- `body_expired_at`（正文按保留期删除的时间；不包含或恢复正文）
 - `message_id`
 - `in_reply_to`
 - `references`（线程引用的 Message-ID 列表）
@@ -277,6 +278,14 @@
 邮件导入会保存标题、时间、收发方向、地址、正文摘要，并按邮箱正文缓存策略保存完整纯文本正文；不保存原始 `.eml` 文件、HTML 原文或附件。相同 `Message-ID`、相同指纹或同一 IMAP 服务器 UID 的邮件会跳过，避免重复导入；摘要再次同步到完整正文时会升级原记录，旧的截断正文也允许被后续完整正文替换，不新增重复事件。完整正文仍受保留期限、单封长度和 AI 总上下文预算限制。
 
 阶段推进事件为追加式审计记录：手动推进或编辑保存时必须填写人工原因；由 AI 给出的建议只有在用户明确点击应用后才会写入，并使用 `ai_suggestion_confirmed` 来源与“人工确认”操作者。阶段事件会同时更新 Case 的阶段、版本和最近审计摘要，不允许 AI 在无人确认时变更高风险阶段。
+
+### AI 跟进上下文边界
+
+`POST /api/ai/followup-analyze` 与 `POST /api/ai/followup-draft` 只接受当前 `followUpId` 和人工备注/策略。服务端必须以该 `followUpId` 从已保存状态读取合作资料；浏览器提交的品牌、Case、邮件正文、事件列表或其他上下文字段一律不采纳。
+
+服务端会先验证 FollowUp 已关联的 Case 存在，且两者品牌一致；当双方都有 `creator_id`、`lead_id` 或 `cooperation_id` 时，这些关联也必须一致。邮件事件只有同时属于当前 FollowUp、当前品牌和当前 Case 时才可进入 AI 上下文。跨品牌、跨 Case、未关联 Case 与因总长度限制未完整纳入的事件都会计数并排除。
+
+完整正文只有在正文缓存开启、已明确授权 AI 使用、且尚未过期时才可进入上下文；否则 AI 仅可看到该事件的归档摘要。过期清理会删除正文、缓存时间与保留截止时间，只留下不含正文的 `body_expired_at`，使证据范围能解释“正文已按保留期删除”。附件、原始 MIME、HTML 原文、邮箱外沟通和未归档邮件永远不进入 AI 上下文。接口返回的 `context_scope` 是一次请求的可解释证据范围，含品牌、Case、FollowUp、纳入事件 ID、正文/摘要状态计数、排除计数和缺失项；它不是持久化业务字段，也不包含邮件正文。
 
 ## mailInbox
 
@@ -298,6 +307,7 @@
 - `body_cached_at`
 - `body_retention_until`
 - `body_truncated`
+- `body_expired_at`（正文按保留期删除的时间；不包含或恢复正文）
 - `message_id`
 - `in_reply_to`
 - `references`

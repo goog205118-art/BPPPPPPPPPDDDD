@@ -5870,6 +5870,7 @@ function outreachSmtpAccounts(lead) {
 }
 
 function followUpEventScopeLabel(event) {
+  if (!text(event?.body) && text(event?.body_expired_at)) return "正文缓存已过期";
   if (!text(event?.body)) return "已归档邮件摘要";
   const retentionUntil = Date.parse(text(event?.body_retention_until));
   if (Number.isFinite(retentionUntil) && retentionUntil <= Date.now()) return "正文缓存已过期";
@@ -5945,6 +5946,51 @@ function followUpAnalysisMarkup(analysis, selectedStrategy) {
   }
   const confidence = { low: "低", medium: "中", high: "高" }[analysis.confidence] || "低";
   const list = (items = [], className = "") => (items.length ? `<ul class="${className}">${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : `<p class="followup-detail-empty">暂无</p>`);
+  const scope = analysis.context_scope || {};
+  const counts = scope.event_scope_counts || {};
+  const excluded = scope.excluded || {};
+  const count = (value) => Math.max(0, Number(value) || 0);
+  const scopeStates = [
+    ["完整正文", count(counts.full_body)],
+    ["截断正文", count(counts.truncated)],
+    ["仅摘要", count(counts.summary_only)],
+    ["未授权/关闭", count(counts.withheld) + count(counts.disabled)],
+    ["已过期", count(counts.expired)],
+    ["历史受限", count(counts.legacy)],
+  ].filter(([, value]) => value > 0);
+  const excludedStates = [
+    ["跨品牌", count(excluded.cross_brand)],
+    ["跨 Case", count(excluded.cross_case)],
+    ["未关联 Case", count(excluded.unlinked)],
+    ["上下文限额", count(excluded.context_limited)],
+  ].filter(([, value]) => value > 0);
+  const evidenceScope = scope.source
+    ? `
+      <section class="followup-ai-scope">
+        <header>
+          <h4>服务端证据范围</h4>
+          <span>${escapeHtml(scope.source === "server_persisted_case_context" ? "已验证服务端归档" : scope.source)}</span>
+        </header>
+        <div class="followup-ai-scope-meta">
+          <span>品牌 <b>${escapeHtml(scope.brand_id || "未知")}</b></span>
+          <span>Case <b>${escapeHtml(scope.case_id || "未知")}</b></span>
+          <span>跟进 <b>${escapeHtml(scope.follow_up_id || "未知")}</b></span>
+          <span>纳入邮件 <b>${count(scope.evidence_count)} 封</b></span>
+        </div>
+        <div class="followup-ai-scope-groups">
+          <div>
+            <small>纳入方式</small>
+            ${scopeStates.length ? `<p>${scopeStates.map(([label, value]) => `<span>${escapeHtml(label)} ${value}</span>`).join("")}</p>` : `<p><span>暂无归档邮件</span></p>`}
+          </div>
+          <div>
+            <small>已排除</small>
+            ${excludedStates.length ? `<p>${excludedStates.map(([label, value]) => `<span>${escapeHtml(label)} ${value}</span>`).join("")}</p>` : `<p><span>无</span></p>`}
+          </div>
+        </div>
+        ${(scope.missing || []).length ? `<p class="followup-ai-scope-missing"><small>资料缺失 / 不可见</small>${(scope.missing || []).map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</p>` : ""}
+      </section>
+    `
+    : "";
   return `
     <section class="followup-ai-analysis-result">
       <div class="followup-ai-summary">
@@ -5962,6 +6008,7 @@ function followUpAnalysisMarkup(analysis, selectedStrategy) {
         <section><h4>关键事实</h4>${list(analysis.key_facts || [])}</section>
         <section><h4>风险与待确认</h4>${list(analysis.risk_notes || [])}</section>
       </div>
+      ${evidenceScope}
       <section class="followup-ai-evidence"><h4>证据范围</h4>${list(analysis.evidence || [])}</section>
       ${(analysis.warnings || []).length ? `<section class="followup-ai-warnings"><h4>提醒</h4>${list(analysis.warnings || [])}</section>` : ""}
       <section class="followup-ai-strategies">
