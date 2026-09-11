@@ -37,12 +37,12 @@
 
 | 项目 | 当前值 |
 | --- | --- |
-| 当前任务 | `CRM-30-02` |
-| 当前状态 | `planned` |
-| 当前目标 | 建立邮件分诊台，展示候选达人、候选 Case、匹配证据和一键确认/忽略/新建 Case。 |
+| 当前任务 | 未激活（下一项为 `CRM-30-03`） |
+| 当前状态 | `done` |
+| 当前目标 | `CRM-30-02` 邮件分诊台已完成；恢复执行前必须先重新核对本台账，并显式激活下一项任务。 |
 | 已完成前序 | `CRM-00` 基线与执行治理；`CRM-10` Case 模型、兼容迁移、Case 中心展示与阶段审计；`CRM-20-01` 持久化行动任务数据契约；`CRM-20-02` 规则生成、去重与失效生命周期；`CRM-20-03` 今日推进中枢；`CRM-20-04` 协作指派、备注、延期理由与操作历史。 |
 | 禁止提前启动 | `CRM-60` 定时同步、自动发送、AI 自动推进高风险阶段。 |
-| 最近已验证基线 | `npm.cmd run check`、`npm.cmd run test:task-collaboration`、`npm.cmd run test:today-action-center`、`npm.cmd run test:action-task-storage`、`npm.cmd run test:case-display`、`npm.cmd run test:crm-regression`、`npm.cmd run test:followup-isolation`、Python AST 解析、`git diff --check`（功能提交 `0f7d3e8`）。 |
+| 最近已验证基线 | `npm.cmd run check`、`npm.cmd run test:mail-triage-console`、`npm.cmd run test:mail-routing-score`、`npm.cmd run test:crm-regression`、`npm.cmd run test:case-display`、`npm.cmd run test:action-task-storage`、`npm.cmd run test:today-action-center`、`npm.cmd run test:task-collaboration`、`npm.cmd run test:followup-isolation`、Python AST 解析、`git diff --check`（功能提交 `81aaa29`）。 |
 
 ## 总体闭环与完成定义
 
@@ -85,7 +85,7 @@
 | ID | 优先级 | 状态 | 工作项 | 前置 | 验收标准 |
 | --- | --- | --- | --- | --- | --- |
 | `CRM-30-01` | P1 | `done` | 设计邮件匹配评分：品牌、收发邮箱、Message-ID 线程、联系人身份、首联时间窗、活跃 Case。 | `CRM-10-01` | 明确唯一匹配、歧义匹配和未匹配的判定理由；不跨品牌误归档。 |
-| `CRM-30-02` | P2 | `planned` | 建立邮件分诊台，展示候选达人、候选 Case、匹配证据和一键确认/忽略/新建 Case。 | `CRM-30-01` | 共享邮箱、经纪人邮箱、多人合作和陌生来信都可人工高效处理。 |
+| `CRM-30-02` | P2 | `done` | 建立邮件分诊台，展示候选达人、候选 Case、匹配证据和一键确认/忽略/新建 Case。 | `CRM-30-01` | 共享邮箱、经纪人邮箱、多人合作和陌生来信都可人工高效处理。 |
 | `CRM-30-03` | P1 | `planned` | 将分诊结果、手动纠正和回信高亮联动到 Case 与今日推进。 | `CRM-20-03`, `CRM-30-02` | 新回信自动生成待办；人工归档后邮件、Case 和待办状态一致。 |
 | `CRM-30-04` | P2 | `planned` | 为陌生达人合作来信增加“新线索”入口与去重建议。 | `CRM-30-02` | 可从邮件创建待开发达人，保留来源邮件与品牌归属。 |
 
@@ -164,6 +164,8 @@
 | 2026-09-11（America/Los_Angeles） | `CRM-20-04` | `active -> done` | `tools/crm-domain.cjs`、`tools/sqlite_store.py`、`tools/local-server.cjs`、`api/[...route].mjs`、`app/app.js`、`app/styles.css`、`tools/task-collaboration-regression-test.cjs`、`tools/today-action-center-regression-test.cjs`、`package.json`、`docs/SCHEMA.md` | `npm.cmd run check`、`npm.cmd run test:task-collaboration`、`npm.cmd run test:today-action-center`、`npm.cmd run test:crm-regression`、`npm.cmd run test:action-task-storage`、`npm.cmd run test:case-display`、`npm.cmd run test:followup-isolation`、Python AST 解析和 `git diff --check` 全部通过。新回归覆盖创建、指派、备注、延期理由、完成、跳过、历史排序、品牌/Case 隔离、旧数据初始化、SQLite 往返，以及任务操作不改变 Case/FollowUp 阶段。 | `0f7d3e8`（功能提交） | 数据影响：SQLite 新增 `actionTaskEvents` 表与 `actionTasks.defer_reason` 加法列；未读取或写入正式业务资料，未调用真实 IMAP、SMTP 或 AI。回滚：`git revert 0f7d3e8`；新增表和列可安全闲置，任何破坏性数据库降级前先导出。核对：未重复 `CRM-20-01` 持久化、`CRM-20-02` 规则生成或 `CRM-20-03` 今日队列；未启动 `CRM-30+` 邮件分诊、`CRM-40+` AI 工作台、`CRM-50+` 并发重构、`CRM-60` 定时同步或 `CRM-70+` 联系人治理。下一门槛：`CRM-30-01` 保持 planned，开始前必须先读取本台账与最后三条日志。 |
 | 2026-09-11（America/Los_Angeles） | `CRM-30-01` | `planned -> active` | `docs/CRM_EXECUTION_TASKS.md` | 已读取当前执行指针、最后三条阶段记录、现有 `routeMailRecord`、邮件待归档字段与隔离路由回归。确认原有线程、联系人轨迹、活跃跟进、首联 30 天窗口和品牌范围判断均为隐式分支，尚无统一评分、歧义阈值或可持久化证据。 | 待提交 | 本阶段只提取可解释匹配评分并保存唯一/歧义/未匹配证据；不改变人工确认原则、不新建线索或 Case、不调用真实 IMAP/SMTP/AI，也不启动 `CRM-30-02+`、`CRM-40+`、`CRM-50+`、`CRM-60` 或 `CRM-70+`。 |
 | 2026-09-11（America/Los_Angeles） | `CRM-30-01` | `active -> done` | `tools/mail-routing-domain.cjs`、`tools/mail-sync.cjs`、`tools/sqlite_store.py`、`tools/local-server.cjs`、`api/[...route].mjs`、`app/app.js`、`tools/mail-routing-score-regression-test.cjs`、`docs/SCHEMA.md`、`package.json` | `npm.cmd run check`、`npm.cmd run test:mail-routing-score`、`npm.cmd run test:crm-regression`、`npm.cmd run test:case-display`、`npm.cmd run test:action-task-storage`、`npm.cmd run test:today-action-center`、`npm.cmd run test:task-collaboration`、`npm.cmd run test:followup-isolation`、Python AST 解析与 `git diff --check` 全部通过。评分回归覆盖线程唯一命中、共享邮箱跨品牌歧义、首联 30 天窗口、弱邮箱线索未匹配、同达人多活跃 Case 歧义、路由携带证据，以及 SQLite 往返完整保留评分、候选 Case 和规则证据。 | `05a370e`（功能提交） | 数据影响：`mailInbox` 新增 `match_disposition`、`match_score`、`match_reasons`、`match_candidates` 加法字段；未读取或写入正式业务资料，未连接真实 IMAP、SMTP 或 AI。回滚：`git revert 05a370e`；新增列可安全闲置，任何破坏性数据库降级前先导出。核对：已完成的 `CRM-20` 任务模型/队列未重复实现；未启动 `CRM-30-02` 分诊台、`CRM-30-03` 联动、`CRM-40+` AI 工作台、`CRM-50+` 并发重构、`CRM-60` 定时同步或 `CRM-70+` 联系人治理。下一门槛：`CRM-30-02` 保持 planned，开始前必须先读取本台账与最后三条日志。 |
+| 2026-09-11（America/Los_Angeles） | `CRM-30-02` | `planned -> active` | `docs/CRM_EXECUTION_TASKS.md` | 已核对 `CRM-30-01` 评分数据契约、待归档邮件现有入口、Case 展示与任务中心回归。计划新增仅对当前品牌生效的邮件分诊台：展示候选达人/Case/评分证据，并提供人工确认归档、忽略与新建 Case 的受控入口。 | 待提交 | 本阶段不改 AI、阶段自动推进、陌生线索创建、真实 IMAP/SMTP、定时同步或并发存储；先补领域操作契约与隔离回归，再接入界面。 |
+| 2026-09-11（America/Los_Angeles） | `CRM-30-02` | `active -> done` | `tools/crm-domain.cjs`、`tools/sqlite_store.py`、`tools/local-server.cjs`、`api/[...route].mjs`、`app/app.js`、`app/styles.css`、`tools/mail-triage-console-regression-test.cjs`、`docs/SCHEMA.md`、`package.json`、`docs/CRM_EXECUTION_TASKS.md` | `npm.cmd run check`、`npm.cmd run test:mail-triage-console`、`npm.cmd run test:mail-routing-score`、`npm.cmd run test:crm-regression`、`npm.cmd run test:case-display`、`npm.cmd run test:action-task-storage`、`npm.cmd run test:today-action-center`、`npm.cmd run test:task-collaboration`、`npm.cmd run test:followup-isolation`、Python AST 解析与 `git diff --check` 全部通过。专用回归覆盖同品牌候选归档、跨品牌与候选范围外拒绝、无候选不退化为任意同品牌 Case、忽略保留原邮件且不写时间线、已忽略不可归档、唯一已有达人才能新建、默认阶段强制为“初步沟通”、已有活跃 Case 拒绝重复新建，以及 SQLite 往返保留分诊决定、评分理由和逐条证据。 | `81aaa29`（功能提交） | 数据影响：`mailInbox` 新增 `triage_*` 加法字段；未读取或写入正式业务资料，未连接真实 IMAP、SMTP 或 AI。回滚：`git revert 81aaa29`；新增列可安全闲置，任何破坏性数据库降级前先导出。核对：已完成任务未重复实现；未启动 `CRM-30-03` Case/今日推进联动、`CRM-30-04` 陌生线索、`CRM-40+` AI 工作台、`CRM-50+` 并发重构、`CRM-60` 定时同步或 `CRM-70+` 联系人/投递治理。下一门槛：恢复时先读取本台账最后三条日志，且仅在明确决定后激活 `CRM-30-03`。 |
 
 ## 阶段完成记录模板
 
