@@ -46,8 +46,16 @@ const CASE_STAGE_TRANSITIONS = new Map([
   ["已结案", new Set()],
 ]);
 
+const TASK_STATUSES = new Set(["待处理", "已完成", "已失效", "已跳过", "待修复"]);
+const TASK_PRIORITIES = new Set(["高", "中", "低", "普通"]);
+
 function text(value) {
   return String(value ?? "").trim();
+}
+
+function flag(value) {
+  if (typeof value === "boolean") return value;
+  return ["1", "true", "yes", "是"].includes(text(value).toLowerCase());
 }
 
 function iso(value) {
@@ -226,6 +234,62 @@ function taskKey(caseId, type, sourceId = "") {
   return [text(caseId), text(type), text(sourceId)].join(":");
 }
 
+function taskById(state, taskId) {
+  return (Array.isArray(state?.actionTasks) ? state.actionTasks : [])
+    .find((item) => text(item.id) === text(taskId)) || null;
+}
+
+function taskValidationError(state, input = {}) {
+  const caseId = text(input.case_id);
+  if (!caseId) return "行动任务必须关联 Case。";
+  const caseRow = caseById(state, caseId);
+  if (!caseRow) return "行动任务关联的 Case 不存在。";
+  const inputBrandId = text(input.brand_id);
+  if (inputBrandId && inputBrandId !== text(caseRow.brand_id)) {
+    return "行动任务与 Case 品牌不一致，禁止跨品牌保存。";
+  }
+  return "";
+}
+
+function createActionTask(state, input = {}, now = new Date().toISOString()) {
+  const validationError = taskValidationError(state, input);
+  if (validationError) throw new Error(validationError);
+
+  const caseRow = caseById(state, input.case_id);
+  const status = TASK_STATUSES.has(text(input.status)) ? text(input.status) : "待处理";
+  const completionEvidence = text(input.completion_evidence);
+  if (!text(input.title)) throw new Error("行动任务必须填写标题。");
+  if (status === "已完成" && !completionEvidence) {
+    throw new Error("完成行动任务必须填写完成证据。");
+  }
+
+  const timestamp = iso(now);
+  return {
+    id: text(input.id) || `TASK-${randomUUID()}`,
+    brand_id: caseRow.brand_id,
+    brand: text(caseRow.brand),
+    case_id: caseRow.id,
+    source: text(input.source) || "manual",
+    source_id: text(input.source_id),
+    type: text(input.type) || "general",
+    title: text(input.title),
+    description: text(input.description),
+    owner_id: text(input.owner_id),
+    owner_name: text(input.owner_name),
+    priority: TASK_PRIORITIES.has(text(input.priority)) ? text(input.priority) : "普通",
+    due_at: text(input.due_at),
+    status,
+    completion_evidence: completionEvidence,
+    completed_at: status === "已完成" ? (text(input.completed_at) || timestamp) : "",
+    dedupe_key: text(input.dedupe_key),
+    generated: flag(input.generated),
+    validation_error: "",
+    version: Math.max(1, Number(input.version) || 1),
+    createdAt: text(input.createdAt) || timestamp,
+    updatedAt: text(input.updatedAt) || timestamp,
+  };
+}
+
 function latestEvent(events, predicate) {
   return events
     .filter(predicate)
@@ -314,19 +378,19 @@ function reconcileCaseTasks(state, now = new Date().toISOString()) {
         continue;
       }
       const next = {
-        id: `TASK-${randomUUID()}`,
-        brand_id: caseRow.brand_id,
-        case_id: caseRow.id,
-        type: spec.type,
-        source_id: spec.source_id,
-        dedupe_key,
-        title: spec.title,
-        priority: spec.priority,
-        due_at: spec.due_at,
-        status: "待处理",
-        generated: true,
-        createdAt: timestamp,
-        updatedAt: timestamp,
+        ...createActionTask(state, {
+          brand_id: caseRow.brand_id,
+          case_id: caseRow.id,
+          source: "case_rule",
+          source_id: spec.source_id,
+          type: spec.type,
+          dedupe_key,
+          title: spec.title,
+          priority: spec.priority,
+          due_at: spec.due_at,
+          status: "待处理",
+          generated: true,
+        }, timestamp),
       };
       tasks.push(next);
       created.push(next);
@@ -345,11 +409,17 @@ function reconcileCaseTasks(state, now = new Date().toISOString()) {
 }
 
 function completeTask(state, taskId, evidence = "", now = new Date().toISOString()) {
-  const task = (Array.isArray(state?.actionTasks) ? state.actionTasks : []).find((item) => text(item.id) === text(taskId));
+  const task = taskById(state, taskId);
   if (!task) throw new Error("未找到待办。");
+  const validationError = taskValidationError(state, task);
+  if (validationError) throw new Error(validationError);
+  const completionEvidence = text(evidence);
+  if (!completionEvidence) throw new Error("完成行动任务必须填写完成证据。");
   task.status = "已完成";
   task.completed_at = iso(now);
-  task.completion_evidence = text(evidence);
+  task.completion_evidence = completionEvidence;
+  task.validation_error = "";
+  task.version = Math.max(1, Number(task.version) || 1) + 1;
   task.updatedAt = task.completed_at;
   return task;
 }
@@ -377,9 +447,12 @@ function patchVersionedRecord(collection, id, expectedVersion, patch = {}, now =
 module.exports = {
   CASE_STAGES,
   CASE_STAGE_TRANSITIONS,
+  TASK_PRIORITIES,
+  TASK_STATUSES,
   archiveTriageMail,
   canTransitionCaseStage,
   completeTask,
+  createActionTask,
   createCase,
   patchVersionedRecord,
   recordCaseStageChange,

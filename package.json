@@ -12,7 +12,8 @@
     "check": "node --check tools/local-server.cjs && node --check \"api/[...route].mjs\" && node --check app/app.js",
     "test:followup-isolation": "node tools/followup-isolation-test.cjs",
     "test:crm-regression": "node tools/crm-regression-test.cjs",
-    "test:case-display": "node tools/case-display-regression-test.cjs"
+    "test:case-display": "node tools/case-display-regression-test.cjs",
+    "test:action-task-storage": "node tools/action-task-storage-test.cjs"
   },
   "dependencies": {
     "@vercel/blob": "^2.8.0",

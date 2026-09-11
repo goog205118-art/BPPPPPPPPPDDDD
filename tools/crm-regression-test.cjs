@@ -3,6 +3,7 @@ const {
   archiveTriageMail,
   canTransitionCaseStage,
   completeTask,
+  createActionTask,
   createCase,
   patchVersionedRecord,
   recordCaseStageChange,
@@ -118,6 +119,62 @@ function testTaskLifecycle() {
   assert.equal(result.created.some((task) => task.type === "sample_pending"), true);
 }
 
+function testPersistedTaskContract() {
+  const state = fixture();
+  const task = createActionTask(state, {
+    id: "TASK-MANUAL-A",
+    brand_id: "BR-A",
+    case_id: "CASE-A",
+    source: "manual",
+    type: "confirm_quote",
+    title: "确认达人报价",
+    description: "核对报价和合作方式。",
+    owner_id: "USER-A",
+    owner_name: "运营 A",
+    priority: "高",
+    due_at: "2026-09-12T09:00:00.000Z",
+  }, now);
+  state.actionTasks.push(task);
+  assert.equal(task.brand_id, "BR-A");
+  assert.equal(task.case_id, "CASE-A");
+  assert.equal(task.status, "待处理");
+  assert.equal(task.version, 1);
+  assert.equal(task.generated, false);
+
+  assert.throws(
+    () => createActionTask(state, {
+      case_id: "CASE-A",
+      brand_id: "BR-B",
+      title: "不应跨品牌保存",
+    }, now),
+    /品牌不一致/,
+    "任务不能跨品牌挂到其他 Case。",
+  );
+  assert.throws(
+    () => createActionTask(state, {
+      case_id: "CASE-A",
+      title: "",
+    }, now),
+    /必须填写标题/,
+  );
+  assert.throws(
+    () => completeTask(state, "TASK-MANUAL-A", "", now),
+    /必须填写完成证据/,
+  );
+
+  const complete = completeTask(state, "TASK-MANUAL-A", "报价已由达人邮件确认", now);
+  assert.equal(complete.status, "已完成");
+  assert.equal(complete.completed_at, now);
+  assert.equal(complete.version, 2);
+
+  task.brand_id = "BR-B";
+  assert.throws(
+    () => completeTask(state, "TASK-MANUAL-A", "不应写入", now),
+    /品牌不一致/,
+    "读取到跨品牌的异常任务后，完成操作必须拒绝写入。",
+  );
+}
+
 function testOptimisticLocking() {
   const state = fixture();
   const first = patchVersionedRecord(state.cases, "CASE-A", 1, { stage: "初步沟通" }, now);
@@ -217,7 +274,8 @@ function testCaseStageAuditContract() {
 
 testCaseIsolationAndTriage();
 testTaskLifecycle();
+testPersistedTaskContract();
 testOptimisticLocking();
 testCaseStageContract();
 testCaseStageAuditContract();
-console.log("PASS CRM regression: Case isolation, manual mail triage, action task lifecycle, optimistic locking, and stage audit.");
+console.log("PASS CRM regression: Case isolation, persistent action-task contract, manual mail triage, action task lifecycle, optimistic locking, and stage audit.");

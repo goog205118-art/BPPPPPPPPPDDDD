@@ -533,6 +533,7 @@ const emptyState = {
   matches: [],
   followUps: [],
   cases: [],
+  actionTasks: [],
   followUpEvents: [],
   contactTracks: [],
   mailInbox: [],
@@ -1508,7 +1509,7 @@ function ensureStateShape(nextState) {
       updatedAt: text(brand?.updatedAt) || new Date().toISOString(),
     });
   }
-  for (const type of ["creators", "resources", "leads", "products", "cooperations", "matches", "cases", "followUps"]) {
+  for (const type of ["creators", "resources", "leads", "products", "cooperations", "matches", "cases", "followUps", "actionTasks"]) {
     for (const row of Array.isArray(nextState?.[type]) ? nextState[type] : []) {
       if (text(row?.brand)) ensureBrand(shaped, row.brand);
     }
@@ -1601,6 +1602,50 @@ function ensureStateShape(nextState) {
         case_id: text(row.case_id),
         candidate_case_ids: Array.isArray(row.candidate_case_ids) ? row.candidate_case_ids.map(text).filter(Boolean) : [],
       }, shaped))
+    : [];
+  shaped.actionTasks = Array.isArray(nextState?.actionTasks)
+    ? nextState.actionTasks.map((row) => {
+        const linkedCase = caseById.get(text(row.case_id));
+        const originalBrandId = text(row.brand_id);
+        const originalStatus = text(row.status) || "待处理";
+        const validationError = !linkedCase
+          ? "行动任务关联的 Case 不存在。"
+          : originalBrandId && originalBrandId !== text(linkedCase.brand_id)
+            ? "行动任务与 Case 品牌不一致，禁止跨品牌保存。"
+            : originalStatus === "已完成" && !text(row.completion_evidence)
+              ? "已完成行动任务缺少完成证据。"
+              : !text(row.title)
+                ? "行动任务缺少标题。"
+                : "";
+        const normalized = {
+          ...row,
+          case_id: text(row.case_id),
+          source: text(row.source) || "manual",
+          source_id: text(row.source_id),
+          type: text(row.type) || "general",
+          title: text(row.title),
+          description: text(row.description),
+          owner_id: text(row.owner_id),
+          owner_name: text(row.owner_name),
+          priority: ["高", "中", "低", "普通"].includes(text(row.priority)) ? text(row.priority) : "普通",
+          due_at: text(row.due_at),
+          status: validationError ? "待修复" : ["待处理", "已完成", "已失效", "已跳过", "待修复"].includes(originalStatus) ? originalStatus : "待处理",
+          completion_evidence: text(row.completion_evidence),
+          completed_at: text(row.completed_at),
+          dedupe_key: text(row.dedupe_key),
+          generated: ["1", "true", "yes", "是"].includes(String(row.generated || "").trim().toLowerCase()),
+          validation_error: validationError,
+          version: Math.max(1, Number(row.version) || 1),
+        };
+        if (linkedCase && !validationError) {
+          return applyRecordBrand({
+            ...normalized,
+            brand_id: linkedCase.brand_id,
+            brand: linkedCase.brand,
+          }, shaped);
+        }
+        return applyRecordBrand(normalized, shaped);
+      })
     : [];
   shaped.matches = Array.isArray(nextState?.matches)
     ? nextState.matches.map((row) => applyRecordBrand({

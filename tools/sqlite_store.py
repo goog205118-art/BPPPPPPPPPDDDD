@@ -173,6 +173,30 @@ SCHEMA = {
         "createdAt": "TEXT",
         "updatedAt": "TEXT",
     },
+    "actionTasks": {
+        "id": "TEXT PRIMARY KEY",
+        "brand_id": "TEXT",
+        "brand": "TEXT",
+        "case_id": "TEXT",
+        "source": "TEXT",
+        "source_id": "TEXT",
+        "type": "TEXT",
+        "title": "TEXT",
+        "description": "TEXT",
+        "owner_id": "TEXT",
+        "owner_name": "TEXT",
+        "priority": "TEXT",
+        "due_at": "TEXT",
+        "status": "TEXT",
+        "completion_evidence": "TEXT",
+        "completed_at": "TEXT",
+        "dedupe_key": "TEXT",
+        "generated": "REAL",
+        "validation_error": "TEXT",
+        "version": "REAL",
+        "createdAt": "TEXT",
+        "updatedAt": "TEXT",
+    },
     "matches": {
         "id": "TEXT PRIMARY KEY",
         "brand_id": "TEXT",
@@ -387,6 +411,7 @@ def rows_to_state(conn):
         "matches": [],
         "followUps": [],
         "cases": [],
+        "actionTasks": [],
         "followUpEvents": [],
         "mailInbox": [],
         "contactTracks": [],
@@ -420,6 +445,8 @@ def row_to_dict(row):
     payload = {key: row[key] for key in row.keys()}
     if "has_unread_reply" in payload:
         payload["has_unread_reply"] = parse_flag(payload["has_unread_reply"])
+    if "generated" in payload:
+        payload["generated"] = parse_flag(payload["generated"])
     for key in ("beforeCounts", "snapshot", "selected_resource_ids", "product_ids", "candidate_creator_ids", "candidate_lead_ids", "candidate_brand_ids", "candidate_follow_up_ids", "candidate_case_ids", "references"):
         if payload.get(key):
             try:
@@ -482,7 +509,7 @@ def save_state(conn, state):
 
             for row in rows:
                 values = [
-                    int(parse_flag(row.get(key))) if table == "followUps" and key == "has_unread_reply" else normalize_value(row.get(key))
+                    int(parse_flag(row.get(key))) if (table == "followUps" and key == "has_unread_reply") or (table == "actionTasks" and key == "generated") else normalize_value(row.get(key))
                     for key in keys
                 ]
                 conn.execute(insert_sql, values)

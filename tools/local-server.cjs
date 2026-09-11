@@ -82,6 +82,7 @@ const defaultState = {
   matches: [],
   followUps: [],
   cases: [],
+  actionTasks: [],
   followUpEvents: [],
   contactTracks: [],
   mailInbox: [],
@@ -141,7 +142,7 @@ function generatedBrandId(name) {
 
 function normalizeBusinessState(rawState) {
   const state = rawState && typeof rawState === "object" ? rawState : {};
-  const rawCollections = ["creators", "resources", "leads", "products", "cooperations", "matches", "cases", "followUps", "contactTracks"];
+  const rawCollections = ["creators", "resources", "leads", "products", "cooperations", "matches", "cases", "followUps", "contactTracks", "actionTasks"];
   const brandsByKey = new Map();
   const brandsById = new Map();
   const addBrand = (raw) => {
@@ -318,6 +319,51 @@ function normalizeBusinessState(rawState) {
   migrationState.contactTracks = contactTracks;
   linkLegacyCaseReferences(migrationState);
   state.meta = migrationState.meta;
+  const caseById = new Map(cases.map((row) => [textValue(row.id), row]));
+  const actionTasks = Array.isArray(state.actionTasks)
+    ? state.actionTasks.map((row) => {
+        const linkedCase = caseById.get(textValue(row.case_id));
+        const originalBrandId = textValue(row.brand_id);
+        const originalStatus = textValue(row.status) || "待处理";
+        const validationError = !linkedCase
+          ? "行动任务关联的 Case 不存在。"
+          : originalBrandId && originalBrandId !== textValue(linkedCase.brand_id)
+            ? "行动任务与 Case 品牌不一致，禁止跨品牌保存。"
+            : originalStatus === "已完成" && !textValue(row.completion_evidence)
+              ? "已完成行动任务缺少完成证据。"
+              : !textValue(row.title)
+                ? "行动任务缺少标题。"
+                : "";
+        const normalized = {
+          ...row,
+          case_id: textValue(row.case_id),
+          source: textValue(row.source) || "manual",
+          source_id: textValue(row.source_id),
+          type: textValue(row.type) || "general",
+          title: textValue(row.title),
+          description: textValue(row.description),
+          owner_id: textValue(row.owner_id),
+          owner_name: textValue(row.owner_name),
+          priority: ["高", "中", "低", "普通"].includes(textValue(row.priority)) ? textValue(row.priority) : "普通",
+          due_at: textValue(row.due_at),
+          status: validationError ? "待修复" : ["待处理", "已完成", "已失效", "已跳过", "待修复"].includes(originalStatus) ? originalStatus : "待处理",
+          completion_evidence: textValue(row.completion_evidence),
+          completed_at: textValue(row.completed_at),
+          dedupe_key: textValue(row.dedupe_key),
+          generated: ["1", "true", "yes", "是"].includes(String(row.generated || "").trim().toLowerCase()),
+          validation_error: validationError,
+          version: Math.max(1, Number(row.version) || 1),
+        };
+        if (linkedCase && !validationError) {
+          return resolveBrand({
+            ...normalized,
+            brand_id: linkedCase.brand_id,
+            brand: linkedCase.brand,
+          }, brandsById.get(textValue(linkedCase.brand_id)));
+        }
+        return resolveBrand(normalized);
+      })
+    : [];
 
   return {
     ...defaultState,
@@ -332,6 +378,7 @@ function normalizeBusinessState(rawState) {
     matches,
     cases,
     followUps,
+    actionTasks,
     followUpEvents,
     contactTracks,
     mailInbox,
