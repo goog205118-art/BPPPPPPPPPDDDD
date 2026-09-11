@@ -10,7 +10,8 @@
     "start": "node tools/local-server.cjs",
     "dev": "node tools/local-server.cjs",
     "check": "node --check tools/local-server.cjs && node --check \"api/[...route].mjs\" && node --check app/app.js",
-    "test:followup-isolation": "node tools/followup-isolation-test.cjs"
+    "test:followup-isolation": "node tools/followup-isolation-test.cjs",
+    "test:crm-regression": "node tools/crm-regression-test.cjs"
   },
   "dependencies": {
     "@vercel/blob": "^2.8.0",
