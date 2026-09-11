@@ -1617,6 +1617,10 @@ function ensureStateShape(nextState) {
         ...row,
         case_id: text(row.case_id),
         candidate_case_ids: Array.isArray(row.candidate_case_ids) ? row.candidate_case_ids.map(text).filter(Boolean) : [],
+        match_disposition: text(row.match_disposition),
+        match_score: Number(row.match_score) || 0,
+        match_reasons: Array.isArray(row.match_reasons) ? row.match_reasons.map(text).filter(Boolean) : [],
+        match_candidates: Array.isArray(row.match_candidates) ? row.match_candidates : [],
       }, shaped))
     : [];
   shaped.actionTasks = Array.isArray(nextState?.actionTasks)

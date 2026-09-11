@@ -307,8 +307,14 @@
 - `candidate_brand_ids`
 - `candidate_follow_up_ids`
 - `candidate_case_ids`
+- `match_disposition`（`unique`、`ambiguous`、`unmatched`；仅表达匹配置信度，不会绕过人工归档）
+- `match_score`
+- `match_reasons`（匹配结论的简短说明）
+- `match_candidates`（候选品牌、联系人、Case、分数与逐条规则证据；用于后续邮件分诊台解释推荐）
 - `createdAt`
 - `updatedAt`
+
+同步时会对线程 Message-ID、联系人邮箱、联系人轨迹、首联 30 天窗口、活跃 FollowUp 与活跃 Case 计算可解释评分。评分为 `unique` 才可作为自动归档候选；最高分接近其他候选时为 `ambiguous`，证据不足时为 `unmatched`。共享邮箱绝不按账号的第一个品牌默认归属，跨品牌候选也绝不自动归档。评分与每条证据会保留在待归档邮件记录中，供后续分诊台展示。
 
 当 `status` 为 `needs_followup` 且没有活跃跟进时，可新建一条默认合作跟进后归档；当同一达人有多条活跃跟进时，必须先选择具体跟进。无法自动确认达人或匹配多个达人时，不提供自动归档，但前端可从当前品牌达人库人工绑定已有达人后继续处理；品牌不一致时始终阻止归档。人工确认或 Foxmail 导入保存失败时，页面内存状态会恢复到操作前快照。
 

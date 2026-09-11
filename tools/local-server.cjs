@@ -303,6 +303,10 @@ function normalizeBusinessState(rawState) {
         ...row,
         case_id: textValue(row.case_id),
         candidate_case_ids: Array.isArray(row.candidate_case_ids) ? row.candidate_case_ids.map(textValue).filter(Boolean) : [],
+        match_disposition: textValue(row.match_disposition),
+        match_score: Number(row.match_score) || 0,
+        match_reasons: Array.isArray(row.match_reasons) ? row.match_reasons.map(textValue).filter(Boolean) : [],
+        match_candidates: Array.isArray(row.match_candidates) ? row.match_candidates : [],
         body: textValue(row.body),
       }))
     : [];

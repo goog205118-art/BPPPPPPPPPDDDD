@@ -345,6 +345,10 @@ SCHEMA = {
         "candidate_brand_ids": "TEXT",
         "candidate_follow_up_ids": "TEXT",
         "candidate_case_ids": "TEXT",
+        "match_disposition": "TEXT",
+        "match_score": "REAL",
+        "match_reasons": "TEXT",
+        "match_candidates": "TEXT",
         "createdAt": "TEXT",
         "updatedAt": "TEXT",
     },
@@ -464,7 +468,7 @@ def row_to_dict(row):
         payload["has_unread_reply"] = parse_flag(payload["has_unread_reply"])
     if "generated" in payload:
         payload["generated"] = parse_flag(payload["generated"])
-    for key in ("beforeCounts", "snapshot", "selected_resource_ids", "product_ids", "candidate_creator_ids", "candidate_lead_ids", "candidate_brand_ids", "candidate_follow_up_ids", "candidate_case_ids", "references", "metadata"):
+    for key in ("beforeCounts", "snapshot", "selected_resource_ids", "product_ids", "candidate_creator_ids", "candidate_lead_ids", "candidate_brand_ids", "candidate_follow_up_ids", "candidate_case_ids", "match_reasons", "match_candidates", "references", "metadata"):
         if payload.get(key):
             try:
                 payload[key] = json.loads(payload[key])

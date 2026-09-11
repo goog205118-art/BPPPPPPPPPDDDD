@@ -15,7 +15,8 @@
     "test:case-display": "node tools/case-display-regression-test.cjs",
     "test:action-task-storage": "node tools/action-task-storage-test.cjs",
     "test:today-action-center": "node tools/today-action-center-regression-test.cjs",
-    "test:task-collaboration": "node tools/task-collaboration-regression-test.cjs"
+    "test:task-collaboration": "node tools/task-collaboration-regression-test.cjs",
+    "test:mail-routing-score": "node tools/mail-routing-score-regression-test.cjs"
   },
   "dependencies": {
     "@vercel/blob": "^2.8.0",

@@ -2,6 +2,7 @@ const { createCipheriv, createDecipheriv, createHash, randomBytes } = require("n
 const { ImapFlow } = require("imapflow");
 const { simpleParser } = require("mailparser");
 const nodemailer = require("nodemailer");
+const { scoreMailRouting } = require("./mail-routing-domain.cjs");
 
 const DEFAULT_MAIL_ACCOUNT = {
   id: "",
@@ -1005,6 +1006,7 @@ function upsertContactTrack(state, input = {}, now = new Date().toISOString()) {
 
 function routeMailRecord(state, record, account, now = new Date().toISOString()) {
   const scope = accountBrandIds(account);
+  const match = scoreMailRouting(state, record, account);
   const senderEmails = emailsIn(record.sender);
   const recipientEmails = emailsIn(record.recipients);
   const directions = [];
@@ -1064,6 +1066,7 @@ function routeMailRecord(state, record, account, now = new Date().toISOString())
           brand: followUp.brand,
         },
         matched: "thread",
+        match,
         stageAdvancedFromReply: Boolean(replyProgress.stageAdvanced),
         terminalFollowUp: Boolean(replyProgress.terminal),
       };
@@ -1092,6 +1095,7 @@ function routeMailRecord(state, record, account, now = new Date().toISOString())
         autoCreated: Boolean(followUpResult.created),
         record: { ...record, direction: "inbound", brand_id: followUp.brand_id, brand: followUp.brand },
         matched: "contact_track",
+        match,
         stageAdvancedFromReply: Boolean(replyProgress.stageAdvanced),
         terminalFollowUp: Boolean(replyProgress.terminal),
       };
@@ -1113,6 +1117,7 @@ function routeMailRecord(state, record, account, now = new Date().toISOString())
           autoCreated: false,
           record: { ...record, direction: "inbound", brand_id: followUp.brand_id, brand: followUp.brand },
           matched: "active_followup_person",
+          match,
           contactTrack,
           stageAdvancedFromReply: Boolean(replyProgress.stageAdvanced),
           terminalFollowUp: Boolean(replyProgress.terminal),
@@ -1146,6 +1151,7 @@ function routeMailRecord(state, record, account, now = new Date().toISOString())
           autoCreated: Boolean(followUpResult.created),
           record: { ...record, direction: "inbound", brand_id: followUp.brand_id, brand: followUp.brand },
           matched: "profile_outreach_window",
+          match,
           stageAdvancedFromReply: Boolean(replyProgress.stageAdvanced),
           terminalFollowUp: Boolean(replyProgress.terminal),
         };
@@ -1156,6 +1162,7 @@ function routeMailRecord(state, record, account, now = new Date().toISOString())
       status: "needs_followup",
       record: { ...record, direction: "inbound", brand_id: person.brand_id, brand: person.brand },
       people: [person],
+      match,
     };
   }
 
@@ -1190,6 +1197,7 @@ function routeMailRecord(state, record, account, now = new Date().toISOString())
           autoCreated: Boolean(followUpResult.created),
           record: { ...record, direction: "outbound", lead_id: person.id, brand_id: followUp.brand_id, brand: followUp.brand },
           matched: "external_outbound_lead",
+          match,
           stageAdvancedFromReply: false,
           terminalFollowUp: false,
         };
@@ -1209,12 +1217,13 @@ function routeMailRecord(state, record, account, now = new Date().toISOString())
           followUp,
           record: { ...record, direction: "outbound", brand_id: followUp.brand_id, brand: followUp.brand },
           matched: "external_outbound_followup",
+          match,
           stageAdvancedFromReply: false,
           terminalFollowUp: false,
         };
       }
     }
-    return { kind: "tracked_outbound", track, record: { ...record, direction: "outbound", brand_id: person.brand_id, brand: person.brand }, people: [person] };
+    return { kind: "tracked_outbound", track, record: { ...record, direction: "outbound", brand_id: person.brand_id, brand: person.brand }, people: [person], match };
   }
 
   const candidates = inboundPeople.length ? inboundPeople : outboundPeople;
@@ -1226,8 +1235,9 @@ function routeMailRecord(state, record, account, now = new Date().toISOString())
     status: hasMultipleCandidateBrands ? "needs_brand_confirmation" : hasMultipleCandidates ? "ambiguous_creator" : "unmatched",
     record: { ...record, direction: inboundPeople.length ? "inbound" : outboundPeople.length ? "outbound" : record.direction, brand_id: candidateBrandIds.length === 1 ? candidateBrandIds[0] : "" },
     people: candidates,
-    candidateBrandIds: candidateBrandIds.length ? candidateBrandIds : scope,
+    candidateBrandIds: match.candidate_brand_ids.length ? match.candidate_brand_ids : candidateBrandIds.length ? candidateBrandIds : scope,
     reason: directions.join(","),
+    match,
   };
 }
 
@@ -1342,16 +1352,30 @@ async function syncMailAccount(settings, state, keyMaterial, options = {}) {
           const candidates = routed.people || [];
           const creator = candidates.length === 1 && candidates[0].person_type === "creator" ? candidates[0] : null;
           const status = routed.status || (candidates.length > 1 ? "ambiguous_creator" : creator ? "needs_followup" : "unmatched");
+          const match = routed.match || scoreMailRouting(state, routed.record || record, account);
           state.mailInbox.unshift({
             ...routed.record,
             status,
             brand_id: text(routed.record.brand_id),
             matched_creator_id: creator?.id || "",
             matched_creator_name: creator?.name || "",
-            candidate_creator_ids: candidates.filter((item) => item.person_type === "creator").map((item) => item.id),
-            candidate_lead_ids: candidates.filter((item) => item.person_type === "lead").map((item) => item.id),
-            candidate_brand_ids: routed.candidateBrandIds || [...new Set(candidates.map((item) => item.brand_id).filter(Boolean))],
-            candidate_follow_up_ids: creator ? activeFollowUps(state, creator.id).map((item) => item.id) : [],
+            candidate_creator_ids: match.candidate_creator_ids.length
+              ? match.candidate_creator_ids
+              : candidates.filter((item) => item.person_type === "creator").map((item) => item.id),
+            candidate_lead_ids: match.candidate_lead_ids.length
+              ? match.candidate_lead_ids
+              : candidates.filter((item) => item.person_type === "lead").map((item) => item.id),
+            candidate_brand_ids: match.candidate_brand_ids.length
+              ? match.candidate_brand_ids
+              : routed.candidateBrandIds || [...new Set(candidates.map((item) => item.brand_id).filter(Boolean))],
+            candidate_follow_up_ids: match.candidate_follow_up_ids.length
+              ? match.candidate_follow_up_ids
+              : creator ? activeFollowUps(state, creator.id).map((item) => item.id) : [],
+            candidate_case_ids: match.candidate_case_ids,
+            match_disposition: match.disposition,
+            match_score: match.score,
+            match_reasons: match.reasons,
+            match_candidates: match.candidates,
           });
           summary.added += 1;
           summary.pending += 1;
