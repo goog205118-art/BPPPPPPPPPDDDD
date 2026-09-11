@@ -470,6 +470,142 @@ function createTriageCase(state, input = {}, now = new Date().toISOString()) {
   return { case: caseRow, mail: archived.mail, eventCreated: archived.eventCreated };
 }
 
+function normalizedEmail(value) {
+  return addressList(value)[0] || "";
+}
+
+function normalizedSocialUrl(value) {
+  const raw = text(value);
+  if (!raw) return "";
+  try {
+    const url = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+    return `${url.hostname.toLowerCase().replace(/^www\./, "")}${url.pathname.replace(/\/+$/, "").toLowerCase()}`;
+  } catch {
+    return raw.toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/+$/, "");
+  }
+}
+
+function createDomainError(message, code = "", details = []) {
+  const error = new Error(message);
+  error.code = code;
+  error.details = details;
+  return error;
+}
+
+function triageLeadDuplicateSuggestions(state, input = {}) {
+  const brandId = text(input.brand_id);
+  const email = normalizedEmail(input.email);
+  const socialUrl = normalizedSocialUrl(input.social_url);
+  if (!brandId || (!email && !socialUrl)) return [];
+  const matches = [];
+  for (const type of ["leads", "creators"]) {
+    for (const row of Array.isArray(state?.[type]) ? state[type] : []) {
+      if (text(row.brand_id) !== brandId) continue;
+      const matched = [];
+      if (email && normalizedEmail(row.email) === email) matched.push("邮箱");
+      if (socialUrl && normalizedSocialUrl(row.social_url) === socialUrl) matched.push("社媒地址");
+      if (matched.length) {
+        matches.push({
+          type,
+          id: text(row.id),
+          name: text(row.name) || text(row.handle) || text(row.email) || "未命名资料",
+          matched,
+        });
+      }
+    }
+  }
+  return matches;
+}
+
+function senderDisplayName(email) {
+  const localPart = text(email).split("@")[0].replace(/[._-]+/g, " ").trim();
+  return localPart ? `未知合作来信（${localPart}）` : "未知合作来信";
+}
+
+function createTriageLead(state, input = {}, now = new Date().toISOString()) {
+  const mailId = text(input.mail_id);
+  const inbox = Array.isArray(state?.mailInbox) ? state.mailInbox : [];
+  const mailIndex = inbox.findIndex((item) => text(item.id) === mailId);
+  if (mailIndex < 0) throw new Error("未找到待分诊邮件。");
+  const mailRow = inbox[mailIndex];
+  ensureOpenTriageMail(mailRow);
+  if (text(mailRow.triage_status) === "lead_created" || text(mailRow.lead_id)) {
+    throw new Error("该邮件已创建待开发达人，不能重复处理。");
+  }
+  if (text(mailRow.direction) !== "inbound") {
+    throw new Error("只有入站邮件可以创建待开发达人。");
+  }
+  const brandId = text(mailRow.brand_id);
+  if (!brandId) throw new Error("请先人工确认邮件所属品牌后再创建待开发达人。");
+  if (text(input.brand_id) && text(input.brand_id) !== brandId) {
+    throw new Error("邮件与待开发达人品牌不一致，禁止跨品牌创建。");
+  }
+  if (text(mailRow.matched_creator_id) || (Array.isArray(mailRow.candidate_creator_ids) && mailRow.candidate_creator_ids.length)) {
+    throw new Error("该邮件已关联或候选关联到已有达人，不能降级创建待开发达人。");
+  }
+  if ((Array.isArray(mailRow.candidate_case_ids) && mailRow.candidate_case_ids.length)
+    || (Array.isArray(mailRow.candidate_follow_up_ids) && mailRow.candidate_follow_up_ids.length)) {
+    throw new Error("该邮件已有活跃合作候选，不能创建待开发达人。");
+  }
+
+  const email = normalizedEmail(input.email || mailRow.sender);
+  if (!email) throw new Error("未能从来信中识别有效邮箱，请补充有效邮箱后再创建。");
+  const socialUrl = text(input.social_url);
+  const duplicates = triageLeadDuplicateSuggestions(state, { brand_id: brandId, email, social_url: socialUrl });
+  if (duplicates.length) {
+    const labels = duplicates.map((item) => `${item.type === "creators" ? "达人库" : "待开发达人"}「${item.name}」`).join("、");
+    throw createDomainError(`检测到同品牌重复资料：${labels}。请先打开已有记录确认，不会自动合并或重复创建。`, "duplicate_identity", duplicates);
+  }
+
+  const timestamp = iso(now);
+  const brand = (Array.isArray(state?.brands) ? state.brands : [])
+    .find((item) => text(item.id) === brandId);
+  const sourceSubject = text(mailRow.subject) || "无主题邮件";
+  const lead = {
+    id: text(input.lead_id) || `LEAD-${randomUUID()}`,
+    brand_id: brandId,
+    brand: text(brand?.name) || text(mailRow.brand),
+    social_url: socialUrl,
+    name: text(input.name) || senderDisplayName(email),
+    handle: text(input.handle),
+    platform: text(input.platform),
+    country: text(input.country),
+    niche: text(input.niche),
+    followers: null,
+    avg_views: null,
+    engagement: null,
+    email,
+    email_source: `邮件来信：${sourceSubject}`,
+    source_mail_inbox_id: mailRow.id,
+    source_mail_message_id: text(mailRow.message_id),
+    source_mail_sender: text(mailRow.sender),
+    source_mail_occurred_at: text(mailRow.occurred_at),
+    source_mail_subject: sourceSubject,
+    source_mail_fingerprint: text(mailRow.fingerprint),
+    source_mail_server_key: text(mailRow.server_key),
+    source_mail_imap_uid: text(mailRow.imap_uid),
+    last_outreach_at: "",
+    status: "待开发",
+    priority: text(input.priority) || "中",
+    notes: text(input.notes),
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+  const leads = Array.isArray(state?.leads) ? state.leads : (state.leads = []);
+  leads.push(lead);
+  const updatedMail = {
+    ...mailRow,
+    lead_id: lead.id,
+    triage_status: "lead_created",
+    triage_reason: text(input.reason) || "人工从陌生合作来信创建待开发达人",
+    triage_resolved_at: timestamp,
+    triage_resolved_by: text(input.actor_name) || "人工",
+    updatedAt: timestamp,
+  };
+  inbox[mailIndex] = updatedMail;
+  return { lead, mail: updatedMail, duplicateSuggestions: [] };
+}
+
 function taskKey(caseId, type, sourceId = "") {
   return [text(caseId), text(type), text(sourceId)].join(":");
 }
@@ -979,6 +1115,7 @@ module.exports = {
   completeTask,
   createActionTask,
   createCase,
+  createTriageLead,
   createTriageCase,
   deferTask,
   ignoreTriageMail,
@@ -988,5 +1125,6 @@ module.exports = {
   skipTask,
   taskEventsForTask,
   taskKey,
+  triageLeadDuplicateSuggestions,
   triageCandidateCases,
 };

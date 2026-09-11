@@ -74,6 +74,9 @@
 - `engagement`
 - `email`（仅保留可验证公开邮箱）
 - `email_source`（邮箱所在公开页面链接）
+- `source_mail_inbox_id`（由陌生合作来信人工创建时，关联来源 `mailInbox.id`）
+- `source_mail_message_id`、`source_mail_sender`、`source_mail_occurred_at`、`source_mail_subject`（来源邮件身份与发生时间）
+- `source_mail_fingerprint`、`source_mail_server_key`、`source_mail_imap_uid`（用于回溯来源邮件和避免重复处理）
 - `last_outreach_at`（最近首联 / 复联发件时间；可人工补录历史首发邮件）
 - `status`（待开发、已联系、已转达人库、不适合）
 - `notes`
@@ -289,6 +292,7 @@
 - `excerpt`
 - `brand_id`（已确认归属时写入）
 - `case_id`（人工或规则确认后的目标 Case）
+- `lead_id`（从陌生合作来信人工创建待开发达人后关联 `leads.id`）
 - `mailbox_account_id`
 - `body`
 - `body_cached_at`
@@ -314,7 +318,7 @@
 - `match_score`
 - `match_reasons`（匹配结论的简短说明）
 - `match_candidates`（候选品牌、联系人、Case、分数与逐条规则证据；用于后续邮件分诊台解释推荐）
-- `triage_status`（空值为待处理；`archived` 为人工确认已归档；`ignored` 为人工忽略）
+- `triage_status`（空值为待处理；`archived` 为人工确认已归档；`ignored` 为人工忽略；`lead_created` 为已从陌生合作来信创建待开发达人）
 - `triage_reason`（人工归档或忽略的理由；忽略时必填）
 - `triage_resolved_at`
 - `triage_resolved_by`
@@ -326,6 +330,8 @@
 邮件分诊台必须展示候选达人、候选 Case、分数及逐条规则证据。人工归档只能选取当前邮件候选范围内、同一品牌且未结案的 Case；没有候选 Case 时不得退化为选择任意同品牌 Case。人工绑定已有达人后，系统会重新写入该达人当前活跃 Case 的候选范围。忽略邮件必须填写理由，保留原始 `mailInbox` 记录，但不会创建 Case/FollowUp 时间线事件；已忽略邮件不可再次归档。仅当邮件唯一识别到已有达人且该达人没有活跃 Case 时，才能新建默认阶段为“初步沟通”的 Case 并归档，不能跳过到报价、寄样、发布等阶段。
 
 当 `status` 为 `needs_followup` 且没有活跃跟进时，可新建一条默认合作跟进后归档；当同一达人有多条活跃跟进时，必须先选择具体跟进。无法自动确认达人或匹配多个达人时，不提供自动归档，但前端可从当前品牌达人库人工绑定已有达人后继续处理；品牌不一致时始终阻止归档。人工确认或 Foxmail 导入保存失败时，页面内存状态会恢复到操作前快照。
+
+对于同品牌、入站、已确认品牌且未关联现有达人或活跃 Case 候选的陌生合作来信，分诊台可由人工明确确认后创建一条“待开发”达人线索。创建时必须保留来源邮件身份，并以来源邮箱及可选社媒地址同时检查同品牌的待开发达人和达人库；出现重复时只提示既有资料，不会自动合并或重复创建。此操作不会创建 Case、FollowUp、邮件时间线事件或行动任务，也不会调用 AI 或发送邮件。
 
 邮件同步会先匹配现有“已联系待回复”轨迹；若历史首发邮件未同步为轨迹，但能唯一匹配当前品牌中的达人或待开发达人，并且该资料的 `last_outreach_at` 距来信不超过 30 天，则会自动建立“初步沟通”合作跟进。超过 30 天、来信早于发件时间、同邮箱跨品牌或匹配多人时，邮件仍停留在待人工归档区。30 天窗口只用于首次自动建入合作跟进；已经明确关联到某条合作跟进的邮件线程，后续来信会持续归档到原跟进，不会因合作周期较长而中断。
 

@@ -4631,6 +4631,70 @@ function pendingMailCreatorOptions(message) {
     });
 }
 
+function mailLeadDraftName(message) {
+  const senderEmail = firstEmail(message?.sender);
+  const localPart = senderEmail.split("@")[0].replace(/[._-]+/g, " ").trim();
+  return localPart ? `未知合作来信（${localPart}）` : "未知合作来信";
+}
+
+function pendingMailLeadSocialIdentity(value) {
+  const raw = text(value);
+  if (!raw) return "";
+  try {
+    const parsed = new URL(/^https?:\/\//i.test(raw) ? raw : `https://${raw}`);
+    return `${parsed.hostname.toLowerCase().replace(/^www\./, "")}${parsed.pathname.replace(/\/+$/, "").toLowerCase()}`;
+  } catch {
+    return raw.toLowerCase().replace(/^https?:\/\//, "").replace(/^www\./, "").replace(/\/+$/, "");
+  }
+}
+
+function pendingMailLeadDuplicates(message, draft = {}) {
+  const brandId = text(message?.brand_id);
+  const email = firstEmail(draft.email || message?.sender);
+  const socialUrl = pendingMailLeadSocialIdentity(draft.social_url);
+  if (!brandId || (!email && !socialUrl)) return [];
+  return ["leads", "creators"].flatMap((type) =>
+    allRows(type)
+      .filter((row) => text(row.brand_id) === brandId)
+      .map((row) => {
+        const matched = [];
+        if (email && firstEmail(row.email) === email) matched.push("邮箱");
+        if (socialUrl && pendingMailLeadSocialIdentity(row.social_url) === socialUrl) matched.push("社媒地址");
+        return matched.length ? { type, row, matched } : null;
+      })
+      .filter(Boolean),
+  );
+}
+
+function canCreateLeadFromPendingMail(message) {
+  if (text(message?.triage_status) || text(message?.lead_id)) return false;
+  if (text(message?.direction) !== "inbound" || !text(message?.brand_id)) return false;
+  if (text(message?.matched_creator_id)) return false;
+  if ((message?.candidate_creator_ids || []).map(text).filter(Boolean).length) return false;
+  if ((message?.candidate_case_ids || []).map(text).filter(Boolean).length) return false;
+  if ((message?.candidate_follow_up_ids || []).map(text).filter(Boolean).length) return false;
+  return Boolean(firstEmail(message?.sender));
+}
+
+function pendingMailLeadCreateMarkup(message, busy, isCurrentBusy) {
+  if (!canCreateLeadFromPendingMail(message)) return "";
+  const senderEmail = firstEmail(message.sender);
+  return `
+    <div class="mail-triage-create-lead">
+      <strong>作为陌生合作来信建立待开发达人</strong>
+      <small>仅创建待开发资料并保留该邮件来源；不会创建 Case、合作跟进、待办或发送邮件。</small>
+      <div class="mail-inbox-actions">
+        <input type="text" data-mail-lead-name="${escapeHtml(message.id)}" value="${escapeHtml(mailLeadDraftName(message))}" aria-label="待开发达人名称" ${busy ? "disabled" : ""} />
+        <input type="text" data-mail-lead-handle="${escapeHtml(message.id)}" placeholder="账号 Handle（选填）" aria-label="达人账号 Handle" ${busy ? "disabled" : ""} />
+        <input type="url" data-mail-lead-social-url="${escapeHtml(message.id)}" placeholder="社媒地址（选填，用于去重）" aria-label="达人社媒地址" ${busy ? "disabled" : ""} />
+        <button type="button" class="ghost" data-mail-create-lead="${escapeHtml(message.id)}" ${busy ? "disabled" : ""}>
+          ${isCurrentBusy ? "正在创建..." : "创建待开发达人"}
+        </button>
+      </div>
+      <small>来源邮箱：${escapeHtml(senderEmail)}</small>
+    </div>`;
+}
+
 function isTerminalTriageCase(caseRow) {
   return ["合作终止", "已结案", "未谈妥"].includes(text(caseRow?.stage));
 }
@@ -4730,6 +4794,7 @@ function mailInboxRowMarkup(message) {
   let action = "";
   const canManuallyAssignCreator = ["unmatched", "ambiguous_creator"].includes(text(message.status))
     || (message.status === "needs_followup" && !text(message.matched_creator_id));
+  const leadCreateMarkup = pendingMailLeadCreateMarkup(message, busy, isCurrentBusy);
   if (message.status === "needs_brand_confirmation") {
     const candidateIds = [...new Set((message.candidate_brand_ids || []).map(text).filter(Boolean))];
     const candidateBrands = candidateIds.length ? candidateIds.map(brandById).filter(Boolean) : state.data.brands || [];
@@ -4770,9 +4835,10 @@ function mailInboxRowMarkup(message) {
         <button type="button" class="ghost" data-mail-assign-creator="${escapeHtml(message.id)}" ${busy || !creators.length ? "disabled" : ""}>
           ${isCurrentBusy ? "正在绑定..." : "绑定达人并继续"}
         </button>
-      </div>`;
+      </div>
+      ${leadCreateMarkup}`;
   } else {
-    action = `<p class="mail-inbox-blocked">${escapeHtml(pendingMailBlockedReason(message))}</p>`;
+    action = `<p class="mail-inbox-blocked">${escapeHtml(pendingMailBlockedReason(message))}</p>${leadCreateMarkup}`;
   }
   return `
     <article class="mail-inbox-row">
@@ -5178,10 +5244,90 @@ async function ignorePendingMail(mailId) {
   }
 }
 
+async function createLeadFromPendingMail(mailId, draft = {}) {
+  if (state.followUpInboxBusyId) return;
+  state.followUpInboxBusyId = text(mailId);
+  setFollowUpInboxNotice("正在创建待开发达人并保留来源邮件...", "info");
+  renderFollowUpPage();
+  let snapshot = null;
+  try {
+    const message = (state.data.mailInbox || []).find((item) => text(item.id) === text(mailId));
+    if (!message) throw new Error("找不到这封待处理邮件，可能已被其他操作处理。");
+    if (!belongsToActiveBrand(message)) throw new Error("该邮件不属于当前工作区，请切换到对应品牌后处理。");
+    if (!canCreateLeadFromPendingMail(message)) {
+      throw new Error("该邮件已有关联达人、Case 候选或已完成分诊，不能再创建待开发达人。");
+    }
+    const email = firstEmail(draft.email || message.sender);
+    if (!email) throw new Error("未能从来信中识别有效邮箱，请补充后重新同步或人工录入。");
+    const duplicates = pendingMailLeadDuplicates(message, { email, social_url: draft.social_url });
+    if (duplicates.length) {
+      const labels = duplicates
+        .map(({ type, row, matched }) => `${entityConfig[type]?.title || type}「${row.name || row.handle || row.email || "未命名资料"}」(${matched.join("、")})`)
+        .join("、");
+      throw new Error(`检测到同品牌重复资料：${labels}。请先打开已有记录确认，系统不会自动合并或重复创建。`);
+    }
+    const brand = brandById(message.brand_id);
+    if (!brand) throw new Error("找不到该邮件所属品牌，请先重新确认品牌归属。");
+
+    snapshot = clone(state.data);
+    await withActivity("正在创建待开发达人", "只保存线索与来源邮件，不会创建 Case 或合作跟进...", async () => {
+      const now = new Date().toISOString();
+      const sourceSubject = text(message.subject) || "无主题邮件";
+      const lead = {
+        id: uid("LEAD"),
+        brand_id: brand.id,
+        brand: brand.name,
+        social_url: text(draft.social_url),
+        name: text(draft.name) || mailLeadDraftName(message),
+        handle: text(draft.handle),
+        platform: "",
+        country: "",
+        niche: "",
+        followers: null,
+        avg_views: null,
+        engagement: null,
+        email,
+        email_source: `邮件来信：${sourceSubject}`,
+        source_mail_inbox_id: message.id,
+        source_mail_message_id: text(message.message_id),
+        source_mail_sender: text(message.sender),
+        source_mail_occurred_at: text(message.occurred_at),
+        source_mail_subject: sourceSubject,
+        source_mail_fingerprint: text(message.fingerprint),
+        source_mail_server_key: text(message.server_key),
+        source_mail_imap_uid: text(message.imap_uid),
+        last_outreach_at: "",
+        status: "待开发",
+        priority: "中",
+        notes: "人工从陌生合作来信创建；请核对账号信息后再推进。",
+        createdAt: now,
+        updatedAt: now,
+      };
+      state.data.leads = [lead, ...(state.data.leads || [])];
+      Object.assign(message, {
+        lead_id: lead.id,
+        triage_status: "lead_created",
+        triage_reason: "人工从陌生合作来信创建待开发达人",
+        triage_resolved_at: now,
+        triage_resolved_by: "人工",
+        updatedAt: now,
+      });
+      await persist();
+    });
+    setFollowUpInboxNotice(`已从来信创建「${text(draft.name) || mailLeadDraftName(message)}」待开发达人，并保留邮件来源；未创建 Case 或合作跟进。`, "success");
+  } catch (error) {
+    if (snapshot) state.data = snapshot;
+    setFollowUpInboxNotice(error.message || "创建待开发达人失败。", "error");
+  } finally {
+    state.followUpInboxBusyId = "";
+    renderFollowUpPage();
+  }
+}
+
 function handlePendingMailAction(event) {
-  const trigger = event.currentTarget?.matches?.("[data-mail-create-followup], [data-mail-archive], [data-mail-confirm-brand], [data-mail-assign-creator], [data-mail-ignore]")
+  const trigger = event.currentTarget?.matches?.("[data-mail-create-followup], [data-mail-create-lead], [data-mail-archive], [data-mail-confirm-brand], [data-mail-assign-creator], [data-mail-ignore]")
     ? event.currentTarget
-    : event.target.closest("[data-mail-create-followup], [data-mail-archive], [data-mail-confirm-brand], [data-mail-assign-creator], [data-mail-ignore]");
+    : event.target.closest("[data-mail-create-followup], [data-mail-create-lead], [data-mail-archive], [data-mail-confirm-brand], [data-mail-assign-creator], [data-mail-ignore]");
   if (!trigger) return;
 
   event.preventDefault();
@@ -5198,6 +5344,15 @@ function handlePendingMailAction(event) {
   }
   if (trigger.dataset.mailCreateFollowup) {
     void createFollowUpAndArchiveMail(trigger.dataset.mailCreateFollowup);
+    return;
+  }
+  if (trigger.dataset.mailCreateLead) {
+    const row = trigger.closest(".mail-inbox-row");
+    void createLeadFromPendingMail(trigger.dataset.mailCreateLead, {
+      name: text(row?.querySelector("[data-mail-lead-name]")?.value),
+      handle: text(row?.querySelector("[data-mail-lead-handle]")?.value),
+      social_url: text(row?.querySelector("[data-mail-lead-social-url]")?.value),
+    });
     return;
   }
   if (trigger.dataset.mailAssignCreator) {
@@ -6612,7 +6767,7 @@ function renderFollowUpPage() {
   `;
 
   elements.followUpPage.querySelectorAll("[data-followup-new]").forEach((button) => button.addEventListener("click", () => openFollowUpEditor()));
-  elements.followUpPage.querySelectorAll("[data-mail-create-followup], [data-mail-archive], [data-mail-confirm-brand], [data-mail-assign-creator], [data-mail-ignore]").forEach((button) => {
+  elements.followUpPage.querySelectorAll("[data-mail-create-followup], [data-mail-create-lead], [data-mail-archive], [data-mail-confirm-brand], [data-mail-assign-creator], [data-mail-ignore]").forEach((button) => {
     button.addEventListener("click", handlePendingMailAction);
   });
   elements.followUpPage.querySelector("[data-contact-track-form]")?.addEventListener("submit", (event) => {

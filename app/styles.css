@@ -5126,6 +5126,47 @@ body.access-locked .app-shell {
   font-size: 0.67rem;
 }
 
+.mail-triage-create-lead {
+  display: grid;
+  gap: 5px;
+  padding-top: 6px;
+  border-top: 1px solid #2d4053;
+}
+
+.mail-triage-create-lead > strong {
+  color: #d5e5f1;
+  font-size: 0.67rem;
+}
+
+.mail-triage-create-lead > small {
+  color: #8ea8bd;
+  font-size: 0.62rem;
+  line-height: 1.4;
+}
+
+.mail-triage-create-lead .mail-inbox-actions {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr);
+}
+
+.mail-triage-create-lead input {
+  min-width: 0;
+  height: 28px;
+  border-color: #35485b;
+  background: #121b25;
+  color: #d8e5ef;
+  font-size: 0.68rem;
+}
+
+.mail-triage-create-lead input[data-mail-lead-social-url] {
+  grid-column: 1 / -1;
+}
+
+.mail-triage-create-lead button {
+  grid-column: 1 / -1;
+  justify-self: start;
+}
+
 .followup-empty {
   display: grid;
   justify-items: center;
