@@ -18,6 +18,18 @@ const API_FOLLOWUP_DRAFT = "/api/ai/followup-draft";
 const STORAGE_ACCESS_PASSWORD = "resource-workbench-access-password";
 const SETTINGS_TAB = { key: "settings", title: "设置" };
 const MATCHING_TAB = { key: "matches", title: "本周资源匹配" };
+const TODAY_ACTION_TAB = { key: "today", title: "今日推进" };
+const ACTION_TASK_TYPE_LABELS = {
+  new_reply: "新回信",
+  mail_triage: "邮件归档",
+  reply_overdue: "待复联",
+  address_needed: "待补地址",
+  sample_pending: "待寄样",
+  quote_confirmation_pending: "待确认报价",
+  publish_pending: "待发布",
+  performance_data_pending: "待回收数据",
+  general: "通用",
+};
 const FOLLOW_UP_STAGES = ["已联系待回复", "初步沟通", "已回复", "谈合作方式 / 报价", "条款确认", "待寄样", "运输中", "已签收", "待发布", "已发布", "数据回收", "已结案", "暂停跟进", "未谈妥"];
 const FOLLOW_UP_TERMINAL_STAGES = new Set(["已结案", "暂停跟进", "未谈妥"]);
 const FOLLOW_UP_BOARD_COLUMNS = [
@@ -573,6 +585,8 @@ const state = {
   mailImport: { open: false, followUpId: null, messages: [], status: "" },
   followUpBoardFilter: { query: "", stage: "", priority: "", overdueOnly: false },
   followUpDetail: { open: false, followUpId: null, analysis: null, draft: null },
+  todayActionFilter: { brand: "", owner: "", priority: "", due: "", type: "", status: "待处理" },
+  todayActionNotice: "",
 };
 
 let timeZoneTickerId = null;
@@ -594,6 +608,7 @@ const elements = {
   matchingPage: document.getElementById("matchingPage"),
   productPage: document.getElementById("productPage"),
   followUpPage: document.getElementById("followUpPage"),
+  todayActionPage: document.getElementById("todayActionPage"),
   matchForm: document.getElementById("matchForm"),
   matchFormTitle: document.getElementById("matchFormTitle"),
   matchingResults: document.getElementById("matchingResults"),
@@ -2520,7 +2535,7 @@ function filterRows(dataRows) {
 }
 
 function renderTabs() {
-  const tabs = [...Object.entries(entityConfig).map(([key, item]) => ({ key, title: item.title })), MATCHING_TAB];
+  const tabs = [...Object.entries(entityConfig).map(([key, item]) => ({ key, title: item.title })), TODAY_ACTION_TAB, MATCHING_TAB];
   elements.tabs.innerHTML = tabs
     .map((item) => `<button class="tab ${item.key === state.activeTab ? "active" : ""}" data-tab="${item.key}">${item.title}</button>`)
     .join("");
@@ -3564,6 +3579,7 @@ function setEntityUiVisible(isVisible) {
   elements.matchingPage.classList.toggle("hidden", isVisible);
   elements.productPage.classList.add("hidden");
   elements.followUpPage.classList.add("hidden");
+  elements.todayActionPage.classList.add("hidden");
 }
 
 function renderOptionSettings() {
@@ -3640,6 +3656,7 @@ function renderSettingsPage() {
   setEntityUiVisible(false);
   elements.matchingPage.classList.add("hidden");
   elements.followUpPage.classList.add("hidden");
+  elements.todayActionPage.classList.add("hidden");
   renderAiSettings();
   renderBrandManager();
   renderMailSettings();
@@ -6223,6 +6240,7 @@ function renderFollowUpPage() {
   elements.settingsPage.classList.add("hidden");
   elements.matchingPage.classList.add("hidden");
   elements.productPage.classList.add("hidden");
+  elements.todayActionPage.classList.add("hidden");
   elements.followUpPage.classList.remove("hidden");
 
   const allRows = rows("followups").slice().sort((a, b) => {
@@ -6428,6 +6446,245 @@ function renderFollowUpPage() {
   });
 }
 
+function actionTaskTypeLabel(type) {
+  return ACTION_TASK_TYPE_LABELS[text(type)] || text(type) || "通用";
+}
+
+function actionTaskCase(task) {
+  return (state.data.cases || []).find((item) =>
+    text(item.id) === text(task?.case_id) && text(item.brand_id) === text(task?.brand_id),
+  ) || null;
+}
+
+function actionTaskFollowUp(task) {
+  return allRows("followups").find((item) =>
+    text(item.case_id) === text(task?.case_id) && text(item.brand_id) === text(task?.brand_id),
+  ) || null;
+}
+
+function actionTaskCreator(task, caseRow = actionTaskCase(task)) {
+  if (!caseRow) return null;
+  return (state.data.creators || []).find((item) =>
+    text(item.id) === text(caseRow.creator_id) && text(item.brand_id) === text(task?.brand_id),
+  ) || null;
+}
+
+function actionTaskDueCategory(task, now = new Date()) {
+  const dueAt = new Date(text(task?.due_at));
+  if (Number.isNaN(dueAt.getTime())) return "未设截止";
+  if (dueAt.getTime() < now.getTime()) return "已逾期";
+  if (isSameLocalDay(dueAt, now)) return "今天";
+  const sevenDaysLater = new Date(now);
+  sevenDaysLater.setDate(sevenDaysLater.getDate() + 7);
+  return dueAt.getTime() <= sevenDaysLater.getTime() ? "未来 7 天" : "稍后";
+}
+
+function actionTaskMatchesFilters(task, filter = state.todayActionFilter, now = new Date()) {
+  if (filter.brand && text(task.brand_id) !== text(filter.brand)) return false;
+  if (filter.owner && text(task.owner_name) !== text(filter.owner)) return false;
+  if (filter.priority && text(task.priority) !== text(filter.priority)) return false;
+  if (filter.type && text(task.type) !== text(filter.type)) return false;
+  if (filter.status && text(task.status) !== text(filter.status)) return false;
+  if (filter.due && actionTaskDueCategory(task, now) !== filter.due) return false;
+  return true;
+}
+
+function actionTaskMarkup(task) {
+  const caseRow = actionTaskCase(task);
+  const creator = actionTaskCreator(task, caseRow);
+  const taskType = actionTaskTypeLabel(task.type);
+  const dueCategory = actionTaskDueCategory(task);
+  const hasCase = Boolean(actionTaskFollowUp(task));
+  const canResolve = ["待处理", "待修复"].includes(text(task.status));
+  const canDefer = text(task.status) === "待处理";
+  return `
+    <article class="today-action-row ${dueCategory === "已逾期" ? "is-overdue" : ""}">
+      <div class="today-action-main">
+        <div class="today-action-title">
+          <span class="today-action-type">${escapeHtml(taskType)}</span>
+          ${statusBadge(task.priority || "普通")}
+          <strong>${escapeHtml(task.title)}</strong>
+        </div>
+        <p>${escapeHtml(task.description || "暂无补充说明")}</p>
+        <div class="today-action-meta">
+          <span>${escapeHtml(task.brand || "未归属品牌")}</span>
+          <span>${escapeHtml(creator?.name || caseRow?.creator_name || "未关联达人")}</span>
+          <span>Case ${escapeHtml(task.case_id || "-")}</span>
+          <span class="${dueCategory === "已逾期" ? "is-overdue" : ""}">${escapeHtml(text(task.due_at) ? `${dueCategory} · ${formatDateTime(task.due_at)}` : "未设截止")}</span>
+          ${text(task.owner_name) ? `<span>负责人：${escapeHtml(task.owner_name)}</span>` : ""}
+        </div>
+        ${text(task.completion_evidence) ? `<small class="today-action-evidence">${escapeHtml(task.status)}：${escapeHtml(task.completion_evidence)}</small>` : ""}
+      </div>
+      <div class="today-action-actions">
+        <button type="button" class="icon-button" data-today-action-complete="${escapeHtml(task.id)}" title="完成任务" aria-label="完成任务" ${canResolve ? "" : "disabled"}>✓</button>
+        <button type="button" class="icon-button" data-today-action-skip="${escapeHtml(task.id)}" title="跳过任务" aria-label="跳过任务" ${canResolve ? "" : "disabled"}>×</button>
+        <button type="button" class="icon-button" data-today-action-defer="${escapeHtml(task.id)}" title="延期任务" aria-label="延期任务" ${canDefer ? "" : "disabled"}>↷</button>
+        <button type="button" class="icon-button" data-today-action-open-case="${escapeHtml(task.id)}" title="进入合作 Case" aria-label="进入合作 Case" ${hasCase ? "" : "disabled"}>↗</button>
+      </div>
+    </article>
+  `;
+}
+
+function renderTodayActionPage() {
+  setEntityUiVisible(false);
+  elements.settingsPage.classList.add("hidden");
+  elements.matchingPage.classList.add("hidden");
+  elements.productPage.classList.add("hidden");
+  elements.followUpPage.classList.add("hidden");
+  elements.todayActionPage.classList.remove("hidden");
+
+  const now = new Date();
+  const tasks = (state.data.actionTasks || [])
+    .slice()
+    .sort((left, right) => new Date(left.due_at || "2999-01-01") - new Date(right.due_at || "2999-01-01"));
+  const visibleTasks = tasks.filter((task) => actionTaskMatchesFilters(task, state.todayActionFilter, now));
+  const pendingTasks = tasks.filter((task) => text(task.status) === "待处理");
+  const overdueCount = pendingTasks.filter((task) => actionTaskDueCategory(task, now) === "已逾期").length;
+  const todayCount = pendingTasks.filter((task) => actionTaskDueCategory(task, now) === "今天").length;
+  const highCount = pendingTasks.filter((task) => text(task.priority) === "高").length;
+  const brands = (state.data.brands || []).slice().sort((a, b) => text(a.name).localeCompare(text(b.name), "zh-CN"));
+  const owners = [...new Set(tasks.map((task) => text(task.owner_name)).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-CN"));
+  const types = [...new Set(tasks.map((task) => text(task.type)).filter(Boolean))].sort();
+  const notice = text(state.todayActionNotice);
+
+  const selectOptions = (items, selected, allLabel, map = (item) => ({ value: item, label: item })) =>
+    `<option value="">${escapeHtml(allLabel)}</option>${items.map((item) => {
+      const option = map(item);
+      return `<option value="${escapeHtml(option.value)}" ${text(selected) === text(option.value) ? "selected" : ""}>${escapeHtml(option.label)}</option>`;
+    }).join("")}`;
+
+  elements.todayActionPage.innerHTML = `
+    <header class="today-action-head">
+      <div>
+        <span class="eyebrow">ACTION CENTER</span>
+        <h2>今日推进</h2>
+        <p class="panel-hint">集中处理回信、复联、寄样、报价、发布和人工归档。所有关键阶段仍需人工在 Case 中确认。</p>
+      </div>
+      <span class="today-action-total">待处理 ${pendingTasks.length}</span>
+    </header>
+    <div class="today-action-metrics">
+      <div><span>待处理</span><strong>${pendingTasks.length}</strong></div>
+      <div><span>已逾期</span><strong>${overdueCount}</strong></div>
+      <div><span>今天到期</span><strong>${todayCount}</strong></div>
+      <div><span>高优任务</span><strong>${highCount}</strong></div>
+    </div>
+    <div class="today-action-filters">
+      <label><span>品牌</span><select data-today-action-filter="brand">${selectOptions(brands, state.todayActionFilter.brand, "全部品牌", (brand) => ({ value: brand.id, label: brand.name }))}</select></label>
+      <label><span>负责人</span><select data-today-action-filter="owner">${selectOptions(owners, state.todayActionFilter.owner, "全部负责人")}</select></label>
+      <label><span>优先级</span><select data-today-action-filter="priority">${selectOptions(["高", "中", "低", "普通"], state.todayActionFilter.priority, "全部优先级")}</select></label>
+      <label><span>截止</span><select data-today-action-filter="due">${selectOptions(["已逾期", "今天", "未来 7 天", "未设截止"], state.todayActionFilter.due, "全部时间")}</select></label>
+      <label><span>类型</span><select data-today-action-filter="type">${selectOptions(types, state.todayActionFilter.type, "全部类型", (type) => ({ value: type, label: actionTaskTypeLabel(type) }))}</select></label>
+      <label><span>状态</span><select data-today-action-filter="status">${selectOptions(["待处理", "待修复", "已完成", "已跳过", "已失效"], state.todayActionFilter.status, "全部状态")}</select></label>
+    </div>
+    ${notice ? `<p class="today-action-notice">${escapeHtml(notice)}</p>` : ""}
+    <section class="today-action-list">
+      ${visibleTasks.length ? visibleTasks.map(actionTaskMarkup).join("") : `<p class="today-action-empty">当前筛选下没有行动任务。</p>`}
+    </section>
+  `;
+
+  elements.todayActionPage.querySelectorAll("[data-today-action-filter]").forEach((control) => {
+    control.addEventListener("change", () => {
+      state.todayActionFilter[control.dataset.todayActionFilter] = control.value;
+      state.todayActionNotice = "";
+      renderTodayActionPage();
+    });
+  });
+  elements.todayActionPage.querySelectorAll("[data-today-action-complete]").forEach((button) => {
+    button.addEventListener("click", () => void resolveTodayAction(button.dataset.todayActionComplete, "complete"));
+  });
+  elements.todayActionPage.querySelectorAll("[data-today-action-skip]").forEach((button) => {
+    button.addEventListener("click", () => void resolveTodayAction(button.dataset.todayActionSkip, "skip"));
+  });
+  elements.todayActionPage.querySelectorAll("[data-today-action-defer]").forEach((button) => {
+    button.addEventListener("click", () => void deferTodayAction(button.dataset.todayActionDefer));
+  });
+  elements.todayActionPage.querySelectorAll("[data-today-action-open-case]").forEach((button) => {
+    button.addEventListener("click", () => openTodayActionCase(button.dataset.todayActionOpenCase));
+  });
+}
+
+async function saveTodayActionMutation(message, mutate) {
+  const snapshot = clone(state.data);
+  try {
+    mutate();
+    await persist();
+    state.todayActionNotice = message;
+  } catch (error) {
+    state.data = snapshot;
+    state.todayActionNotice = error.message || "任务操作保存失败，已恢复原状态。";
+  }
+  renderTodayActionPage();
+}
+
+function mutableActionTask(taskId) {
+  return (state.data.actionTasks || []).find((task) => text(task.id) === text(taskId)) || null;
+}
+
+async function resolveTodayAction(taskId, mode) {
+  const task = mutableActionTask(taskId);
+  if (!task) {
+    state.todayActionNotice = "未找到该行动任务。";
+    renderTodayActionPage();
+    return;
+  }
+  const isComplete = mode === "complete";
+  const evidence = text(window.prompt(isComplete ? "填写完成证据（必填）" : "填写跳过原因（必填）", ""));
+  if (!evidence) return;
+  await saveTodayActionMutation(
+    isComplete ? "任务已完成并保存证据。" : "任务已跳过并保存原因。",
+    () => {
+      if (!["待处理", "待修复"].includes(text(task.status))) {
+        throw new Error("该任务当前不能完成或跳过。");
+      }
+      const timestamp = new Date().toISOString();
+      task.status = isComplete ? "已完成" : "已跳过";
+      task.completion_evidence = evidence;
+      task.completed_at = timestamp;
+      task.validation_error = "";
+      task.version = Math.max(1, Number(task.version) || 1) + 1;
+      task.updatedAt = timestamp;
+    },
+  );
+}
+
+async function deferTodayAction(taskId) {
+  const task = mutableActionTask(taskId);
+  if (!task) {
+    state.todayActionNotice = "未找到该行动任务。";
+    renderTodayActionPage();
+    return;
+  }
+  const rawDueAt = text(window.prompt("输入新的截止时间（YYYY-MM-DD HH:mm）", ""));
+  if (!rawDueAt) return;
+  const parsedDueAt = new Date(rawDueAt.replace(" ", "T"));
+  if (Number.isNaN(parsedDueAt.getTime()) || parsedDueAt.getTime() <= Date.now()) {
+    state.todayActionNotice = "延期时间必须是晚于当前时间的有效日期。";
+    renderTodayActionPage();
+    return;
+  }
+  await saveTodayActionMutation("任务已延期。", () => {
+    if (text(task.status) !== "待处理") throw new Error("只有待处理的任务可以延期。");
+    task.due_at = parsedDueAt.toISOString();
+    task.version = Math.max(1, Number(task.version) || 1) + 1;
+    task.updatedAt = new Date().toISOString();
+  });
+}
+
+function openTodayActionCase(taskId) {
+  const task = mutableActionTask(taskId);
+  const followUp = task ? actionTaskFollowUp(task) : null;
+  if (!task || !followUp) {
+    state.todayActionNotice = "未找到该任务关联的合作跟进，无法打开 Case。";
+    renderTodayActionPage();
+    return;
+  }
+  state.activeBrandId = task.brand_id;
+  state.activeTab = "followups";
+  state.todayActionNotice = "";
+  render();
+  openFollowUpDetail(followUp.id);
+}
+
 function productFilterOptions(fieldKey) {
   return getOptionValues("products", fieldKey);
 }
@@ -6456,6 +6713,7 @@ function renderProductPage() {
   elements.settingsPage.classList.add("hidden");
   elements.matchingPage.classList.add("hidden");
   elements.followUpPage.classList.add("hidden");
+  elements.todayActionPage.classList.add("hidden");
   elements.productPage.classList.remove("hidden");
 
   const products = filteredProducts();
@@ -7002,6 +7260,13 @@ function render() {
     resetEditorState();
     renderEditor();
     renderMatchingPage();
+    return;
+  }
+  if (state.activeTab === TODAY_ACTION_TAB.key) {
+    elements.outreachBtn.classList.add("hidden");
+    resetEditorState();
+    renderEditor();
+    renderTodayActionPage();
     return;
   }
   if (state.activeTab === "products") {

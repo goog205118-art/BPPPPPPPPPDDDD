@@ -523,6 +523,45 @@ function completeTask(state, taskId, evidence = "", now = new Date().toISOString
   return task;
 }
 
+function skipTask(state, taskId, reason = "", now = new Date().toISOString()) {
+  const task = taskById(state, taskId);
+  if (!task) throw new Error("未找到待办。");
+  const validationError = taskValidationError(state, task);
+  if (validationError) throw new Error(validationError);
+  if (!["待处理", "待修复"].includes(text(task.status))) {
+    throw new Error("只有待处理或待修复的行动任务可以跳过。");
+  }
+  const skipReason = text(reason);
+  if (!skipReason) throw new Error("跳过行动任务必须填写原因。");
+  const timestamp = iso(now);
+  task.status = "已跳过";
+  task.completed_at = timestamp;
+  task.completion_evidence = skipReason;
+  task.validation_error = "";
+  task.version = Math.max(1, Number(task.version) || 1) + 1;
+  task.updatedAt = timestamp;
+  return task;
+}
+
+function deferTask(state, taskId, dueAt, now = new Date().toISOString()) {
+  const task = taskById(state, taskId);
+  if (!task) throw new Error("未找到待办。");
+  const validationError = taskValidationError(state, task);
+  if (validationError) throw new Error(validationError);
+  if (text(task.status) !== "待处理") {
+    throw new Error("只有待处理的行动任务可以延期。");
+  }
+  const parsedDueAt = new Date(text(dueAt));
+  const parsedNow = new Date(iso(now));
+  if (Number.isNaN(parsedDueAt.getTime()) || parsedDueAt.getTime() <= parsedNow.getTime()) {
+    throw new Error("延期时间必须晚于当前时间。");
+  }
+  task.due_at = parsedDueAt.toISOString();
+  task.version = Math.max(1, Number(task.version) || 1) + 1;
+  task.updatedAt = iso(now);
+  return task;
+}
+
 function patchVersionedRecord(collection, id, expectedVersion, patch = {}, now = new Date().toISOString()) {
   const row = (Array.isArray(collection) ? collection : []).find((item) => text(item.id) === text(id));
   if (!row) return { ok: false, code: "not_found" };
@@ -553,8 +592,10 @@ module.exports = {
   completeTask,
   createActionTask,
   createCase,
+  deferTask,
   patchVersionedRecord,
   recordCaseStageChange,
   reconcileCaseTasks,
+  skipTask,
   taskKey,
 };

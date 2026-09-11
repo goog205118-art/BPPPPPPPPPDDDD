@@ -4117,6 +4117,204 @@ body.access-locked .app-shell {
   border-radius: 6px;
 }
 
+.today-action-page {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+
+.today-action-head,
+.today-action-title,
+.today-action-meta,
+.today-action-actions {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.today-action-head {
+  align-items: flex-start;
+  justify-content: space-between;
+}
+
+.today-action-head h2 {
+  margin: 2px 0 3px;
+  font-size: 1.1rem;
+}
+
+.today-action-head .panel-hint {
+  margin: 0;
+  max-width: 760px;
+  font-size: 0.75rem;
+}
+
+.today-action-total,
+.today-action-type {
+  flex: 0 0 auto;
+  border: 1px solid #35516a;
+  border-radius: 4px;
+  background: #173047;
+  color: #b9dcf5;
+  padding: 0.14rem 0.36rem;
+  font-size: 0.62rem;
+}
+
+.today-action-metrics {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.today-action-metrics > div {
+  display: grid;
+  gap: 2px;
+  min-height: 50px;
+  padding: 7px 9px;
+  border: 1px solid #2c3a4b;
+  border-radius: 5px;
+  background: #182633;
+}
+
+.today-action-metrics span {
+  color: #93a7ba;
+  font-size: 0.66rem;
+}
+
+.today-action-metrics strong {
+  color: #edf5ff;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 1rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.today-action-filters {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(100px, 1fr));
+  gap: 6px;
+}
+
+.today-action-filters label {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.today-action-filters label > span {
+  color: #9aafc1;
+  font-size: 0.62rem;
+}
+
+.today-action-filters select {
+  min-width: 0;
+  min-height: 28px;
+  border: 1px solid #33495e;
+  border-radius: 4px;
+  background: #111c27;
+  color: #dceaf5;
+  padding: 0.22rem 0.35rem;
+  font-size: 0.66rem;
+}
+
+.today-action-notice {
+  margin: 0;
+  padding: 7px 9px;
+  border-left: 2px solid #5a8fbd;
+  background: #14283a;
+  color: #c0d9eb;
+  font-size: 0.67rem;
+  line-height: 1.4;
+}
+
+.today-action-list {
+  display: grid;
+  gap: 6px;
+}
+
+.today-action-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 9px;
+  border: 1px solid #304256;
+  border-left: 3px solid #4e718f;
+  border-radius: 5px;
+  background: #182633;
+}
+
+.today-action-row.is-overdue {
+  border-left-color: #c67561;
+}
+
+.today-action-main {
+  display: grid;
+  min-width: 0;
+  gap: 4px;
+}
+
+.today-action-title {
+  min-width: 0;
+}
+
+.today-action-title strong {
+  overflow: hidden;
+  color: #e7f1fb;
+  font-size: 0.73rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.today-action-main > p,
+.today-action-evidence {
+  margin: 0;
+  color: #a7bbcc;
+  font-size: 0.65rem;
+  line-height: 1.4;
+}
+
+.today-action-evidence {
+  color: #c6d7e4;
+}
+
+.today-action-meta {
+  flex-wrap: wrap;
+  color: #8fa5b8;
+  font-size: 0.61rem;
+}
+
+.today-action-meta .is-overdue {
+  color: #e8a095;
+}
+
+.today-action-actions {
+  justify-content: flex-end;
+}
+
+.today-action-actions .icon-button {
+  display: grid;
+  width: 28px;
+  min-width: 28px;
+  height: 28px;
+  min-height: 28px;
+  place-items: center;
+  padding: 0;
+  border-radius: 4px;
+  font-size: 0.78rem;
+}
+
+.today-action-empty {
+  margin: 0;
+  padding: 16px 8px;
+  border: 1px dashed #3a5065;
+  border-radius: 5px;
+  color: #9db3c4;
+  font-size: 0.7rem;
+  text-align: center;
+}
+
 .followup-head,
 .followup-column-head,
 .followup-card-head,
@@ -6076,6 +6274,10 @@ body.access-locked .app-shell {
 }
 
 @media (max-width: 900px) {
+  .today-action-filters {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
   .followup-detail-dialog {
     width: min(980px, calc(100vw - 20px));
     max-height: calc(100vh - 20px);
@@ -6104,6 +6306,19 @@ body.access-locked .app-shell {
 }
 
 @media (max-width: 560px) {
+  .today-action-metrics,
+  .today-action-filters {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .today-action-row {
+    grid-template-columns: 1fr;
+  }
+
+  .today-action-actions {
+    justify-content: flex-start;
+  }
+
   .brand-workspace {
     width: 100%;
   }
