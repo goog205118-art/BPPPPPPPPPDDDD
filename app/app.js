@@ -4256,6 +4256,86 @@ function syncFollowUpContactTracksForStage(followUp, stage, now = new Date().toI
   });
 }
 
+function requestStageChangeReason(previousStage, nextStage) {
+  const response = window.prompt(
+    `请填写将合作阶段从「${previousStage || "未设置"}」变更为「${nextStage}」的原因：`,
+    "",
+  );
+  const reason = text(response);
+  if (!reason) {
+    if (response !== null) window.alert("阶段变更需要填写原因；未填写时不会保存。");
+    return "";
+  }
+  return reason;
+}
+
+function recordCaseStageChange({
+  followUp,
+  previousStage,
+  nextStage,
+  reason,
+  source = "manual_stage_change",
+  actor = "人工操作",
+  evidence = "",
+  subject = "合作阶段已更新",
+  excerpt = "",
+  now = new Date().toISOString(),
+} = {}) {
+  const normalizedReason = text(reason);
+  if (!followUp) throw new Error("未找到要更新的合作跟进。");
+  if (!FOLLOW_UP_STAGES.includes(text(nextStage))) throw new Error("目标合作阶段无效。");
+  if (!normalizedReason) throw new Error("人工阶段变更必须填写原因。");
+
+  const caseRow = followUpCase(followUp);
+  if (!caseRow) throw new Error("该合作跟进尚未关联 Case，请刷新页面后再推进。");
+  if (text(followUp.brand_id) && text(caseRow.brand_id) && text(followUp.brand_id) !== text(caseRow.brand_id)) {
+    throw new Error("合作跟进与 Case 品牌不一致，禁止跨品牌推进。");
+  }
+
+  const before = text(previousStage || followUp.stage || caseRow.stage);
+  const eventId = uid("FUE");
+  const caseVersion = Math.max(1, Number(caseRow.version) || 1) + 1;
+  const event = {
+    id: eventId,
+    follow_up_id: followUp.id,
+    case_id: caseRow.id,
+    brand_id: caseRow.brand_id || followUp.brand_id,
+    brand: caseRow.brand || followUp.brand,
+    type: "stage_update",
+    direction: "internal",
+    subject,
+    excerpt: text(excerpt) || `${before || "未设置"} → ${nextStage}`,
+    source,
+    previous_stage: before,
+    next_stage: text(nextStage),
+    actor,
+    change_reason: normalizedReason,
+    evidence: text(evidence),
+    case_version: caseVersion,
+    occurred_at: now,
+    createdAt: now,
+    updatedAt: now,
+  };
+
+  Object.assign(followUp, {
+    stage: text(nextStage),
+    has_unread_reply: false,
+    updatedAt: now,
+  });
+  Object.assign(caseRow, {
+    stage: text(nextStage),
+    version: caseVersion,
+    last_stage_changed_at: now,
+    last_stage_changed_by: actor,
+    last_stage_change_reason: normalizedReason,
+    last_stage_change_source: source,
+    last_stage_change_event_id: eventId,
+    updatedAt: now,
+  });
+  state.data.followUpEvents = [event, ...(state.data.followUpEvents || [])];
+  return { case: caseRow, event };
+}
+
 async function deleteFollowUpRecord(followUpId) {
   if (state.followUpDeleteBusyId) return false;
 
@@ -5500,6 +5580,14 @@ function renderFollowUpDetail() {
   const publishUrl = safeExternalUrl(model.publishUrl);
   const creatorUrl = safeExternalUrl(creator?.social_url);
   const recipient = text(state.followUpDetail.recipient || creator?.email);
+  const stageAudit = model.case && text(model.case.last_stage_changed_at)
+    ? `
+      <p class="followup-stage-audit">
+        <b>最近阶段变更</b>
+        <span>${escapeHtml(formatDateTime(model.case.last_stage_changed_at) || "时间未知")} · ${escapeHtml(model.case.last_stage_changed_by || "人工操作")}</span>
+        <small>${escapeHtml(model.case.last_stage_change_reason || "未记录原因")}</small>
+      </p>`
+    : "";
 
   elements.followUpDetailTitle.textContent = creator?.name || followUp.creator_name || "合作跟进详情";
   elements.followUpDetailHint.textContent = `${model.brand || "未绑定品牌"} · ${creator?.platform || "平台待补充"} · 当前阶段 ${model.stage || "待确认"}${model.caseId ? ` · ${model.caseId}` : ""}`;
@@ -5532,6 +5620,7 @@ function renderFollowUpDetail() {
             <div><dt>发布链接</dt><dd>${publishUrl ? `<a href="${escapeHtml(publishUrl)}" target="_blank" rel="noreferrer">打开链接</a>` : "待补充"}</dd></div>
           </dl>
           ${text(model.notes) ? `<p class="followup-detail-notes"><b>内部备注</b>${escapeHtml(model.notes)}</p>` : ""}
+          ${stageAudit}
         </section>
 
         <section class="followup-detail-section">
@@ -5561,7 +5650,10 @@ function renderFollowUpDetail() {
             : `<p class="followup-detail-empty">暂无已沉淀的历史合作记录。</p>`}
           <div class="followup-detail-action-history">
             ${events.filter((event) => event.direction === "internal" || event.type === "stage" || event.type === "stage_update").slice(0, 12).map((event) => `
-              <div><span>${escapeHtml(event.subject || "阶段动作")}</span><time>${escapeHtml(formatDateTime(event.occurred_at || event.createdAt) || "时间未知")}</time></div>
+              <div>
+                <span><strong>${escapeHtml(event.subject || "阶段动作")}</strong>${text(event.change_reason) ? `<small>${escapeHtml(event.change_reason)}</small>` : ""}</span>
+                <time>${escapeHtml(formatDateTime(event.occurred_at || event.createdAt) || "时间未知")}</time>
+              </div>
             `).join("") || `<span class="muted">暂无阶段动作记录</span>`}
           </div>
         </section>
@@ -5648,29 +5740,38 @@ async function applyFollowUpAnalysisSuggestion(followUpId, analysis) {
   const now = new Date().toISOString();
   try {
     await withActivity("正在应用人工确认的建议", "正在保存阶段和下一步；不会发送邮件...", async () => {
+      const previousStage = text(followUp.stage);
+      const nextAction = text(analysis.recommended_next_action) || followUp.next_action;
+      const nextFollowUpAt = nextFollowUpAtFromAnalysis(analysis) || followUp.next_follow_up_at;
+      const evidence = (Array.isArray(analysis.evidence) ? analysis.evidence : [])
+        .map((item) => text(item))
+        .filter(Boolean)
+        .slice(0, 3)
+        .join("；");
+      const reason = `人工确认 AI 阶段建议${text(analysis.recommended_next_action) ? `：${text(analysis.recommended_next_action)}` : ""}`;
+      recordCaseStageChange({
+        followUp,
+        previousStage,
+        nextStage: suggestedStage,
+        reason,
+        source: "ai_suggestion_confirmed",
+        actor: "人工确认",
+        evidence,
+        subject: "已人工应用 AI 阶段建议",
+        excerpt: `阶段：${suggestedStage}${text(analysis.recommended_next_action) ? `；下一步：${text(analysis.recommended_next_action)}` : ""}`,
+        now,
+      });
       Object.assign(followUp, {
-        stage: suggestedStage,
-        next_action: text(analysis.recommended_next_action) || followUp.next_action,
-        next_follow_up_at: nextFollowUpAtFromAnalysis(analysis) || followUp.next_follow_up_at,
-        has_unread_reply: false,
+        next_action: nextAction,
+        next_follow_up_at: nextFollowUpAt,
+        updatedAt: now,
+      });
+      Object.assign(followUpCase(followUp), {
+        next_action: nextAction,
+        next_action_at: nextFollowUpAt,
         updatedAt: now,
       });
       syncFollowUpContactTracksForStage(followUp, suggestedStage, now);
-      state.data.followUpEvents = [{
-        id: uid("FUE"),
-        follow_up_id: followUp.id,
-        case_id: followUp.case_id || "",
-        brand_id: followUp.brand_id,
-        brand: followUp.brand,
-        type: "stage_update",
-        direction: "internal",
-        subject: "已人工应用 AI 阶段建议",
-        excerpt: `阶段：${suggestedStage}${text(analysis.recommended_next_action) ? `；下一步：${text(analysis.recommended_next_action)}` : ""}`,
-        source: "人工确认 · AI 沟通研判",
-        occurred_at: now,
-        createdAt: now,
-        updatedAt: now,
-      }, ...(state.data.followUpEvents || [])];
       syncCompletedCooperation(followUp);
       await persist();
     });
@@ -6014,30 +6115,28 @@ async function toggleContactTrack(trackId) {
 async function manuallyUpdateFollowUpStage(followUpId, stage) {
   const followUp = allRows("followups").find((row) => text(row.id) === text(followUpId));
   if (!followUp || !FOLLOW_UP_STAGES.includes(stage) || text(followUp.stage) === stage) return;
+  const previousStage = text(followUp.stage);
+  const reason = requestStageChangeReason(previousStage, stage);
+  if (!reason) {
+    renderFollowUpPage();
+    return;
+  }
   const snapshot = clone(state.data);
   const now = new Date().toISOString();
   try {
     await withActivity("正在手动推进合作阶段", `正在更新为「${stage}」...`, async () => {
-      const previousStage = text(followUp.stage);
-      followUp.stage = stage;
-      followUp.has_unread_reply = false;
-      followUp.updatedAt = now;
-      syncFollowUpContactTracksForStage(followUp, stage, now);
-      state.data.followUpEvents = [{
-        id: uid("FUE"),
-        follow_up_id: followUp.id,
-        case_id: followUp.case_id || "",
-        brand_id: followUp.brand_id,
-        brand: followUp.brand,
-        type: "stage_update",
-        direction: "internal",
+      recordCaseStageChange({
+        followUp,
+        previousStage,
+        nextStage: stage,
+        reason,
+        source: "manual_stage_change",
+        actor: "人工操作",
         subject: "已手动推进合作阶段",
         excerpt: `${previousStage || "未设置"} → ${stage}`,
-        source: "人工推进",
-        occurred_at: now,
-        createdAt: now,
-        updatedAt: now,
-      }, ...(state.data.followUpEvents || [])];
+        now,
+      });
+      syncFollowUpContactTracksForStage(followUp, stage, now);
       syncCompletedCooperation(followUp);
       await persist();
     });
@@ -7261,26 +7360,43 @@ async function commitEditor({ close = false, showError = false } = {}) {
 
   const list = allRows();
   const previous = state.editingId ? list.find((row) => row.id === state.editingId) : null;
+  let stageChange = null;
+  if (state.activeTab === "followups" && previous && text(previous.stage) !== text(record.stage)) {
+    const reason = requestStageChangeReason(text(previous.stage), text(record.stage));
+    if (!reason) {
+      elements.editorStatus.textContent = "阶段变更未保存：需要填写人工变更原因。";
+      return false;
+    }
+    const caseRow = followUpCase(previous);
+    if (!caseRow) {
+      elements.editorStatus.textContent = "该合作跟进尚未关联 Case，请刷新页面后再保存阶段变更。";
+      return false;
+    }
+    stageChange = {
+      previousStage: text(previous.stage),
+      nextStage: text(record.stage),
+      reason,
+      now: new Date().toISOString(),
+    };
+  }
   const index = list.findIndex((row) => row.id === record.id);
   if (index >= 0) list[index] = record;
   else list.unshift(record);
   if (state.activeTab === "followups") {
     state.data.followUps = list;
-    if (previous && text(previous.stage) !== text(record.stage)) {
-      state.data.followUpEvents.unshift({
-        id: uid("EV"),
-        follow_up_id: record.id,
-        case_id: record.case_id || "",
-        brand_id: record.brand_id,
-        brand: record.brand,
-        type: "stage",
-        occurred_at: new Date().toISOString(),
-        direction: "internal",
+    if (stageChange) {
+      recordCaseStageChange({
+        followUp: record,
+        previousStage: stageChange.previousStage,
+        nextStage: stageChange.nextStage,
+        reason: stageChange.reason,
+        source: "editor_manual_change",
+        actor: "人工编辑",
         subject: `阶段更新为：${record.stage}`,
-        excerpt: `合作跟进阶段从“${previous.stage || "未填写"}”更新为“${record.stage}”。`,
-        source: "工作台",
-        createdAt: new Date().toISOString(),
+        excerpt: `合作跟进阶段从“${stageChange.previousStage || "未填写"}”更新为“${record.stage}”。`,
+        now: stageChange.now,
       });
+      syncFollowUpContactTracksForStage(record, stageChange.nextStage, stageChange.now);
     }
     syncCompletedCooperation(record);
   }

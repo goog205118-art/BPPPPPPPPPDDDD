@@ -5,6 +5,7 @@ const {
   completeTask,
   createCase,
   patchVersionedRecord,
+  recordCaseStageChange,
   reconcileCaseTasks,
 } = require("./crm-domain.cjs");
 
@@ -141,8 +142,82 @@ function testCaseStageContract() {
   assert.equal(canTransitionCaseStage("已结案", "初步沟通"), false);
 }
 
+function testCaseStageAuditContract() {
+  const state = fixture();
+  state.followUps = [{
+    id: "FU-A",
+    case_id: "CASE-A",
+    brand_id: "BR-A",
+    stage: "待寄样",
+    has_unread_reply: true,
+  }];
+
+  assert.throws(
+    () => recordCaseStageChange(state, {
+      case_id: "CASE-A",
+      follow_up_id: "FU-A",
+      next_stage: "已寄样",
+      actor: "人工操作",
+    }, now),
+    /必须填写原因/,
+    "手动阶段变更不能没有原因。",
+  );
+
+  const result = recordCaseStageChange(state, {
+    case_id: "CASE-A",
+    follow_up_id: "FU-A",
+    next_stage: "已寄样",
+    actor: "人工操作",
+    source: "manual_stage_change",
+    change_reason: "已确认收件地址并完成寄样交接。",
+    evidence: "物流单已创建",
+  }, now);
+  assert.equal(result.case.stage, "已寄样");
+  assert.equal(result.followUp.stage, "已寄样", "Case 与兼容 FollowUp 必须同步阶段。");
+  assert.equal(result.followUp.has_unread_reply, false);
+  assert.equal(result.case.version, 2, "阶段变更必须推进 Case 版本。");
+  assert.equal(result.case.last_stage_change_reason, "已确认收件地址并完成寄样交接。");
+  assert.equal(result.event.previous_stage, "待寄样");
+  assert.equal(result.event.next_stage, "已寄样");
+  assert.equal(result.event.case_version, 2);
+  assert.equal(result.event.change_reason, "已确认收件地址并完成寄样交接。");
+  assert.equal(result.event.evidence, "物流单已创建");
+  assert.equal(result.event.brand_id, "BR-A");
+
+  const aiResult = recordCaseStageChange(state, {
+    case_id: "CASE-A",
+    follow_up_id: "FU-A",
+    next_stage: "运输中",
+    actor: "人工确认",
+    source: "ai_suggestion_confirmed",
+    change_reason: "人工确认 AI 建议：已取得承运商揽收状态。",
+    evidence: "AI 建议下一步：核对物流号",
+  }, "2026-09-11T12:10:00.000Z");
+  assert.equal(aiResult.event.source, "ai_suggestion_confirmed");
+  assert.equal(aiResult.event.actor, "人工确认", "AI 建议必须有人工确认操作者。");
+  assert.equal(aiResult.case.version, 3);
+
+  state.followUps.push({
+    id: "FU-CROSS-BRAND",
+    case_id: "CASE-A",
+    brand_id: "BR-B",
+    stage: "待寄样",
+  });
+  assert.throws(
+    () => recordCaseStageChange(state, {
+      case_id: "CASE-A",
+      follow_up_id: "FU-CROSS-BRAND",
+      next_stage: "已寄样",
+      change_reason: "测试跨品牌阻止。",
+    }, now),
+    /品牌不一致/,
+    "阶段审计不能跨品牌写入 Case。",
+  );
+}
+
 testCaseIsolationAndTriage();
 testTaskLifecycle();
 testOptimisticLocking();
 testCaseStageContract();
-console.log("PASS CRM regression: Case isolation, manual mail triage, action task lifecycle, and optimistic locking.");
+testCaseStageAuditContract();
+console.log("PASS CRM regression: Case isolation, manual mail triage, action task lifecycle, optimistic locking, and stage audit.");

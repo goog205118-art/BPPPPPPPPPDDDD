@@ -79,6 +79,11 @@ function createCase(input = {}, now = new Date().toISOString()) {
     next_action_at: text(input.next_action_at),
     last_outreach_at: text(input.last_outreach_at),
     version: Math.max(1, Number(input.version) || 1),
+    last_stage_changed_at: text(input.last_stage_changed_at),
+    last_stage_changed_by: text(input.last_stage_changed_by),
+    last_stage_change_reason: text(input.last_stage_change_reason),
+    last_stage_change_source: text(input.last_stage_change_source),
+    last_stage_change_event_id: text(input.last_stage_change_event_id),
     createdAt: text(input.createdAt) || iso(now),
     updatedAt: text(input.updatedAt) || iso(now),
   };
@@ -92,6 +97,73 @@ function canTransitionCaseStage(fromStage, toStage) {
 
 function caseById(state, caseId) {
   return (Array.isArray(state?.cases) ? state.cases : []).find((item) => text(item.id) === text(caseId)) || null;
+}
+
+function recordCaseStageChange(state, input = {}, now = new Date().toISOString()) {
+  const caseId = text(input.case_id);
+  const caseRow = caseById(state, caseId);
+  if (!caseRow) throw new Error("未找到目标 Case。");
+
+  const followUpId = text(input.follow_up_id);
+  const followUp = (Array.isArray(state?.followUps) ? state.followUps : [])
+    .find((item) => text(item.id) === followUpId) || null;
+  if (followUp && text(followUp.brand_id) && text(followUp.brand_id) !== text(caseRow.brand_id)) {
+    throw new Error("合作跟进与 Case 品牌不一致，禁止跨品牌推进。");
+  }
+
+  const previousStage = text(input.previous_stage || followUp?.stage || caseRow.stage);
+  const nextStage = text(input.next_stage);
+  const reason = text(input.change_reason);
+  if (!CASE_STAGES.has(nextStage)) throw new Error("目标 Case 阶段无效。");
+  if (!reason) throw new Error("人工阶段变更必须填写原因。");
+
+  const timestamp = iso(now);
+  const eventId = text(input.event_id) || `EV-${randomUUID()}`;
+  const nextVersion = Math.max(1, Number(caseRow.version) || 1) + 1;
+  const actor = text(input.actor) || "人工操作";
+  const source = text(input.source) || "manual_stage_change";
+  const event = {
+    id: eventId,
+    brand_id: caseRow.brand_id,
+    case_id: caseRow.id,
+    follow_up_id: followUpId,
+    type: "stage_update",
+    direction: "internal",
+    subject: text(input.subject) || "合作阶段已更新",
+    excerpt: text(input.excerpt) || `${previousStage || "未设置"} -> ${nextStage}`,
+    source,
+    previous_stage: previousStage,
+    next_stage: nextStage,
+    actor,
+    change_reason: reason,
+    evidence: text(input.evidence),
+    case_version: nextVersion,
+    occurred_at: timestamp,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+
+  Object.assign(caseRow, {
+    stage: nextStage,
+    version: nextVersion,
+    last_stage_changed_at: timestamp,
+    last_stage_changed_by: actor,
+    last_stage_change_reason: reason,
+    last_stage_change_source: source,
+    last_stage_change_event_id: eventId,
+    updatedAt: timestamp,
+  });
+  if (followUp) {
+    Object.assign(followUp, {
+      stage: nextStage,
+      has_unread_reply: false,
+      updatedAt: timestamp,
+    });
+  }
+
+  const events = Array.isArray(state?.followUpEvents) ? state.followUpEvents : (state.followUpEvents = []);
+  events.push(event);
+  return { case: caseRow, followUp, event };
 }
 
 function assertSameBrand(caseRow, mailRow) {
@@ -310,6 +382,7 @@ module.exports = {
   completeTask,
   createCase,
   patchVersionedRecord,
+  recordCaseStageChange,
   reconcileCaseTasks,
   taskKey,
 };

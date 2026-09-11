@@ -2661,6 +2661,35 @@ tbody tr[data-open-creator] {
   color: #bac7d6;
 }
 
+.followup-stage-audit {
+  display: grid;
+  gap: 3px;
+  margin: 8px 0 0;
+  padding: 7px 8px;
+  border-left: 2px solid #4c84bd;
+  background: #122235;
+  color: #bfd0e2;
+  font-size: 0.76rem;
+}
+
+.followup-stage-audit b {
+  color: #d9e8f8;
+}
+
+.followup-stage-audit small {
+  color: #9db2c7;
+}
+
+.followup-detail-action-history strong,
+.followup-detail-action-history small {
+  display: block;
+}
+
+.followup-detail-action-history small {
+  margin-top: 2px;
+  color: #9db2c7;
+}
+
 .numeric {
   font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
   font-variant-numeric: tabular-nums;

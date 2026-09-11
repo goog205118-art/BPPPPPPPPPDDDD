@@ -55,11 +55,25 @@ function testCaseWriteContract() {
     functionBlock("async function applyFollowUpAnalysisSuggestion", "function openFollowUpEditor"),
     functionBlock("async function manuallyUpdateFollowUpStage", "function openFollowUpEditor"),
   ];
-  assert.match(stageActions[0], /follow_up_id:/);
-  assert.match(stageActions[0], /case_id:\s*followUp\.case_id/);
-  assert.match(stageActions[1], /follow_up_id:/);
-  assert.match(stageActions[1], /case_id:\s*followUp\.case_id/);
-  assert.match(appSource, /follow_up_id:\s*record\.id,\s*case_id:\s*record\.case_id/);
+  assert.match(stageActions[0], /recordCaseStageChange\(/);
+  assert.match(stageActions[0], /source:\s*"ai_suggestion_confirmed"/);
+  assert.match(stageActions[0], /actor:\s*"人工确认"/);
+  assert.match(stageActions[1], /requestStageChangeReason\(/);
+  assert.match(stageActions[1], /recordCaseStageChange\(/);
+  assert.match(appSource, /source:\s*"editor_manual_change"/);
+
+  const audit = functionBlock("function recordCaseStageChange", "async function deleteFollowUpRecord");
+  for (const field of [
+    "previous_stage",
+    "next_stage",
+    "change_reason",
+    "case_version",
+    "last_stage_changed_at",
+    "last_stage_change_event_id",
+  ]) {
+    assert.match(audit, new RegExp(field));
+  }
+  assert.match(audit, /if\s*\(!normalizedReason\)\s*throw new Error\("人工阶段变更必须填写原因。"\)/);
 }
 
 function testDisplayStyles() {
@@ -68,6 +82,7 @@ function testDisplayStyles() {
     ".followup-detail-products",
     ".followup-detail-history",
     ".followup-detail-action-history",
+    ".followup-stage-audit",
   ]) {
     assert.match(stylesSource, new RegExp(selector.replace(".", "\\.")));
   }

@@ -173,6 +173,11 @@
 - `last_outreach_at`
 - `notes`
 - `version`（记录级乐观锁版本；后续实体写入接口必须校验）
+- `last_stage_changed_at`（最近一次人工确认阶段变更时间）
+- `last_stage_changed_by`（最近一次变更操作者；当前为人工操作、人工编辑或人工确认 AI 建议）
+- `last_stage_change_reason`（最近一次人工阶段变更原因；不能为空）
+- `last_stage_change_source`（最近一次变更来源，例如 `manual_stage_change`、`editor_manual_change`、`ai_suggestion_confirmed`）
+- `last_stage_change_event_id`（对应 `followUpEvents.id`，用于快速跳转到完整审计记录）
 - `createdAt`、`updatedAt`
 - `migration_source_follow_up_id`（兼容迁移创建的 Case 所对应的旧 `followUps.id`；人工创建的 Case 为空）
 - `migration_version`（兼容迁移版本号；当前为 `1`）
@@ -218,6 +223,11 @@
 - `references`（线程引用的 Message-ID 列表）
 - `fingerprint`（无 Message-ID 时用于去重）
 - `source`（例如 `Foxmail .eml` 或 `IMAP · 官邮 IMAP`）
+- `previous_stage`、`next_stage`（仅阶段变更事件记录变更前后状态）
+- `actor`（阶段变更执行者；AI 建议只能记录为人工确认）
+- `change_reason`（人工阶段变更原因；不能为空）
+- `evidence`（支持该阶段变更的最小证据摘要；不写入隐藏的完整邮件正文）
+- `case_version`（该事件提交后对应的 Case 版本）
 - `filename`
 - `mailbox`（IMAP 文件夹名称）
 - `server_key`（邮箱服务器、文件夹和 UID 组成的去重键）
@@ -225,6 +235,8 @@
 - `createdAt`
 
 邮件导入会保存标题、时间、收发方向、地址、正文摘要，并按邮箱正文缓存策略保存完整纯文本正文；不保存原始 `.eml` 文件、HTML 原文或附件。相同 `Message-ID`、相同指纹或同一 IMAP 服务器 UID 的邮件会跳过，避免重复导入；摘要再次同步到完整正文时会升级原记录，旧的截断正文也允许被后续完整正文替换，不新增重复事件。完整正文仍受保留期限、单封长度和 AI 总上下文预算限制。
+
+阶段推进事件为追加式审计记录：手动推进或编辑保存时必须填写人工原因；由 AI 给出的建议只有在用户明确点击应用后才会写入，并使用 `ai_suggestion_confirmed` 来源与“人工确认”操作者。阶段事件会同时更新 Case 的阶段、版本和最近审计摘要，不允许 AI 在无人确认时变更高风险阶段。
 
 ## mailInbox
 
