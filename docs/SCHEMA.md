@@ -205,6 +205,8 @@
 
 任务可在今日推进中由人工指派负责人、记录内部备注、延期或完成/跳过。延期必须写明原因；每个操作均写入追加式 `actionTaskEvents` 审计记录。任务操作本身不会自动变更 Case 或 FollowUp 阶段，也不会发送邮件。
 
+人工在邮件分诊台确认归档一封入站达人回信时，系统会保留 `mailInbox` 原记录并标记为 `triage_status = archived`，以 `mail_inbox_id` 写入邮件事件，联动同品牌且唯一的 `followUp` 的 `has_unread_reply` 和 `last_email_at`，并生成唯一的 `new_reply` 行动任务。只有 Case 和 FollowUp 均处于空值、`已联系待回复`、`待回复` 或 `初步沟通` 时，才允许这次人工归档将两者安全推进至 `初步沟通`；报价、条款、寄样、发布、回收和结案阶段不会因邮件归档自动改变。打开或人工标记跟进为已读后，重算会将对应未完成 `new_reply` 任务标记为 `已失效`，不会改变 Case 阶段。
+
 ## actionTaskEvents
 
 行动任务事件是 `actionTasks` 的追加式协作审计记录，必须关联到同品牌、同 Case 的既有任务。旧数据缺少该集合时读取会初始化为空；无效事件保留 `validation_error`，不自动跨品牌或跨 Case 修复。
@@ -239,6 +241,7 @@
 - `id`
 - `follow_up_id`（关联 `followUps.id`）
 - `case_id`（关联 `cases.id`；由历史 `follow_up_id` 兼容回填）
+- `mail_inbox_id`（人工分诊归档时关联 `mailInbox.id`，用于防止同一邮件重复写入时间线）
 - `type`（当前为 `email`）
 - `occurred_at`
 - `direction`（`inbound` 达人来信，`outbound` 我方发信）

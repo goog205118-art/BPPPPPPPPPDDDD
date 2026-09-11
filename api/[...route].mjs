@@ -2147,8 +2147,8 @@ export default async function handler(req, res) {
 
     if (req.method === "POST" && pathname === "/api/state") {
       const body = JSON.parse((await readBody(req)) || "{}");
-      await saveState(body);
-      json(res, 200, { ok: true });
+      const state = await saveState(body);
+      json(res, 200, { ok: true, state });
       return;
     }
 

@@ -1752,6 +1752,10 @@ async function persist() {
     const error = await response.json().catch(() => ({}));
     throw new Error(error.error || "保存失败");
   }
+  const result = await response.json().catch(() => ({}));
+  if (result.state && typeof result.state === "object") {
+    state.data = ensureStateShape(result.state);
+  }
 }
 
 async function loadAiSettings() {
@@ -4784,13 +4788,17 @@ function mailInboxRowMarkup(message) {
     </article>`;
 }
 
-function applyInboundReplyToFollowUp(followUp, message, now = new Date().toISOString()) {
+function applyInboundReplyToFollowUp(followUp, message, caseRow, eventId, now = new Date().toISOString()) {
   if (!followUp || text(message?.direction) !== "inbound") return { stageAdvanced: false, terminal: false };
 
   followUp.has_unread_reply = true;
   const currentStage = text(followUp.stage);
+  const caseStage = text(caseRow?.stage);
+  const lowRiskStages = new Set(["", "已联系待回复", "待回复", "初步沟通"]);
   const terminal = FOLLOW_UP_TERMINAL_STAGES.has(currentStage);
-  const stageAdvanced = !terminal && (!currentStage || currentStage === "已联系待回复" || currentStage === "待回复") && currentStage !== "初步沟通";
+  const stageAdvanced = Boolean(caseRow && !terminal &&
+    lowRiskStages.has(currentStage) && lowRiskStages.has(caseStage) &&
+    (currentStage !== "初步沟通" || caseStage !== "初步沟通"));
   if (stageAdvanced) followUp.stage = "初步沟通";
   followUp.updatedAt = now;
 
@@ -4812,7 +4820,27 @@ function applyInboundReplyToFollowUp(followUp, message, now = new Date().toISOSt
       track.updatedAt = now;
     }
   }
-  return { stageAdvanced, terminal };
+  if (stageAdvanced) {
+    const nextVersion = Math.max(1, Number(caseRow.version) || 1) + 1;
+    Object.assign(caseRow, {
+      stage: "初步沟通",
+      version: nextVersion,
+      last_stage_changed_at: now,
+      last_stage_changed_by: "人工",
+      last_stage_change_reason: "人工确认归档达人新回信",
+      last_stage_change_source: "manual_triage_inbound_reply",
+      last_stage_change_event_id: eventId,
+      updatedAt: now,
+    });
+    return {
+      stageAdvanced,
+      terminal,
+      previousStage: caseStage,
+      nextStage: "初步沟通",
+      caseVersion: nextVersion,
+    };
+  }
+  return { stageAdvanced, terminal, previousStage: "", nextStage: "", caseVersion: null };
 }
 
 function archiveMailIntoFollowUp(message, followUp) {
@@ -4820,19 +4848,42 @@ function archiveMailIntoFollowUp(message, followUp) {
     throw new Error("邮件与合作跟进不属于同一品牌，已阻止归档。");
   }
   const now = new Date().toISOString();
+  const targetCase = followUpCase(followUp);
+  if (!targetCase) throw new Error("所选合作跟进没有可用的 Case，无法安全归档。");
+  const eventId = uid("EV");
+  const transition = applyInboundReplyToFollowUp(followUp, message, targetCase, eventId, now);
+  const currentLatest = text(followUp.last_email_at);
+  followUp.last_email_at = !currentLatest || text(message.occurred_at) > currentLatest
+    ? text(message.occurred_at) || now
+    : currentLatest;
+  followUp.updatedAt = now;
   const archivedMessage = {
     ...message,
+    case_id: followUp.case_id,
+    status: "已归档",
+    match_type: "manual",
     triage_status: "archived",
     triage_reason: text(message.triage_reason) || "人工确认归档",
     triage_resolved_at: now,
     triage_resolved_by: text(message.triage_resolved_by) || "人工",
+    resolved_at: now,
+    updatedAt: now,
   };
   const event = {
     ...archivedMessage,
+    id: eventId,
+    mail_inbox_id: message.id,
     follow_up_id: followUp.id,
-    case_id: followUp.case_id || text(archivedMessage.case_id),
+    case_id: followUp.case_id,
     brand_id: followUp.brand_id,
     brand: followUp.brand,
+    source: "manual_triage",
+    previous_stage: transition.previousStage,
+    next_stage: transition.nextStage,
+    actor: transition.stageAdvanced ? "人工" : "",
+    change_reason: transition.stageAdvanced ? "人工确认归档达人新回信" : "",
+    evidence: transition.stageAdvanced ? "人工确认的入站邮件已归档到当前 Case。" : "",
+    case_version: transition.caseVersion,
     updatedAt: now,
   };
   delete event.status;
@@ -4844,19 +4895,12 @@ function archiveMailIntoFollowUp(message, followUp) {
   delete event.candidate_follow_up_ids;
 
   state.data.followUpEvents = [event, ...(state.data.followUpEvents || [])];
-  state.data.mailInbox = (state.data.mailInbox || []).filter((item) => text(item.id) !== text(message.id));
-
   const followUpIndex = (state.data.followUps || []).findIndex((row) => text(row.id) === text(followUp.id));
   if (followUpIndex >= 0) {
-    const current = state.data.followUps[followUpIndex];
-    applyInboundReplyToFollowUp(current, message, now);
-    const currentLatest = text(current.last_email_at);
-    state.data.followUps[followUpIndex] = {
-      ...current,
-      last_email_at: !currentLatest || text(message.occurred_at) > currentLatest ? message.occurred_at : currentLatest,
-      updatedAt: now,
-    };
+    state.data.followUps[followUpIndex] = followUp;
   }
+  const inboxIndex = (state.data.mailInbox || []).findIndex((item) => text(item.id) === text(message.id));
+  if (inboxIndex >= 0) state.data.mailInbox[inboxIndex] = archivedMessage;
 }
 
 async function archivePendingMail(mailId, followUpId) {
@@ -4946,6 +4990,7 @@ async function createFollowUpAndArchiveMail(mailId) {
     const now = new Date().toISOString();
     const followUp = normalizeFollowUp({
       id: uid("FU"),
+      case_id: uid("CASE"),
       creator_id: creator.id,
       creator_name: creator.name,
       brand_id: creator.brand_id || state.activeBrandId,
@@ -4959,9 +5004,36 @@ async function createFollowUpAndArchiveMail(mailId) {
       createdAt: now,
       updatedAt: now,
     });
+    const caseRow = {
+      id: followUp.case_id,
+      brand_id: followUp.brand_id,
+      brand: followUp.brand,
+      creator_id: creator.id,
+      lead_id: "",
+      cooperation_id: "",
+      product_ids: [],
+      stage: "初步沟通",
+      priority: followUp.priority,
+      cooperation_mode: followUp.cooperation_mode,
+      budget: "",
+      quote_amount: null,
+      shipping_address: "",
+      shipping_status: followUp.shipping_status,
+      tracking_no: "",
+      publish_due_at: "",
+      publish_url: "",
+      next_action: followUp.next_action,
+      next_action_at: "",
+      last_outreach_at: "",
+      notes: followUp.notes,
+      version: 1,
+      createdAt: now,
+      updatedAt: now,
+    };
 
     snapshot = clone(state.data);
     await withActivity("正在新建跟进", "正在建立合作跟进并归档对应邮件...", async () => {
+      state.data.cases = [caseRow, ...(state.data.cases || [])];
       state.data.followUps = [followUp, ...(state.data.followUps || [])];
       archiveMailIntoFollowUp(message, followUp);
       await persist();
@@ -5538,8 +5610,9 @@ async function confirmMailImport() {
   const followUpIndex = state.data.followUps.findIndex((row) => row.id === followUp.id);
   if (followUpIndex >= 0) {
     const current = state.data.followUps[followUpIndex];
+    const linkedCase = followUpCase(current);
     additions.filter((item) => text(item.direction) === "inbound").forEach((item) => {
-      applyInboundReplyToFollowUp(current, item, now);
+      applyInboundReplyToFollowUp(current, item, linkedCase, item.id, now);
     });
     const latestImportedAt = additions.map((item) => Date.parse(text(item.occurred_at))).filter(Number.isFinite).sort((a, b) => a - b).at(-1);
     const currentLatestAt = Date.parse(text(current.last_email_at));

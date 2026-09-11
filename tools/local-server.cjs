@@ -523,6 +523,7 @@ function saveState(nextState) {
   } catch {
     // The project-side JSON mirror is best effort; SQLite remains the source of truth.
   }
+  return committedState;
 }
 
 function resumeCaseMigration() {
@@ -2769,8 +2770,8 @@ function handleApi(req, res, pathname) {
     readBody(req)
       .then((body) => {
         const parsed = JSON.parse(body || "{}");
-        saveState(parsed);
-        send(res, 200, JSON.stringify({ ok: true }));
+        const state = saveState(parsed);
+        send(res, 200, JSON.stringify({ ok: true, state }));
       })
       .catch((error) => {
         send(res, 400, JSON.stringify({ ok: false, error: error.message }));

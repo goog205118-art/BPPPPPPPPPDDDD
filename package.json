@@ -17,7 +17,8 @@
     "test:today-action-center": "node tools/today-action-center-regression-test.cjs",
     "test:task-collaboration": "node tools/task-collaboration-regression-test.cjs",
     "test:mail-routing-score": "node tools/mail-routing-score-regression-test.cjs",
-    "test:mail-triage-console": "node tools/mail-triage-console-regression-test.cjs"
+    "test:mail-triage-console": "node tools/mail-triage-console-regression-test.cjs",
+    "test:mail-triage-case-actions": "node tools/mail-triage-case-actions-regression-test.cjs"
   },
   "dependencies": {
     "@vercel/blob": "^2.8.0",

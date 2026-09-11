@@ -208,6 +208,75 @@ function ensureOpenTriageMail(mailRow) {
   }
 }
 
+function linkedFollowUpsForCase(state, caseRow) {
+  return (Array.isArray(state?.followUps) ? state.followUps : [])
+    .filter((followUp) => text(followUp.case_id) === text(caseRow.id))
+    .filter((followUp) => text(followUp.brand_id) === text(caseRow.brand_id));
+}
+
+function linkedFollowUpForTriageMail(state, caseRow, mailRow) {
+  const linked = linkedFollowUpsForCase(state, caseRow);
+  if (!linked.length) return null;
+
+  const explicitIds = new Set([
+    ...(Array.isArray(mailRow?.candidate_follow_up_ids) ? mailRow.candidate_follow_up_ids : []),
+    ...(Array.isArray(mailRow?.match_candidates) ? mailRow.match_candidates
+      .filter((candidate) => text(candidate?.case_id) === text(caseRow.id))
+      .map((candidate) => candidate?.follow_up_id) : []),
+  ].map(text).filter(Boolean));
+  if (explicitIds.size) {
+    const explicitMatches = linked.filter((followUp) => explicitIds.has(text(followUp.id)));
+    return explicitMatches.length === 1 ? explicitMatches[0] : null;
+  }
+  return linked.length === 1 ? linked[0] : null;
+}
+
+function latestTimestamp(left, right) {
+  const leftDate = new Date(text(left));
+  const rightDate = new Date(text(right));
+  if (Number.isNaN(leftDate.getTime())) return text(right);
+  if (Number.isNaN(rightDate.getTime())) return text(left);
+  return leftDate >= rightDate ? leftDate.toISOString() : rightDate.toISOString();
+}
+
+function addressList(value) {
+  return String(value ?? "")
+    .match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi)
+    ?.map((email) => email.toLowerCase()) || [];
+}
+
+function canSafelyEnterInitialCommunication(caseRow, followUp) {
+  const lowRiskStages = new Set(["", "已联系待回复", "待回复", "初步沟通"]);
+  return lowRiskStages.has(text(caseRow?.stage)) && lowRiskStages.has(text(followUp?.stage));
+}
+
+function updateContactTrackForInboundArchive(state, caseRow, followUp, mailRow, timestamp) {
+  if (text(mailRow?.direction) !== "inbound" || !text(caseRow?.creator_id)) return null;
+  const creator = (Array.isArray(state?.creators) ? state.creators : [])
+    .find((item) => text(item.id) === text(caseRow.creator_id)
+      && text(item.brand_id) === text(caseRow.brand_id));
+  const creatorEmails = new Set(addressList(creator?.email));
+  const senderEmails = new Set(addressList(mailRow?.sender));
+  const matchedEmail = [...senderEmails].find((email) => creatorEmails.has(email));
+  if (!matchedEmail) return null;
+
+  const tracks = Array.isArray(state?.contactTracks) ? state.contactTracks : (state.contactTracks = []);
+  const track = tracks.find((item) => text(item.brand_id) === text(caseRow.brand_id)
+    && text(item.person_type || "creator") === "creator"
+    && text(item.person_id) === text(caseRow.creator_id)
+    && text(item.email).toLowerCase() === matchedEmail
+    && (!text(item.follow_up_id) || text(item.follow_up_id) === text(followUp?.id)));
+  if (!track) return null;
+  Object.assign(track, {
+    status: "replied",
+    follow_up_id: text(followUp?.id),
+    case_id: caseRow.id,
+    replied_at: latestTimestamp(track.replied_at, text(mailRow.occurred_at) || timestamp),
+    updatedAt: timestamp,
+  });
+  return track;
+}
+
 function archiveTriageMail(state, input = {}, now = new Date().toISOString()) {
   const mailId = text(input.mail_id);
   const caseId = text(input.case_id);
@@ -225,6 +294,33 @@ function archiveTriageMail(state, input = {}, now = new Date().toISOString()) {
   }
 
   const timestamp = iso(now);
+  const followUp = linkedFollowUpForTriageMail(state, selectedCase, mailRow);
+  const inboundReply = text(mailRow.direction) === "inbound";
+  const stageAdvanced = Boolean(inboundReply && followUp && canSafelyEnterInitialCommunication(selectedCase, followUp)
+    && (text(selectedCase.stage) !== "初步沟通" || text(followUp.stage) !== "初步沟通"));
+  const eventId = `EV-${randomUUID()}`;
+  const eventOccurredAt = text(mailRow.occurred_at) || timestamp;
+  const previousCaseStage = text(selectedCase.stage);
+  let caseVersion = Math.max(1, Number(selectedCase.version) || 1);
+  if (followUp && inboundReply) {
+    followUp.has_unread_reply = true;
+    followUp.last_email_at = latestTimestamp(followUp.last_email_at, eventOccurredAt);
+    if (stageAdvanced) followUp.stage = "初步沟通";
+    followUp.updatedAt = timestamp;
+  }
+  if (stageAdvanced) {
+    caseVersion += 1;
+    Object.assign(selectedCase, {
+      stage: "初步沟通",
+      version: caseVersion,
+      last_stage_changed_at: timestamp,
+      last_stage_changed_by: text(input.actor_name) || "人工",
+      last_stage_change_reason: "人工确认归档达人新回信",
+      last_stage_change_source: "manual_triage_inbound_reply",
+      last_stage_change_event_id: eventId,
+      updatedAt: timestamp,
+    });
+  }
   const nextMail = {
     ...mailRow,
     case_id: caseId,
@@ -243,22 +339,54 @@ function archiveTriageMail(state, input = {}, now = new Date().toISOString()) {
   const existing = events.find((item) => text(item.mail_inbox_id) === mailId && text(item.case_id) === caseId);
   if (!existing) {
     events.push({
-      id: `EV-${randomUUID()}`,
+      id: eventId,
       brand_id: selectedCase.brand_id,
       case_id: caseId,
+      follow_up_id: text(followUp?.id),
       mail_inbox_id: mailId,
       type: "email",
       direction: text(mailRow.direction) || "inbound",
       subject: text(mailRow.subject),
+      sender: text(mailRow.sender),
+      recipients: text(mailRow.recipients),
       excerpt: text(mailRow.excerpt),
-      occurred_at: text(mailRow.occurred_at) || timestamp,
+      body: text(mailRow.body),
+      body_cached_at: text(mailRow.body_cached_at),
+      body_retention_until: text(mailRow.body_retention_until),
+      body_truncated: flag(mailRow.body_truncated),
+      message_id: text(mailRow.message_id),
+      in_reply_to: text(mailRow.in_reply_to),
+      references: Array.isArray(mailRow.references)
+        ? mailRow.references.map(text).filter(Boolean)
+        : text(mailRow.references),
+      fingerprint: text(mailRow.fingerprint),
+      mailbox_account_id: text(mailRow.mailbox_account_id),
+      mailbox: text(mailRow.mailbox),
+      server_key: text(mailRow.server_key),
+      imap_uid: text(mailRow.imap_uid),
+      occurred_at: eventOccurredAt,
       source: "manual_triage",
+      previous_stage: stageAdvanced ? previousCaseStage : "",
+      next_stage: stageAdvanced ? "初步沟通" : "",
+      actor: stageAdvanced ? (text(input.actor_name) || "人工") : "",
+      change_reason: stageAdvanced ? "人工确认归档达人新回信" : "",
+      evidence: stageAdvanced ? "人工确认的入站邮件已归档到当前 Case。" : "",
+      case_version: stageAdvanced ? caseVersion : null,
       createdAt: timestamp,
       updatedAt: timestamp,
     });
   }
-
-  return { mail: nextMail, case: selectedCase, eventCreated: !existing };
+  const contactTrack = followUp ? updateContactTrackForInboundArchive(state, selectedCase, followUp, mailRow, timestamp) : null;
+  const taskResult = reconcileCaseTasks(state, timestamp);
+  return {
+    mail: nextMail,
+    case: selectedCase,
+    followUp,
+    contactTrack,
+    eventCreated: !existing,
+    stageAdvanced,
+    taskResult,
+  };
 }
 
 function ignoreTriageMail(state, input = {}, now = new Date().toISOString()) {
