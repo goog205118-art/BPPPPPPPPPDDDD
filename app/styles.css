@@ -4279,6 +4279,67 @@ body.access-locked .app-shell {
   color: #c6d7e4;
 }
 
+.today-action-last-event {
+  color: #8fc5da;
+  font-size: 0.62rem;
+  line-height: 1.35;
+}
+
+.today-action-history {
+  width: fit-content;
+  color: #a9c6d6;
+  font-size: 0.62rem;
+}
+
+.today-action-history summary {
+  width: fit-content;
+  cursor: pointer;
+  color: #8fc5da;
+  list-style: none;
+}
+
+.today-action-history summary::-webkit-details-marker {
+  display: none;
+}
+
+.today-action-history summary::before {
+  content: "+";
+  display: inline-block;
+  width: 10px;
+  color: #6da9c4;
+}
+
+.today-action-history[open] summary::before {
+  content: "-";
+}
+
+.today-action-history ol {
+  display: grid;
+  gap: 4px;
+  margin: 5px 0 0;
+  padding: 5px 0 0 13px;
+  border-top: 1px solid #2c4256;
+}
+
+.today-action-history li {
+  color: #d6e4ee;
+  line-height: 1.35;
+}
+
+.today-action-history li span {
+  color: #80b6ce;
+}
+
+.today-action-history li p,
+.today-action-history li small {
+  margin: 0;
+}
+
+.today-action-history li small {
+  color: #849daf;
+  font-size: 0.58rem;
+}
+
 .today-action-meta {
   flex-wrap: wrap;
   color: #8fa5b8;

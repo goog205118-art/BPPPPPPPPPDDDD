@@ -38,6 +38,7 @@ const defaultState = {
   followUps: [],
   cases: [],
   actionTasks: [],
+  actionTaskEvents: [],
   followUpEvents: [],
   contactTracks: [],
   mailInbox: [],
@@ -330,6 +331,7 @@ function normalizeBusinessState(rawState) {
           status: validationError ? "待修复" : ["待处理", "已完成", "已失效", "已跳过", "待修复"].includes(originalStatus) ? originalStatus : "待处理",
           completion_evidence: textValue(row.completion_evidence),
           completed_at: textValue(row.completed_at),
+          defer_reason: textValue(row.defer_reason),
           dedupe_key: textValue(row.dedupe_key),
           generated: ["1", "true", "yes", "是"].includes(String(row.generated || "").trim().toLowerCase()),
           validation_error: validationError,
@@ -343,6 +345,39 @@ function normalizeBusinessState(rawState) {
           }, brandsById.get(textValue(linkedCase.brand_id)));
         }
         return resolveBrand(normalized);
+      })
+    : [];
+  const actionTaskById = new Map(actionTasks.map((row) => [textValue(row.id), row]));
+  const actionTaskEvents = Array.isArray(state.actionTaskEvents)
+    ? state.actionTaskEvents.map((row) => {
+        const task = actionTaskById.get(textValue(row.task_id));
+        const sourceBrandId = textValue(row.brand_id);
+        const sourceCaseId = textValue(row.case_id);
+        const type = textValue(row.type);
+        const validationError = !task
+          ? "行动任务事件关联的任务不存在。"
+          : sourceBrandId && sourceBrandId !== textValue(task.brand_id)
+            ? "行动任务事件与任务品牌不一致，禁止跨品牌保存。"
+            : sourceCaseId && sourceCaseId !== textValue(task.case_id)
+              ? "行动任务事件与任务 Case 不一致，禁止跨 Case 保存。"
+              : !["created", "assignment", "note", "defer", "complete", "skip"].includes(type)
+                ? "行动任务事件类型无效。"
+                : !textValue(row.summary)
+                  ? "行动任务事件缺少摘要。"
+                  : "";
+        return {
+          ...row,
+          task_id: textValue(row.task_id),
+          brand_id: task && !validationError ? task.brand_id : sourceBrandId,
+          case_id: task && !validationError ? task.case_id : sourceCaseId,
+          type,
+          actor_id: textValue(row.actor_id),
+          actor_name: textValue(row.actor_name),
+          summary: textValue(row.summary),
+          metadata: row.metadata && typeof row.metadata === "object" ? row.metadata : {},
+          occurred_at: textValue(row.occurred_at) || textValue(row.createdAt),
+          validation_error: validationError,
+        };
       })
     : [];
 
@@ -360,6 +395,7 @@ function normalizeBusinessState(rawState) {
     cases,
     followUps,
     actionTasks,
+    actionTaskEvents,
     followUpEvents,
     contactTracks,
     mailInbox,

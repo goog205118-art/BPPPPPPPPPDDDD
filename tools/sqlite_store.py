@@ -190,10 +190,26 @@ SCHEMA = {
         "status": "TEXT",
         "completion_evidence": "TEXT",
         "completed_at": "TEXT",
+        "defer_reason": "TEXT",
         "dedupe_key": "TEXT",
         "generated": "REAL",
         "validation_error": "TEXT",
         "version": "REAL",
+        "createdAt": "TEXT",
+        "updatedAt": "TEXT",
+    },
+    "actionTaskEvents": {
+        "id": "TEXT PRIMARY KEY",
+        "task_id": "TEXT",
+        "brand_id": "TEXT",
+        "case_id": "TEXT",
+        "type": "TEXT",
+        "actor_id": "TEXT",
+        "actor_name": "TEXT",
+        "summary": "TEXT",
+        "metadata": "TEXT",
+        "occurred_at": "TEXT",
+        "validation_error": "TEXT",
         "createdAt": "TEXT",
         "updatedAt": "TEXT",
     },
@@ -412,6 +428,7 @@ def rows_to_state(conn):
         "followUps": [],
         "cases": [],
         "actionTasks": [],
+        "actionTaskEvents": [],
         "followUpEvents": [],
         "mailInbox": [],
         "contactTracks": [],
@@ -447,7 +464,7 @@ def row_to_dict(row):
         payload["has_unread_reply"] = parse_flag(payload["has_unread_reply"])
     if "generated" in payload:
         payload["generated"] = parse_flag(payload["generated"])
-    for key in ("beforeCounts", "snapshot", "selected_resource_ids", "product_ids", "candidate_creator_ids", "candidate_lead_ids", "candidate_brand_ids", "candidate_follow_up_ids", "candidate_case_ids", "references"):
+    for key in ("beforeCounts", "snapshot", "selected_resource_ids", "product_ids", "candidate_creator_ids", "candidate_lead_ids", "candidate_brand_ids", "candidate_follow_up_ids", "candidate_case_ids", "references", "metadata"):
         if payload.get(key):
             try:
                 payload[key] = json.loads(payload[key])

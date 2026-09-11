@@ -197,11 +197,27 @@
 - `owner_id`、`owner_name`
 - `priority`、`due_at`
 - `status`（`待处理`、`已完成`、`已失效`、`已跳过`、`待修复`）
-- `completion_evidence`、`completed_at`
+- `completion_evidence`、`completed_at`、`defer_reason`
 - `generated`、`validation_error`、`version`
 - `createdAt`、`updatedAt`
 
 当前自动规则覆盖：已归档新回信待处理、首次外联后三天未回复、待补寄样地址、地址齐备但待安排寄样、待确认报价与合作方式、待确认内容发布、待回收合作数据，以及已唯一匹配到 Case 但待人工归档的入站邮件。新回信规则仅采用同品牌、已关联当前 Case 且 `has_unread_reply = true` 的旧跟进记录，并要求存在其最新的入站邮件事件，避免把历史邮件重复列为待办。`dedupe_key = case_id + type + source_id`；同一事实重复保存不会重复创建任务。条件消失时仅将未完成的 `case_rule` 任务标记为 `已失效`，不会覆盖人工完成或跳过的记录。歧义或跨品牌待归档邮件不生成 Case 任务，留待 `CRM-30` 邮件分诊台处理。
+
+任务可在今日推进中由人工指派负责人、记录内部备注、延期或完成/跳过。延期必须写明原因；每个操作均写入追加式 `actionTaskEvents` 审计记录。任务操作本身不会自动变更 Case 或 FollowUp 阶段，也不会发送邮件。
+
+## actionTaskEvents
+
+行动任务事件是 `actionTasks` 的追加式协作审计记录，必须关联到同品牌、同 Case 的既有任务。旧数据缺少该集合时读取会初始化为空；无效事件保留 `validation_error`，不自动跨品牌或跨 Case 修复。
+
+- `id`
+- `task_id`、`brand_id`、`case_id`
+- `type`（`created`、`assignment`、`note`、`defer`、`complete`、`skip`）
+- `actor_id`、`actor_name`
+- `summary`（必填、面向人工查看的操作摘要）
+- `metadata`（结构化细节，例如前后负责人、延期前后截止时间、延期原因或完成证据）
+- `occurred_at`
+- `validation_error`
+- `createdAt`、`updatedAt`
 
 ### 旧跟进兼容迁移
 
@@ -297,28 +313,6 @@
 当 `status` 为 `needs_followup` 且没有活跃跟进时，可新建一条默认合作跟进后归档；当同一达人有多条活跃跟进时，必须先选择具体跟进。无法自动确认达人或匹配多个达人时，不提供自动归档，但前端可从当前品牌达人库人工绑定已有达人后继续处理；品牌不一致时始终阻止归档。人工确认或 Foxmail 导入保存失败时，页面内存状态会恢复到操作前快照。
 
 邮件同步会先匹配现有“已联系待回复”轨迹；若历史首发邮件未同步为轨迹，但能唯一匹配当前品牌中的达人或待开发达人，并且该资料的 `last_outreach_at` 距来信不超过 30 天，则会自动建立“初步沟通”合作跟进。超过 30 天、来信早于发件时间、同邮箱跨品牌或匹配多人时，邮件仍停留在待人工归档区。30 天窗口只用于首次自动建入合作跟进；已经明确关联到某条合作跟进的邮件线程，后续来信会持续归档到原跟进，不会因合作周期较长而中断。
-
-## actionTasks
-
-行动任务是 Case 的独立推进记录，不依赖当前页面、看板筛选或浏览器会话。它为后续“今日推进”、规则待办、人工分派和操作历史提供统一持久化基础；本阶段只定义数据契约，尚未启用自动任务生成或任务中心界面。
-
-- `id`
-- `brand_id`、`brand`（从所属 Case 继承；任务品牌必须与 Case 一致）
-- `case_id`（必填，关联 `cases.id`）
-- `source`、`source_id`（任务来源，例如 `manual` 或后续规则/邮件来源）
-- `type`（任务类型；当前允许通用任务与后续规则类型）
-- `title`、`description`
-- `owner_id`、`owner_name`（可为空；指派界面将在后续任务实现）
-- `priority`（`高`、`中`、`低`、`普通`）
-- `due_at`
-- `status`（`待处理`、`已完成`、`已失效`、`已跳过`、`待修复`）
-- `completion_evidence`、`completed_at`（状态为 `已完成` 时必须填写完成证据）
-- `dedupe_key`（为后续规则生成和去重预留）
-- `generated`（是否由规则生成）
-- `validation_error`（旧数据或外部数据不符合 Case / 品牌契约时保留错误原因，不自动跨品牌改挂）
-- `version`、`createdAt`、`updatedAt`
-
-创建或完成任务时，领域层会校验 Case 存在、任务与 Case 品牌一致、标题有效以及完成证据。读取旧数据时，孤儿任务、跨品牌任务或缺少完成证据的完成任务不会被删除或静默纠正，而会标记为 `待修复`，等待后续任务中心人工处理。
 
 ## matches
 

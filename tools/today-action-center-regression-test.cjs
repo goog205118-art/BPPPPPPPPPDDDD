@@ -56,11 +56,13 @@ function testSkipAndReconcile() {
 
 function testDeferValidation() {
   const state = fixture();
-  assert.throws(() => domain.deferTask(state, "TASK-A", "not-a-date", "2026-09-11T10:00:00.000Z"), /必须晚于当前时间/);
-  assert.throws(() => domain.deferTask(state, "TASK-A", "2026-09-11T09:59:00.000Z", "2026-09-11T10:00:00.000Z"), /必须晚于当前时间/);
-  const deferred = domain.deferTask(state, "TASK-A", "2026-09-12T12:30:00.000Z", "2026-09-11T10:00:00.000Z");
+  assert.throws(() => domain.deferTask(state, "TASK-A", "not-a-date", "等待达人确认", "2026-09-11T10:00:00.000Z"), /必须晚于当前时间/);
+  assert.throws(() => domain.deferTask(state, "TASK-A", "2026-09-11T09:59:00.000Z", "等待达人确认", "2026-09-11T10:00:00.000Z"), /必须晚于当前时间/);
+  assert.throws(() => domain.deferTask(state, "TASK-A", "2026-09-12T12:30:00.000Z", "", "2026-09-11T10:00:00.000Z"), /必须填写原因/);
+  const deferred = domain.deferTask(state, "TASK-A", "2026-09-12T12:30:00.000Z", "等待达人确认", "2026-09-11T10:00:00.000Z");
   assert.equal(deferred.status, "待处理");
   assert.equal(deferred.due_at, "2026-09-12T12:30:00.000Z");
+  assert.equal(deferred.defer_reason, "等待达人确认");
   assert.equal(state.cases[0].stage, "初步沟通");
   assert.equal(state.followUps[0].stage, "初步沟通");
   assert.equal(state.followUpEvents.length, 0);
@@ -87,6 +89,10 @@ function testUiContracts() {
     "data-today-action-complete",
     "data-today-action-skip",
     "data-today-action-defer",
+    "data-today-action-assign",
+    "data-today-action-note",
+    "function appendTodayActionEvent",
+    "function actionTaskHistoryMarkup",
     "data-today-action-open-case",
     "openFollowUpDetail(followUp.id)",
   ]) {

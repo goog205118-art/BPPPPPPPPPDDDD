@@ -239,6 +239,20 @@ function taskById(state, taskId) {
     .find((item) => text(item.id) === text(taskId)) || null;
 }
 
+const TASK_EVENT_TYPES = new Set(["created", "assignment", "note", "defer", "complete", "skip"]);
+
+function taskEvents(state) {
+  return Array.isArray(state?.actionTaskEvents)
+    ? state.actionTaskEvents
+    : (state.actionTaskEvents = []);
+}
+
+function taskEventsForTask(state, taskId) {
+  return taskEvents(state)
+    .filter((item) => text(item.task_id) === text(taskId) && !text(item.validation_error))
+    .sort((left, right) => new Date(left.occurred_at || 0) - new Date(right.occurred_at || 0));
+}
+
 function taskValidationError(state, input = {}) {
   const caseId = text(input.case_id);
   if (!caseId) return "行动任务必须关联 Case。";
@@ -249,6 +263,40 @@ function taskValidationError(state, input = {}) {
     return "行动任务与 Case 品牌不一致，禁止跨品牌保存。";
   }
   return "";
+}
+
+function appendTaskEvent(state, task, input = {}, now = new Date().toISOString()) {
+  const validationError = taskValidationError(state, task);
+  if (validationError) throw new Error(validationError);
+  const type = text(input.type);
+  if (!TASK_EVENT_TYPES.has(type)) throw new Error("行动任务事件类型无效。");
+  if (text(input.brand_id) && text(input.brand_id) !== text(task.brand_id)) {
+    throw new Error("行动任务事件与任务品牌不一致，禁止跨品牌保存。");
+  }
+  if (text(input.case_id) && text(input.case_id) !== text(task.case_id)) {
+    throw new Error("行动任务事件与任务 Case 不一致，禁止跨 Case 保存。");
+  }
+  const summary = text(input.summary);
+  if (!summary) throw new Error("行动任务事件必须填写摘要。");
+
+  const timestamp = iso(now);
+  const event = {
+    id: text(input.id) || `TASKEVT-${randomUUID()}`,
+    task_id: task.id,
+    brand_id: task.brand_id,
+    case_id: task.case_id,
+    type,
+    actor_id: text(input.actor_id),
+    actor_name: text(input.actor_name) || "当前用户",
+    summary,
+    metadata: input.metadata && typeof input.metadata === "object" ? input.metadata : {},
+    occurred_at: text(input.occurred_at) || timestamp,
+    validation_error: "",
+    createdAt: text(input.createdAt) || timestamp,
+    updatedAt: timestamp,
+  };
+  taskEvents(state).push(event);
+  return event;
 }
 
 function createActionTask(state, input = {}, now = new Date().toISOString()) {
@@ -264,7 +312,7 @@ function createActionTask(state, input = {}, now = new Date().toISOString()) {
   }
 
   const timestamp = iso(now);
-  return {
+  const task = {
     id: text(input.id) || `TASK-${randomUUID()}`,
     brand_id: caseRow.brand_id,
     brand: text(caseRow.brand),
@@ -281,6 +329,7 @@ function createActionTask(state, input = {}, now = new Date().toISOString()) {
     status,
     completion_evidence: completionEvidence,
     completed_at: status === "已完成" ? (text(input.completed_at) || timestamp) : "",
+    defer_reason: text(input.defer_reason),
     dedupe_key: text(input.dedupe_key),
     generated: flag(input.generated),
     validation_error: "",
@@ -288,6 +337,22 @@ function createActionTask(state, input = {}, now = new Date().toISOString()) {
     createdAt: text(input.createdAt) || timestamp,
     updatedAt: text(input.updatedAt) || timestamp,
   };
+  if (!input.skip_created_event) {
+    appendTaskEvent(state, task, {
+      type: "created",
+      actor_id: text(input.actor_id),
+      actor_name: text(input.actor_name) || (flag(input.generated) ? "系统规则" : "当前用户"),
+      summary: flag(input.generated) ? "系统规则生成行动任务。" : "已创建行动任务。",
+      metadata: {
+        source: task.source,
+        type: task.type,
+        due_at: task.due_at,
+        owner_id: task.owner_id,
+        owner_name: task.owner_name,
+      },
+    }, timestamp);
+  }
+  return task;
 }
 
 function latestEvent(events, predicate) {
@@ -520,6 +585,11 @@ function completeTask(state, taskId, evidence = "", now = new Date().toISOString
   task.validation_error = "";
   task.version = Math.max(1, Number(task.version) || 1) + 1;
   task.updatedAt = task.completed_at;
+  appendTaskEvent(state, task, {
+    type: "complete",
+    summary: `已完成：${completionEvidence}`,
+    metadata: { completion_evidence: completionEvidence },
+  }, task.completed_at);
   return task;
 }
 
@@ -540,10 +610,15 @@ function skipTask(state, taskId, reason = "", now = new Date().toISOString()) {
   task.validation_error = "";
   task.version = Math.max(1, Number(task.version) || 1) + 1;
   task.updatedAt = timestamp;
+  appendTaskEvent(state, task, {
+    type: "skip",
+    summary: `已跳过：${skipReason}`,
+    metadata: { reason: skipReason },
+  }, timestamp);
   return task;
 }
 
-function deferTask(state, taskId, dueAt, now = new Date().toISOString()) {
+function deferTask(state, taskId, dueAt, reason = "", now = new Date().toISOString()) {
   const task = taskById(state, taskId);
   if (!task) throw new Error("未找到待办。");
   const validationError = taskValidationError(state, task);
@@ -556,9 +631,77 @@ function deferTask(state, taskId, dueAt, now = new Date().toISOString()) {
   if (Number.isNaN(parsedDueAt.getTime()) || parsedDueAt.getTime() <= parsedNow.getTime()) {
     throw new Error("延期时间必须晚于当前时间。");
   }
+  const deferReason = text(reason);
+  if (!deferReason) throw new Error("延期行动任务必须填写原因。");
+  const previousDueAt = text(task.due_at);
   task.due_at = parsedDueAt.toISOString();
+  task.defer_reason = deferReason;
   task.version = Math.max(1, Number(task.version) || 1) + 1;
   task.updatedAt = iso(now);
+  appendTaskEvent(state, task, {
+    type: "defer",
+    summary: `延期至 ${task.due_at}：${deferReason}`,
+    metadata: {
+      previous_due_at: previousDueAt,
+      due_at: task.due_at,
+      reason: deferReason,
+    },
+  }, task.updatedAt);
+  return task;
+}
+
+function assignTask(state, taskId, assignment = {}, now = new Date().toISOString()) {
+  const task = taskById(state, taskId);
+  if (!task) throw new Error("未找到待办。");
+  const validationError = taskValidationError(state, task);
+  if (validationError) throw new Error(validationError);
+  if (!["待处理", "待修复"].includes(text(task.status))) {
+    throw new Error("只有待处理或待修复的行动任务可以调整负责人。");
+  }
+  const previousOwnerId = text(task.owner_id);
+  const previousOwnerName = text(task.owner_name);
+  const ownerId = text(assignment.owner_id);
+  const ownerName = text(assignment.owner_name);
+  if (previousOwnerId === ownerId && previousOwnerName === ownerName) {
+    throw new Error("负责人没有变化。");
+  }
+  const timestamp = iso(now);
+  task.owner_id = ownerId;
+  task.owner_name = ownerName;
+  task.version = Math.max(1, Number(task.version) || 1) + 1;
+  task.updatedAt = timestamp;
+  appendTaskEvent(state, task, {
+    type: "assignment",
+    actor_id: text(assignment.actor_id),
+    actor_name: text(assignment.actor_name),
+    summary: ownerName ? `已指派给 ${ownerName}。` : "已取消负责人指派。",
+    metadata: {
+      previous_owner_id: previousOwnerId,
+      previous_owner_name: previousOwnerName,
+      owner_id: ownerId,
+      owner_name: ownerName,
+    },
+  }, timestamp);
+  return task;
+}
+
+function addTaskNote(state, taskId, note = "", actor = {}, now = new Date().toISOString()) {
+  const task = taskById(state, taskId);
+  if (!task) throw new Error("未找到待办。");
+  const validationError = taskValidationError(state, task);
+  if (validationError) throw new Error(validationError);
+  const content = text(note);
+  if (!content) throw new Error("任务备注不能为空。");
+  const timestamp = iso(now);
+  task.version = Math.max(1, Number(task.version) || 1) + 1;
+  task.updatedAt = timestamp;
+  appendTaskEvent(state, task, {
+    type: "note",
+    actor_id: text(actor.actor_id),
+    actor_name: text(actor.actor_name),
+    summary: content,
+    metadata: { note: content },
+  }, timestamp);
   return task;
 }
 
@@ -587,7 +730,11 @@ module.exports = {
   CASE_STAGE_TRANSITIONS,
   TASK_PRIORITIES,
   TASK_STATUSES,
+  TASK_EVENT_TYPES,
+  addTaskNote,
   archiveTriageMail,
+  assignTask,
+  appendTaskEvent,
   canTransitionCaseStage,
   completeTask,
   createActionTask,
@@ -597,5 +744,6 @@ module.exports = {
   recordCaseStageChange,
   reconcileCaseTasks,
   skipTask,
+  taskEventsForTask,
   taskKey,
 };

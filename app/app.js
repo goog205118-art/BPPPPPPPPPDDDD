@@ -546,6 +546,7 @@ const emptyState = {
   followUps: [],
   cases: [],
   actionTasks: [],
+  actionTaskEvents: [],
   followUpEvents: [],
   contactTracks: [],
   mailInbox: [],
@@ -1647,6 +1648,7 @@ function ensureStateShape(nextState) {
           status: validationError ? "待修复" : ["待处理", "已完成", "已失效", "已跳过", "待修复"].includes(originalStatus) ? originalStatus : "待处理",
           completion_evidence: text(row.completion_evidence),
           completed_at: text(row.completed_at),
+          defer_reason: text(row.defer_reason),
           dedupe_key: text(row.dedupe_key),
           generated: ["1", "true", "yes", "是"].includes(String(row.generated || "").trim().toLowerCase()),
           validation_error: validationError,
@@ -1660,6 +1662,39 @@ function ensureStateShape(nextState) {
           }, shaped);
         }
         return applyRecordBrand(normalized, shaped);
+      })
+    : [];
+  const actionTaskById = new Map(shaped.actionTasks.map((row) => [text(row.id), row]));
+  shaped.actionTaskEvents = Array.isArray(nextState?.actionTaskEvents)
+    ? nextState.actionTaskEvents.map((row) => {
+        const task = actionTaskById.get(text(row.task_id));
+        const sourceBrandId = text(row.brand_id);
+        const sourceCaseId = text(row.case_id);
+        const type = text(row.type);
+        const validationError = !task
+          ? "行动任务事件关联的任务不存在。"
+          : sourceBrandId && sourceBrandId !== text(task.brand_id)
+            ? "行动任务事件与任务品牌不一致，禁止跨品牌保存。"
+            : sourceCaseId && sourceCaseId !== text(task.case_id)
+              ? "行动任务事件与任务 Case 不一致，禁止跨 Case 保存。"
+              : !["created", "assignment", "note", "defer", "complete", "skip"].includes(type)
+                ? "行动任务事件类型无效。"
+                : !text(row.summary)
+                  ? "行动任务事件缺少摘要。"
+                  : "";
+        return {
+          ...row,
+          task_id: text(row.task_id),
+          brand_id: task && !validationError ? task.brand_id : sourceBrandId,
+          case_id: task && !validationError ? task.case_id : sourceCaseId,
+          type,
+          actor_id: text(row.actor_id),
+          actor_name: text(row.actor_name),
+          summary: text(row.summary),
+          metadata: row.metadata && typeof row.metadata === "object" ? row.metadata : {},
+          occurred_at: text(row.occurred_at) || text(row.createdAt),
+          validation_error: validationError,
+        };
       })
     : [];
   shaped.matches = Array.isArray(nextState?.matches)
@@ -6489,6 +6524,43 @@ function actionTaskMatchesFilters(task, filter = state.todayActionFilter, now = 
   return true;
 }
 
+function actionTaskEventsFor(task) {
+  return (state.data.actionTaskEvents || [])
+    .filter((event) => text(event.task_id) === text(task?.id)
+      && text(event.brand_id) === text(task?.brand_id)
+      && text(event.case_id) === text(task?.case_id)
+      && !text(event.validation_error))
+    .sort((left, right) => new Date(left.occurred_at || 0) - new Date(right.occurred_at || 0));
+}
+
+function actionTaskEventLabel(type) {
+  return {
+    created: "创建",
+    assignment: "指派",
+    note: "备注",
+    defer: "延期",
+    complete: "完成",
+    skip: "跳过",
+  }[text(type)] || "记录";
+}
+
+function actionTaskHistoryMarkup(events) {
+  if (!events.length) return "";
+  const entries = events.slice(-6).reverse().map((event) => `
+    <li>
+      <span>${escapeHtml(actionTaskEventLabel(event.type))}</span>
+      <p>${escapeHtml(event.summary)}</p>
+      <small>${escapeHtml([event.actor_name || "当前用户", formatDateTime(event.occurred_at)].filter(Boolean).join(" · "))}</small>
+    </li>
+  `).join("");
+  return `
+    <details class="today-action-history">
+      <summary title="查看任务操作历史">历史 ${events.length}</summary>
+      <ol>${entries}</ol>
+    </details>
+  `;
+}
+
 function actionTaskMarkup(task) {
   const caseRow = actionTaskCase(task);
   const creator = actionTaskCreator(task, caseRow);
@@ -6497,6 +6569,9 @@ function actionTaskMarkup(task) {
   const hasCase = Boolean(actionTaskFollowUp(task));
   const canResolve = ["待处理", "待修复"].includes(text(task.status));
   const canDefer = text(task.status) === "待处理";
+  const canCollaborate = ["待处理", "待修复"].includes(text(task.status));
+  const events = actionTaskEventsFor(task);
+  const latestEvent = events.at(-1);
   return `
     <article class="today-action-row ${dueCategory === "已逾期" ? "is-overdue" : ""}">
       <div class="today-action-main">
@@ -6514,8 +6589,13 @@ function actionTaskMarkup(task) {
           ${text(task.owner_name) ? `<span>负责人：${escapeHtml(task.owner_name)}</span>` : ""}
         </div>
         ${text(task.completion_evidence) ? `<small class="today-action-evidence">${escapeHtml(task.status)}：${escapeHtml(task.completion_evidence)}</small>` : ""}
+        ${text(task.defer_reason) ? `<small class="today-action-evidence">最近延期：${escapeHtml(task.defer_reason)}</small>` : ""}
+        ${latestEvent ? `<small class="today-action-last-event">${escapeHtml(actionTaskEventLabel(latestEvent.type))} · ${escapeHtml(latestEvent.summary)}</small>` : ""}
+        ${actionTaskHistoryMarkup(events)}
       </div>
       <div class="today-action-actions">
+        <button type="button" class="icon-button" data-today-action-assign="${escapeHtml(task.id)}" title="指派负责人" aria-label="指派负责人" ${canCollaborate ? "" : "disabled"}>@</button>
+        <button type="button" class="icon-button" data-today-action-note="${escapeHtml(task.id)}" title="添加内部备注" aria-label="添加内部备注">✎</button>
         <button type="button" class="icon-button" data-today-action-complete="${escapeHtml(task.id)}" title="完成任务" aria-label="完成任务" ${canResolve ? "" : "disabled"}>✓</button>
         <button type="button" class="icon-button" data-today-action-skip="${escapeHtml(task.id)}" title="跳过任务" aria-label="跳过任务" ${canResolve ? "" : "disabled"}>×</button>
         <button type="button" class="icon-button" data-today-action-defer="${escapeHtml(task.id)}" title="延期任务" aria-label="延期任务" ${canDefer ? "" : "disabled"}>↷</button>
@@ -6598,6 +6678,12 @@ function renderTodayActionPage() {
   elements.todayActionPage.querySelectorAll("[data-today-action-defer]").forEach((button) => {
     button.addEventListener("click", () => void deferTodayAction(button.dataset.todayActionDefer));
   });
+  elements.todayActionPage.querySelectorAll("[data-today-action-assign]").forEach((button) => {
+    button.addEventListener("click", () => void assignTodayAction(button.dataset.todayActionAssign));
+  });
+  elements.todayActionPage.querySelectorAll("[data-today-action-note]").forEach((button) => {
+    button.addEventListener("click", () => void addTodayActionNote(button.dataset.todayActionNote));
+  });
   elements.todayActionPage.querySelectorAll("[data-today-action-open-case]").forEach((button) => {
     button.addEventListener("click", () => openTodayActionCase(button.dataset.todayActionOpenCase));
   });
@@ -6618,6 +6704,34 @@ async function saveTodayActionMutation(message, mutate) {
 
 function mutableActionTask(taskId) {
   return (state.data.actionTasks || []).find((task) => text(task.id) === text(taskId)) || null;
+}
+
+function appendTodayActionEvent(task, type, summary, metadata = {}, timestamp = new Date().toISOString()) {
+  if (!["created", "assignment", "note", "defer", "complete", "skip"].includes(text(type))) {
+    throw new Error("行动任务事件类型无效。");
+  }
+  if (!text(summary)) throw new Error("行动任务事件必须填写摘要。");
+  if (!text(task?.id) || !text(task?.brand_id) || !text(task?.case_id)) {
+    throw new Error("行动任务缺少 Case 或品牌关联，无法记录操作历史。");
+  }
+  state.data.actionTaskEvents = Array.isArray(state.data.actionTaskEvents)
+    ? state.data.actionTaskEvents
+    : [];
+  state.data.actionTaskEvents.push({
+    id: uid("TASKEVT"),
+    task_id: task.id,
+    brand_id: task.brand_id,
+    case_id: task.case_id,
+    type: text(type),
+    actor_id: "",
+    actor_name: "当前用户",
+    summary: text(summary),
+    metadata: metadata && typeof metadata === "object" ? metadata : {},
+    occurred_at: timestamp,
+    validation_error: "",
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  });
 }
 
 async function resolveTodayAction(taskId, mode) {
@@ -6643,6 +6757,9 @@ async function resolveTodayAction(taskId, mode) {
       task.validation_error = "";
       task.version = Math.max(1, Number(task.version) || 1) + 1;
       task.updatedAt = timestamp;
+      appendTodayActionEvent(task, isComplete ? "complete" : "skip", `${isComplete ? "已完成" : "已跳过"}：${evidence}`, {
+        [isComplete ? "completion_evidence" : "reason"]: evidence,
+      }, timestamp);
     },
   );
 }
@@ -6662,11 +6779,75 @@ async function deferTodayAction(taskId) {
     renderTodayActionPage();
     return;
   }
+  const reason = text(window.prompt("填写延期原因（必填）", ""));
+  if (!reason) return;
   await saveTodayActionMutation("任务已延期。", () => {
     if (text(task.status) !== "待处理") throw new Error("只有待处理的任务可以延期。");
+    const timestamp = new Date().toISOString();
+    const previousDueAt = text(task.due_at);
     task.due_at = parsedDueAt.toISOString();
+    task.defer_reason = reason;
     task.version = Math.max(1, Number(task.version) || 1) + 1;
-    task.updatedAt = new Date().toISOString();
+    task.updatedAt = timestamp;
+    appendTodayActionEvent(task, "defer", `延期至 ${task.due_at}：${reason}`, {
+      previous_due_at: previousDueAt,
+      due_at: task.due_at,
+      reason,
+    }, timestamp);
+  });
+}
+
+async function assignTodayAction(taskId) {
+  const task = mutableActionTask(taskId);
+  if (!task) {
+    state.todayActionNotice = "未找到该行动任务。";
+    renderTodayActionPage();
+    return;
+  }
+  if (!["待处理", "待修复"].includes(text(task.status))) {
+    state.todayActionNotice = "只有待处理或待修复的任务可以调整负责人。";
+    renderTodayActionPage();
+    return;
+  }
+  const rawOwnerName = window.prompt("输入负责人姓名；清空并确认可取消指派。", text(task.owner_name));
+  if (rawOwnerName === null) return;
+  const ownerName = text(rawOwnerName);
+  if (ownerName === text(task.owner_name)) {
+    state.todayActionNotice = "负责人没有变化。";
+    renderTodayActionPage();
+    return;
+  }
+  await saveTodayActionMutation(ownerName ? `已指派给 ${ownerName}。` : "已取消负责人指派。", () => {
+    const timestamp = new Date().toISOString();
+    const previousOwnerId = text(task.owner_id);
+    const previousOwnerName = text(task.owner_name);
+    task.owner_id = "";
+    task.owner_name = ownerName;
+    task.version = Math.max(1, Number(task.version) || 1) + 1;
+    task.updatedAt = timestamp;
+    appendTodayActionEvent(task, "assignment", ownerName ? `已指派给 ${ownerName}。` : "已取消负责人指派。", {
+      previous_owner_id: previousOwnerId,
+      previous_owner_name: previousOwnerName,
+      owner_id: "",
+      owner_name: ownerName,
+    }, timestamp);
+  });
+}
+
+async function addTodayActionNote(taskId) {
+  const task = mutableActionTask(taskId);
+  if (!task) {
+    state.todayActionNotice = "未找到该行动任务。";
+    renderTodayActionPage();
+    return;
+  }
+  const note = text(window.prompt("填写内部备注（必填）", ""));
+  if (!note) return;
+  await saveTodayActionMutation("已添加内部备注。", () => {
+    const timestamp = new Date().toISOString();
+    task.version = Math.max(1, Number(task.version) || 1) + 1;
+    task.updatedAt = timestamp;
+    appendTodayActionEvent(task, "note", note, { note }, timestamp);
   });
 }
 
