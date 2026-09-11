@@ -37,12 +37,12 @@
 
 | 项目 | 当前值 |
 | --- | --- |
-| 当前任务 | `CRM-20-03` |
-| 当前状态 | `active` |
-| 当前目标 | 建立首页“今日推进”中枢；在不改变当前人工确认边界的前提下展示、筛选和处理已持久化的行动任务。 |
-| 已完成前序 | `CRM-00` 基线与执行治理；`CRM-10` Case 模型、兼容迁移、Case 中心展示与阶段审计；`CRM-20-01` 持久化行动任务数据契约；`CRM-20-02` 规则生成、去重与失效生命周期。 |
+| 当前任务 | `CRM-20-04` |
+| 当前状态 | `planned` |
+| 当前目标 | 支持行动任务的指派、备注、延期理由和操作历史，形成可协作的处理责任与追溯记录。 |
+| 已完成前序 | `CRM-00` 基线与执行治理；`CRM-10` Case 模型、兼容迁移、Case 中心展示与阶段审计；`CRM-20-01` 持久化行动任务数据契约；`CRM-20-02` 规则生成、去重与失效生命周期；`CRM-20-03` 今日推进中枢。 |
 | 禁止提前启动 | `CRM-60` 定时同步、自动发送、AI 自动推进高风险阶段。 |
-| 最近已验证基线 | `npm.cmd run check`、`npm.cmd run test:action-task-storage`、`npm.cmd run test:case-display`、`npm.cmd run test:crm-regression`、`npm.cmd run test:followup-isolation`、Python AST 解析、`git diff --check`（功能提交 `140b6f2`）。 |
+| 最近已验证基线 | `npm.cmd run check`、`npm.cmd run test:today-action-center`、`npm.cmd run test:action-task-storage`、`npm.cmd run test:case-display`、`npm.cmd run test:crm-regression`、`npm.cmd run test:followup-isolation`、Python AST 解析、`git diff --check`（功能提交 `91cbf9f`）。 |
 
 ## 总体闭环与完成定义
 
@@ -77,7 +77,7 @@
 | --- | --- | --- | --- | --- | --- |
 | `CRM-20-01` | P1 | `done` | 定义行动任务模型：来源、所属 Case、负责人、截止时间、优先级、状态、完成证据。 | `CRM-10-01` | 任务可独立于页面展示保存，不只是临时筛选结果。 |
 | `CRM-20-02` | P1 | `done` | 根据规则生成并去重“新回信待处理、三天未回复、待补地址、待寄样、待确认报价、待发布、待数据回收、待人工归档”。 | `CRM-20-01` | 同一事实不会重复生成多条待办；条件消失后任务自动关闭或标记失效。 |
-| `CRM-20-03` | P1 | `active` | 建立首页“今日推进”中枢，支持按品牌、负责人、优先级、截止时间与任务类型筛选。 | `CRM-20-02` | 用户可在一个队列中完成/跳过/延期/进入对应 Case，不必逐个看板查找。 |
+| `CRM-20-03` | P1 | `done` | 建立首页“今日推进”中枢，支持按品牌、负责人、优先级、截止时间与任务类型筛选。 | `CRM-20-02` | 用户可在一个队列中完成/跳过/延期/进入对应 Case，不必逐个看板查找。 |
 | `CRM-20-04` | P2 | `planned` | 支持任务指派、备注、延期理由和操作历史。 | `CRM-20-03` | 团队协作时能知道谁正在处理、何时处理、为什么延后。 |
 
 ### CRM-30：邮件分诊与可靠归档
@@ -159,6 +159,7 @@
 | 2026-09-11 | `CRM-20-02` | `planned -> active` | `docs/CRM_EXECUTION_TASKS.md` | 已读取当前执行指针、最近完成记录、`crm-domain.cjs`、前后端状态保存入口与现有回归。确认领域层已有部分任务规格和去重雏形，但未覆盖全部八类任务，且未在本地/线上常规保存与邮箱同步保存后统一重算。 | 待提交 | 本阶段只实现规则生成、去重、条件消失失效和运行时保存接入；计划覆盖新回信、三天未回复、地址、寄样、报价、发布、数据回收、人工归档八类任务，并新增隔离回归。不得启动今日推进 UI、指派/历史界面、邮件分诊台、AI 工作台、定时同步、自动发送或并发存储重构。 |
 | 2026-09-11 | `CRM-20-02` | `active -> done` | `tools/crm-domain.cjs`、`tools/local-server.cjs`、`api/[...route].mjs`、`tools/crm-regression-test.cjs`、`docs/SCHEMA.md`、`docs/CRM_EXECUTION_TASKS.md` | `npm.cmd run check`、`npm.cmd run test:action-task-storage`、`npm.cmd run test:case-display`、`npm.cmd run test:crm-regression`、`npm.cmd run test:followup-isolation`、Python AST 解析与 `git diff --check` 全部通过。回归覆盖八类规则、同一事实去重、条件消失失效、失效任务恢复、已完成任务不重开、同品牌 Case 隔离、最新未读回信识别、跨品牌事件排除和唯一候选待归档邮件。 | `140b6f2`（功能提交） | 数据影响：保存时新增规则重算；未读取或写入正式业务资料，未调用真实 IMAP、SMTP 或 AI。新回信只依据同品牌、当前 Case 的 `has_unread_reply` 与最新有效入站事件，避免历史邮件误报。回滚：`git revert 140b6f2`。核对：已比对 `CRM-20-01` 的持久化契约，未重复实现其数据表；未启动 `CRM-20-03` 今日推进 UI、`CRM-20-04` 指派/历史、`CRM-30+` 分诊、`CRM-40+` AI 工作台、`CRM-50+` 并发重构、`CRM-60` 定时同步或 `CRM-70+` 联系人治理。下一门槛：仅可激活 `CRM-20-03`。 |
 | 2026-09-11 | `CRM-20-03` | `planned -> active` | `docs/CRM_EXECUTION_TASKS.md` | 已核对执行指针、最近完成记录、行动任务持久化与规则生成回归。计划仅增加“今日推进”筛选队列及完成/跳过/延期/进入 Case 操作；不新增指派或操作历史，不启动邮件分诊、AI 工作台、定时同步、自动发信或并发重构。 | `adf3c69`（启动检查点） | 下一门槛：完成任务状态操作的最小领域校验和界面回归后，独立提交功能与台账检查点。 |
+| 2026-09-11（America/Los_Angeles） | `CRM-20-03` | `active -> done` | `app/app.js`、`app/index.html`、`app/styles.css`、`tools/crm-domain.cjs`、`tools/today-action-center-regression-test.cjs`、`package.json`、`docs/CRM_EXECUTION_TASKS.md` | 本地预览 `http://localhost:4173/` 实测“今日推进”入口、默认仅待处理视图、指标区及筛选状态切换正常。`npm.cmd run check`、`npm.cmd run test:today-action-center`、`npm.cmd run test:crm-regression`、`npm.cmd run test:action-task-storage`、`npm.cmd run test:case-display`、`npm.cmd run test:followup-isolation`、Python AST 解析及 `git diff --check` 均通过。新增回归验证完成/跳过/延期不会自动改变 Case 或合作阶段。 | `91cbf9f`（功能提交） | 数据影响：仅新增前端队列与任务状态操作；未读取或写入正式业务资料，未调用 IMAP、SMTP 或 AI。回滚：`git revert 91cbf9f`。核对：不重复 `CRM-20-01` 持久化或 `CRM-20-02` 规则生成；未启动 `CRM-20-04` 指派/历史、`CRM-30+` 分诊、`CRM-40+` AI、`CRM-50+` 并发重构、`CRM-60` 定时同步或 `CRM-70+` 联系人治理。下一门槛：仅可激活 `CRM-20-04`，先定义任务操作历史和负责人数据契约。 |
 
 ## 阶段完成记录模板
 
