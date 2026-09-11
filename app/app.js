@@ -6005,8 +6005,10 @@ function followUpAnalysisMarkup(analysis, selectedStrategy) {
       <p class="followup-ai-notice">仅建议，不会自动修改当前阶段。${escapeHtml(analysis.context_notice || "")}</p>
       <button type="button" class="ghost followup-apply-analysis" data-followup-apply-analysis>人工应用建议阶段</button>
       <div class="followup-ai-grid">
+        <section><h4>对方当前意图</h4><p>${escapeHtml(analysis.counterparty_intent_cn || "当前证据不足，无法可靠判断对方意图。")}</p></section>
         <section><h4>关键事实</h4>${list(analysis.key_facts || [])}</section>
-        <section><h4>风险与待确认</h4>${list(analysis.risk_notes || [])}</section>
+        <section><h4>待补信息</h4>${list(analysis.missing_information || [])}</section>
+        <section><h4>风险与确认项</h4>${list(analysis.risk_notes || [])}</section>
       </div>
       ${evidenceScope}
       <section class="followup-ai-evidence"><h4>证据范围</h4>${list(analysis.evidence || [])}</section>
@@ -6319,8 +6321,11 @@ async function analyzeFollowUpDetail() {
     const payload = await withActivity("正在分析沟通状态", "AI 正在仅根据已归档邮件和合作资料生成建议...", async () => {
       return requestFollowUpAnalysis(followUpId, note);
     });
+    const previousStrategyId = text(state.followUpDetail.strategyId);
     state.followUpDetail.analysis = payload;
-    state.followUpDetail.strategyId = text(payload.recommended_options?.[0]?.id);
+    state.followUpDetail.strategyId = (payload.recommended_options || []).some((option) => text(option?.id) === previousStrategyId)
+      ? previousStrategyId
+      : text(payload.recommended_options?.[0]?.id);
     state.followUpDetail.draft = null;
     state.followUpDetail.status = "AI 已完成研判。建议仅供人工决策，不会修改合作阶段。";
   } catch (error) {

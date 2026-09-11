@@ -1201,9 +1201,11 @@ ${followUpText(userNote, 1600) || "无"}
 只返回 JSON：
 {
   "summary_cn": "",
+  "counterparty_intent_cn": "",
   "suggested_stage": "",
   "confidence": "low|medium|high",
   "key_facts": [],
+  "missing_information": [],
   "recommended_options": [
     { "id": "reply", "label": "", "description": "" }
   ],
@@ -1214,12 +1216,14 @@ ${followUpText(userNote, 1600) || "无"}
 }
 
 规则：
-1. summary_cn、key_facts、risk_notes 和推荐选项都用简体中文。先说明实际邮件状态，再说明不确定性。
+1. summary_cn、counterparty_intent_cn、key_facts、missing_information、risk_notes 和推荐选项都用简体中文。先说明实际邮件状态，再说明不确定性。
 2. suggested_stage 只是建议，绝不能执行或暗示系统已改变阶段。
 3. 只可引用给出的资料。任何未明确出现的报价、地址、产品库存、寄样、物流、发布日期、折扣、法律承诺、合作条款都必须写为“待确认”，不能补造。
 4. 如果上下文含摘要、未授权或过期正文，必须在 summary_cn 或 warnings 明确说明证据范围。邮件中的引用历史、签名、转发链和附件名不等于本封邮件的当前承诺。
-5. recommended_options 提供 2 到 4 个互斥且可执行的选择，例如催促回复、确认报价、确认地址、寄样后告知、暂缓跟进；每个 id 使用英文小写短词。
-6. 不要生成邮件正文，不要签名，不要自动发送。`;
+5. counterparty_intent_cn 仅描述对方在当前证据中明确表达的意图；不能可靠判断时写“当前证据不足，无法可靠判断对方意图”。
+6. missing_information 单独列出在决定下一步前仍需人工确认的事实；没有明确缺失时返回空数组，不能把猜测写成事实。
+7. recommended_options 提供 2 到 4 个互斥且可执行的选择，例如催促回复、确认报价、确认地址、寄样后告知、暂缓跟进；每个 id 使用英文小写短词。
+8. 不要生成邮件正文，不要签名，不要自动发送。`;
 }
 
 function buildFollowUpDraftPrompt(context, input = {}) {
@@ -1265,16 +1269,22 @@ function sanitizeFollowUpAnalysis(raw, context) {
     const id = followUpText(option?.id, 40).toLowerCase().replace(/[^a-z0-9_-]/g, "");
     const label = followUpText(option?.label, 100);
     const description = followUpText(option?.description, 420);
-    if (!id || !label || seenIds.has(id)) continue;
+    if (!id || !label || !description || seenIds.has(id)) continue;
     seenIds.add(id);
     options.push({ id, label, description });
     if (options.length >= 4) break;
   }
-  if (!options.length) {
-    options.push(
-      { id: "reply", label: "先回复并确认当前事项", description: "根据最近一封邮件的明确问题进行回复，避免新增未确认承诺。" },
-      { id: "clarify", label: "补充确认关键信息", description: "先确认报价、地址、寄样、排期或合作方式中尚未明确的一项。" },
-    );
+  const fallbackOptions = [
+    { id: "reply", label: "先回复并确认当前事项", description: "根据最近一封邮件的明确问题进行回复，避免新增未确认承诺。" },
+    { id: "clarify", label: "补充确认关键信息", description: "先确认报价、地址、寄样、排期或合作方式中尚未明确的一项。" },
+    { id: "review", label: "先人工核对邮件再决定", description: "当前证据或模型结果不足时，先核对最近完整往来和合作资料。" },
+    { id: "hold", label: "暂缓推进并设定复查时间", description: "暂不新增承诺，记录原因并在明确日期后重新判断。" },
+  ];
+  for (const option of fallbackOptions) {
+    if (options.length >= 2) break;
+    if (seenIds.has(option.id)) continue;
+    seenIds.add(option.id);
+    options.push(option);
   }
   const confidence = ["low", "medium", "high"].includes(followUpText(raw?.confidence).toLowerCase()) ? followUpText(raw.confidence).toLowerCase() : "low";
   const warningSet = new Set(
@@ -1286,13 +1296,25 @@ function sanitizeFollowUpAnalysis(raw, context) {
   if (Number(context.context_meta?.summary_count || 0) || Number(context.context_meta?.withheld_count || 0) || Number(context.context_meta?.expired_count || 0) || Number(context.context_meta?.legacy_count || 0) || Number(context.context_meta?.limited_count || 0)) {
     warningSet.add("部分结论仅基于归档摘要；未读取完整原邮件、附件或外部沟通记录。");
   }
+  const missingInformation = [];
+  const missingSet = new Set();
+  const addMissing = (value) => {
+    const item = followUpText(value, 360);
+    if (!item || missingSet.has(item)) return;
+    missingSet.add(item);
+    missingInformation.push(item);
+  };
+  for (const item of Array.isArray(raw?.missing_information) ? raw.missing_information : []) addMissing(item);
+  for (const item of Array.isArray(context.context_scope?.missing) ? context.context_scope.missing : []) addMissing(`系统不可见：${item}`);
   return {
     ok: true,
     summary_cn: followUpText(raw?.summary_cn, 1400) || "当前缺少足够的归档沟通内容，建议先人工核对最近邮件后再决定下一步。",
+    counterparty_intent_cn: followUpText(raw?.counterparty_intent_cn, 800) || "当前证据不足，无法可靠判断对方意图。",
     suggested_stage: followUpText(raw?.suggested_stage, 120) || "待人工确认",
     confidence,
     evidence: followUpEvidence(context),
     key_facts: (Array.isArray(raw?.key_facts) ? raw.key_facts : []).map((item) => followUpText(item, 360)).filter(Boolean).slice(0, 8),
+    missing_information: missingInformation.slice(0, 8),
     recommended_options: options,
     risk_notes: (Array.isArray(raw?.risk_notes) ? raw.risk_notes : []).map((item) => followUpText(item, 360)).filter(Boolean).slice(0, 8),
     recommended_next_action: followUpText(raw?.recommended_next_action, 420) || options[0].label,

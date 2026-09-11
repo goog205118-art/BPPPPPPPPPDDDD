@@ -268,6 +268,22 @@
 - `actor`（阶段变更执行者；AI 建议只能记录为人工确认）
 - `change_reason`（人工阶段变更原因；不能为空）
 - `evidence`（支持该阶段变更的最小证据摘要；不写入隐藏的完整邮件正文）
+
+## AI 跟进研判响应（非持久化）
+
+`POST /api/ai/followup-analyze` 只读取服务端已归档、同品牌同 Case 的合作资料和邮件上下文；浏览器不能指定品牌、Case、邮件正文或事件。响应仅用于人工研判，不会在本接口中写入 Case、FollowUp、阶段审计、邮件事件或发信记录。
+
+- `summary_cn`（中文沟通摘要）
+- `counterparty_intent_cn`（仅基于现有证据的对方意图；证据不足时明确返回无法可靠判断）
+- `suggested_stage`、`confidence`（仅建议，不代表当前阶段已经改变）
+- `key_facts`
+- `missing_information`（决定下一步前仍需人工确认的事实；同时会包含服务端已知但 AI 不可见的上下文限制）
+- `risk_notes`
+- `recommended_options`（2 至 4 个带 `id`、`label`、`description` 的互斥可执行策略；模型输出不完整时使用保守的人工确认策略补足）
+- `recommended_next_action`、`recommended_follow_up_days`
+- `warnings`、`evidence`、`context_scope`、`context_notice`
+
+页面会保留用户已选择且仍然有效的策略，以及人工备注；再次分析只更新建议，不自动应用阶段。邮件草稿、人工应用建议阶段和发送确认属于后续独立动作，不能由分析接口隐式触发。
 - `case_version`（该事件提交后对应的 Case 版本）
 - `filename`
 - `mailbox`（IMAP 文件夹名称）
