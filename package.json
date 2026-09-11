@@ -18,6 +18,7 @@
     "test:task-collaboration": "node tools/task-collaboration-regression-test.cjs",
     "test:followup-ai-context": "node tools/followup-ai-context-regression-test.cjs",
     "test:followup-ai-analysis": "node tools/followup-ai-analysis-workbench-test.cjs",
+    "test:followup-ai-draft-send": "node tools/followup-ai-draft-send-regression-test.cjs",
     "test:mail-routing-score": "node tools/mail-routing-score-regression-test.cjs",
     "test:mail-triage-console": "node tools/mail-triage-console-regression-test.cjs",
     "test:mail-triage-case-actions": "node tools/mail-triage-case-actions-regression-test.cjs",

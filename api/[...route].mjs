@@ -894,7 +894,11 @@ function followUpAiContext(state, followUpId, settings = {}) {
   const cooperation = cooperationCandidate && followUpText(cooperationCandidate.brand_id) === brandId
     ? cooperationCandidate
     : null;
-  const caseProductIds = [...new Set((Array.isArray(caseRow.product_ids) ? caseRow.product_ids : []).map(followUpText).filter(Boolean))];
+  const caseProductIds = [...new Set(
+    (Array.isArray(caseRow.product_ids) ? caseRow.product_ids : [])
+      .map((productId) => followUpText(productId))
+      .filter(Boolean),
+  )];
   const products = productsAll.filter((row) => caseProductIds.includes(followUpText(row.id)) && followUpText(row.brand_id) === brandId);
   const policy = mailContentPolicy(settings);
   const nowMs = Date.now();

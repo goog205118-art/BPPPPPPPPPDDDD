@@ -585,7 +585,7 @@ const state = {
   creatorDrawer: { open: false, creatorId: null },
   mailImport: { open: false, followUpId: null, messages: [], status: "" },
   followUpBoardFilter: { query: "", stage: "", priority: "", overdueOnly: false },
-  followUpDetail: { open: false, followUpId: null, analysis: null, draft: null },
+  followUpDetail: { open: false, followUpId: null, analysis: null, draft: null, sendAccountId: "", sendConfirmed: false },
   todayActionFilter: { brand: "", owner: "", priority: "", due: "", type: "", status: "待处理" },
   todayActionNotice: "",
 };
@@ -5852,6 +5852,18 @@ function followUpSmtpAccounts(followUp) {
   });
 }
 
+function followUpSignatureStatus(account) {
+  if (!account) return "请选择当前品牌的官方邮箱。";
+  const signatureHtml = text(account.signatureHtml);
+  const signatureText = text(account.signatureText);
+  const hasImage = /<img\b/i.test(signatureHtml) || Boolean(text(account.signatureImageData || account.signatureImageUrl));
+  const label = account.label || account.smtp?.user || account.imap?.user || "所选官方邮箱";
+  if (signatureHtml) return `本次发送会在正文后自动追加「${label}」的 HTML 签名${hasImage ? "（含图片）" : ""}。`;
+  if (signatureText) return `本次发送会在正文后自动追加「${label}」的文本签名。`;
+  if (hasImage) return `本次发送会在正文后自动追加「${label}」的图片签名。`;
+  return `「${label}」当前未配置签名；本次发送仅包含上方正文。`;
+}
+
 function outreachSmtpAccounts(lead) {
   const brandId = text(lead?.brand_id);
   return (state.mailSettings.accounts || []).filter((account) => {
@@ -6054,6 +6066,8 @@ function openFollowUpDetail(followUpId) {
     userNote: "",
     customIntent: "",
     strategyId: "",
+    sendAccountId: "",
+    sendConfirmed: false,
     status: "",
   };
   elements.followUpDetailModal.classList.remove("hidden");
@@ -6083,7 +6097,7 @@ async function markFollowUpReplyRead(followUpId) {
 }
 
 function closeFollowUpDetail() {
-  state.followUpDetail = { open: false, followUpId: null, analysis: null, draft: null, userNote: "", customIntent: "", strategyId: "", status: "" };
+  state.followUpDetail = { open: false, followUpId: null, analysis: null, draft: null, userNote: "", customIntent: "", strategyId: "", sendAccountId: "", sendConfirmed: false, status: "" };
   elements.followUpDetailModal.classList.add("hidden");
   elements.followUpDetailModal.setAttribute("aria-hidden", "true");
   elements.followUpDetailBody.innerHTML = "";
@@ -6102,6 +6116,10 @@ function renderFollowUpDetail() {
   const events = model.events;
   const inbound = events.find((event) => event.direction === "inbound" && text(event.message_id));
   const smtpAccounts = followUpSmtpAccounts(followUp);
+  const selectedAccountId = smtpAccounts.some((account) => text(account.id) === text(state.followUpDetail.sendAccountId))
+    ? text(state.followUpDetail.sendAccountId)
+    : text(smtpAccounts[0]?.id);
+  const selectedAccount = smtpAccounts.find((account) => text(account.id) === selectedAccountId) || null;
   const selectedStrategy = text(state.followUpDetail.strategyId) || text(state.followUpDetail.analysis?.recommended_options?.[0]?.id);
   const publishUrl = safeExternalUrl(model.publishUrl);
   const creatorUrl = safeExternalUrl(creator?.social_url);
@@ -6205,10 +6223,12 @@ function renderFollowUpDetail() {
           <header><div><span>MANUAL SEND</span><h3>人工确认发信</h3></div></header>
           ${smtpAccounts.length
             ? `
-              <label>官方邮箱<select data-followup-send-account>${smtpAccounts.map((account) => `<option value="${escapeHtml(account.id)}">${escapeHtml(`${account.brand_name || followUp.brand} · ${account.label || account.smtp?.user || account.imap?.user}`)}</option>`).join("")}</select></label>
+              <label>官方邮箱<select data-followup-send-account>${smtpAccounts.map((account) => `<option value="${escapeHtml(account.id)}" ${text(account.id) === selectedAccountId ? "selected" : ""}>${escapeHtml(`${account.brand_name || followUp.brand} · ${account.label || account.smtp?.user || account.imap?.user}`)}</option>`).join("")}</select></label>
               <label>收件人<input type="email" data-followup-send-to value="${escapeHtml(recipient)}" placeholder="creator@example.com" /></label>
-              <p class="followup-send-notice">发送前会再次确认；仅在本系统通过 SMTP 发出的正文才会保存在时间线。${inbound ? "将尝试关联最近一封达人来信。" : ""}</p>
-              <button type="button" class="primary" data-followup-send ${state.followUpDetail.draft ? "" : "disabled"}>确认并发送邮件</button>
+              <p class="followup-send-signature" data-followup-signature-status>${escapeHtml(followUpSignatureStatus(selectedAccount))}</p>
+              <label class="followup-send-confirm"><input type="checkbox" data-followup-send-confirmed ${state.followUpDetail.sendConfirmed ? "checked" : ""} />我已核对收件人、主题、正文与所选官方邮箱；确认人工发送</label>
+              <p class="followup-send-notice">仅在本系统通过 SMTP 发出的正文才会保存在时间线。${inbound ? "将尝试关联最近一封达人来信。" : ""}</p>
+              <button type="button" class="primary" data-followup-send ${state.followUpDetail.draft && state.followUpDetail.sendConfirmed ? "" : "disabled"}>确认并发送邮件</button>
             `
             : `<p class="followup-detail-empty">当前品牌没有已配置 SMTP 的官方邮箱。请到设置页保存并测试该品牌的 SMTP 账户。</p>`}
         </section>
@@ -6226,6 +6246,30 @@ function renderFollowUpDetail() {
   elements.followUpDetailBody.querySelector("[data-followup-apply-analysis]")?.addEventListener("click", () => void applyFollowUpAnalysisSuggestion(followUp.id, state.followUpDetail.analysis));
   elements.followUpDetailBody.querySelector("[data-followup-ai-draft]")?.addEventListener("click", () => void draftFollowUpReply());
   elements.followUpDetailBody.querySelector("[data-followup-send]")?.addEventListener("click", () => void sendFollowUpReply(inbound?.id || ""));
+  const invalidateSendConfirmation = () => {
+    state.followUpDetail.sendConfirmed = false;
+    const confirmation = elements.followUpDetailBody.querySelector("[data-followup-send-confirmed]");
+    const sendButton = elements.followUpDetailBody.querySelector("[data-followup-send]");
+    if (confirmation) confirmation.checked = false;
+    if (sendButton) sendButton.disabled = !state.followUpDetail.draft;
+  };
+  elements.followUpDetailBody.querySelector("[data-followup-send-account]")?.addEventListener("change", (event) => {
+    state.followUpDetail.sendAccountId = text(event.target.value);
+    const account = smtpAccounts.find((item) => text(item.id) === state.followUpDetail.sendAccountId);
+    const status = elements.followUpDetailBody.querySelector("[data-followup-signature-status]");
+    if (status) status.textContent = followUpSignatureStatus(account);
+    invalidateSendConfirmation();
+  });
+  elements.followUpDetailBody.querySelector("[data-followup-send-confirmed]")?.addEventListener("change", (event) => {
+    state.followUpDetail.sendConfirmed = Boolean(event.target.checked);
+    const sendButton = elements.followUpDetailBody.querySelector("[data-followup-send]");
+    if (sendButton) sendButton.disabled = !state.followUpDetail.draft || !state.followUpDetail.sendConfirmed;
+  });
+  [
+    "[data-followup-send-to]",
+    "[data-followup-email-subject]",
+    "[data-followup-email-body]",
+  ].forEach((selector) => elements.followUpDetailBody.querySelector(selector)?.addEventListener("input", invalidateSendConfirmation));
   elements.followUpDetailBody.querySelectorAll('input[name="followupStrategy"]').forEach((input) => {
     input.addEventListener("change", () => {
       state.followUpDetail.strategyId = input.value;
@@ -6327,6 +6371,7 @@ async function analyzeFollowUpDetail() {
       ? previousStrategyId
       : text(payload.recommended_options?.[0]?.id);
     state.followUpDetail.draft = null;
+    state.followUpDetail.sendConfirmed = false;
     state.followUpDetail.status = "AI 已完成研判。建议仅供人工决策，不会修改合作阶段。";
   } catch (error) {
     state.followUpDetail.status = error.message || "AI 沟通分析失败";
@@ -6366,6 +6411,7 @@ async function draftFollowUpReply() {
       return result;
     });
     detail.draft = payload;
+    detail.sendConfirmed = false;
     detail.status = "草稿已生成。请逐项核对收件人、主题和正文后再发送。";
   } catch (error) {
     detail.status = error.message || "AI 回复草稿生成失败";
@@ -6377,11 +6423,18 @@ async function sendFollowUpReply(replyToEventId = "") {
   const detail = state.followUpDetail;
   const followUp = rows("followups").find((row) => text(row.id) === text(detail.followUpId));
   const accountId = text(elements.followUpDetailBody.querySelector("[data-followup-send-account]")?.value);
+  const confirmed = Boolean(elements.followUpDetailBody.querySelector("[data-followup-send-confirmed]")?.checked);
   const to = text(elements.followUpDetailBody.querySelector("[data-followup-send-to]")?.value);
   const subject = text(elements.followUpDetailBody.querySelector("[data-followup-email-subject]")?.value);
   const body = text(elements.followUpDetailBody.querySelector("[data-followup-email-body]")?.value);
   if (!followUp || !accountId || !to || !subject || !body) {
     detail.status = "请先确认官方邮箱、收件人、邮件主题和正文均已填写。";
+    renderFollowUpDetail();
+    return;
+  }
+  if (!confirmed) {
+    detail.sendConfirmed = false;
+    detail.status = "请先勾选人工发送确认，并核对收件人、主题、正文和官方邮箱。";
     renderFollowUpDetail();
     return;
   }
@@ -6394,6 +6447,8 @@ async function sendFollowUpReply(replyToEventId = "") {
   if (!window.confirm(`即将使用「${account.label || account.smtp?.user || account.imap?.user}」向 ${to} 发送邮件。\n\n邮件发送后将记录在本地时间线，是否继续？`)) return;
 
   detail.recipient = to;
+  detail.sendAccountId = accountId;
+  detail.sendConfirmed = true;
   detail.draft = { ...(detail.draft || {}), subject, body };
   detail.status = "正在通过官方邮箱发送邮件...";
   renderFollowUpDetail();
@@ -6410,6 +6465,7 @@ async function sendFollowUpReply(replyToEventId = "") {
           subject,
           text: body,
           replyToEventId,
+          confirmed: true,
         }),
       });
       const result = await response.json().catch(() => ({}));
@@ -7831,6 +7887,7 @@ async function launchOutreachMail(index) {
           to: lead.email,
           subject,
           text: body,
+          confirmed: true,
         }),
       });
       const payload = await response.json().catch(() => ({}));

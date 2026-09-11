@@ -264,6 +264,8 @@
 - `references`（线程引用的 Message-ID 列表）
 - `fingerprint`（无 Message-ID 时用于去重）
 - `source`（例如 `Foxmail .eml` 或 `IMAP · 官邮 IMAP`）
+- `send_confirmed`（本系统 SMTP 发信时，操作者已明确核对收件人、主题、正文和官方邮箱）
+- `signature_applied`、`signature_mode`、`signature_has_image`（发信时由所选官方邮箱追加的签名审计；模式为 `html`、`text` 或 `none`）
 - `previous_stage`、`next_stage`（仅阶段变更事件记录变更前后状态）
 - `actor`（阶段变更执行者；AI 建议只能记录为人工确认）
 - `change_reason`（人工阶段变更原因；不能为空）
@@ -284,6 +286,12 @@
 - `warnings`、`evidence`、`context_scope`、`context_notice`
 
 页面会保留用户已选择且仍然有效的策略，以及人工备注；再次分析只更新建议，不自动应用阶段。邮件草稿、人工应用建议阶段和发送确认属于后续独立动作，不能由分析接口隐式触发。
+
+## AI 跟进草稿与人工发信
+
+`POST /api/ai/followup-draft` 只返回可编辑的无签名邮件主题和正文。模型被要求不生成署名、公司页脚、HTML 或 Markdown，服务端也会移除模型自带的常见落款。草稿在发送前不写入时间线。
+
+实际 SMTP 发信只接受 `confirmed: true` 的请求。前端必须由操作者明确勾选“已核对收件人、主题、正文和官方邮箱”，服务端会在读取官方邮箱凭据或连接 SMTP 前再次验证该标记。服务端在发信时才依据所选官方邮箱统一追加 HTML/文本/图片签名，因此可编辑草稿不会重复带签名；已保存的出站事件会保留签名审计字段和包含签名的纯文本正文（仅在正文缓存策略开启时）。
 - `case_version`（该事件提交后对应的 Case 版本）
 - `filename`
 - `mailbox`（IMAP 文件夹名称）

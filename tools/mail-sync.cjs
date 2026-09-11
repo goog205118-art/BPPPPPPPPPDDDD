@@ -1668,16 +1668,37 @@ function formatEmailContent(body, signature = "", signatureImage = {}) {
   };
 }
 
+function signatureAuditDetails(account = {}, formatted = {}) {
+  const richHtml = cleanSignatureHtml(account.signatureHtml);
+  const hasHtml = Boolean(richHtml);
+  const hasText = Boolean(compactBody(account.signatureText));
+  const hasImage = Boolean(
+    /<img\b/i.test(richHtml) ||
+    normalizeSignatureImageData(account.signatureImageData) ||
+    normalizeSignatureImageUrl(account.signatureImageUrl) ||
+    (Array.isArray(formatted.attachments) && formatted.attachments.length),
+  );
+  return {
+    signature_applied: hasHtml || hasText || hasImage,
+    signature_mode: hasHtml || hasImage ? "html" : hasText ? "text" : "none",
+    signature_has_image: hasImage,
+  };
+}
+
 function replyHeaderMessageId(value) {
   const id = text(value).replace(/[<>]/g, "");
   return id ? `<${id}>` : "";
 }
 
 async function sendMailAccount(settings, state, keyMaterial, input = {}) {
+  if (input.confirmed !== true) {
+    throw new Error("请先确认已核对收件人、主题、正文和官方邮箱，再发送邮件。");
+  }
   const account = resolveMailAccount(settings, keyMaterial, input.accountId, "smtp");
   const subject = text(input.subject).slice(0, 500);
   const formatted = formatEmailContent(input.text, account.signatureText, account);
   const body = formatted.text;
+  const signatureAudit = signatureAuditDetails(account, formatted);
   const followUpId = text(input.followUpId);
   const leadId = text(input.leadId);
   const brandId = text(input.brandId);
@@ -1768,6 +1789,8 @@ async function sendMailAccount(settings, state, keyMaterial, input = {}) {
     mailbox: account.imap.sentFolder || "Sent",
     brand_id: targetBrandId,
     mailbox_account_id: account.id,
+    send_confirmed: true,
+    ...signatureAudit,
     createdAt: now,
     updatedAt: now,
   };
@@ -1828,4 +1851,5 @@ module.exports = {
   recordDedupKeys,
   formatEmailContent,
   buildEmailHtml,
+  signatureAuditDetails,
 };

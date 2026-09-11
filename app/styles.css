@@ -6101,6 +6101,36 @@ body.access-locked .app-shell {
   font-weight: 600;
 }
 
+.followup-send-confirm {
+  display: flex !important;
+  align-items: flex-start;
+  gap: 7px !important;
+  padding: 7px;
+  border: 1px solid #385067;
+  border-radius: 4px;
+  background: #142230;
+  color: #d5e3ef !important;
+  font-weight: 500 !important;
+  line-height: 1.45;
+}
+
+.followup-send-confirm input {
+  width: 14px;
+  height: 14px;
+  margin: 1px 0 0;
+  accent-color: #43b581;
+}
+
+.followup-send-signature {
+  margin: 0;
+  padding: 7px;
+  border-left: 2px solid #4d92cf;
+  background: #132433;
+  color: #b7cbe0;
+  font-size: 0.65rem;
+  line-height: 1.45;
+}
+
 .followup-ai-note-label textarea,
 .followup-draft-result input,
 .followup-draft-result textarea,

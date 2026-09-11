@@ -1877,6 +1877,7 @@ async function run() {
       to: "shared@example.com",
       subject: "Cross-brand must be blocked",
       text: "This request must fail before any SMTP connection.",
+      confirmed: true,
     }),
   );
   assert.equal(result.response.status, 400, "跨品牌 SMTP 发信必须被服务端拦截。");
