@@ -5,7 +5,7 @@
 这是合作跟进 CRM 的唯一执行台账，用于替代分散的口头规划、聊天记录和临时待办。后续所有涉及合作跟进、官邮、AI 跟进、达人联系人、任务队列和存储并发的改动，必须先核对本文件，再开始实现。
 
 - 建立日期：2026-09-11
-- 当前里程碑：`CRM-10` Case 基础模型
+- 当前里程碑：`CRM-20` 今日推进与任务生命周期
 - 总体状态：`active`
 - 本轮范围：先跑稳人工确认的合作跟进闭环；定时同步暂缓。
 - 数据原则：不改动正式业务资料、不暴露邮箱授权码或 AI Key。
@@ -28,7 +28,7 @@
 1. **开始前**：读取本台账，确认任务编号、状态、前置任务和不做范围；已有 `done` 证据的内容不得重复规划或重做。
 2. **实现前**：将本次最小变更记为 `active`，写入计划改动和预期验证方式。
 3. **每个小阶段结束后**：在“阶段变更日志”追加一条记录，包含任务编号、状态变化、文件、测试结果、提交号和下一道门槛。
-4. **提交规则**：功能改动、对应测试和本台账更新必须放在同一提交中；尚未提交时，日志中的提交号写 `待提交`。
+4. **提交规则**：功能改动和对应测试先形成独立功能提交；本台账随后立即形成检查点提交并引用该功能提交号。两者共同构成一次可追溯完成记录；尚未提交时，日志中的提交号写 `待提交`。
 5. **完成规则**：没有验收证据、没有回归测试结果或没有提交号的任务不得标记 `done`。
 6. **中断或上下文压缩后**：先读取本文件的“当前执行指针”和最后三条日志，再恢复工作；不得仅依赖聊天上下文。
 7. **范围变化**：新增需求必须先新增任务编号或挂到已有任务的“子项”，不得直接插入实现。
@@ -37,12 +37,12 @@
 
 | 项目 | 当前值 |
 | --- | --- |
-| 当前任务 | `CRM-20-01` |
+| 当前任务 | `CRM-20-02` |
 | 当前状态 | `planned` |
-| 当前目标 | 定义行动任务模型：来源、所属 Case、负责人、截止时间、优先级、状态、完成证据。 |
-| 已完成前序 | `CRM-00` 基线与执行治理；`CRM-10` Case 模型、兼容迁移、Case 中心展示与阶段审计。 |
+| 当前目标 | 根据确定规则生成并去重行动任务；条件消失时关闭或标记失效。 |
+| 已完成前序 | `CRM-00` 基线与执行治理；`CRM-10` Case 模型、兼容迁移、Case 中心展示与阶段审计；`CRM-20-01` 持久化行动任务数据契约。 |
 | 禁止提前启动 | `CRM-60` 定时同步、自动发送、AI 自动推进高风险阶段。 |
-| 最近已验证基线 | `npm.cmd run check`、`npm.cmd run test:case-display`、`npm.cmd run test:crm-regression`、`npm.cmd run test:followup-isolation`、Python AST 解析、`git diff --check`（功能提交 `b6570d2`）。 |
+| 最近已验证基线 | `npm.cmd run check`、`npm.cmd run test:action-task-storage`、`npm.cmd run test:case-display`、`npm.cmd run test:crm-regression`、`npm.cmd run test:followup-isolation`、Python AST 解析、`git diff --check`（功能提交 `c08db7e`）。 |
 
 ## 总体闭环与完成定义
 
@@ -75,7 +75,7 @@
 
 | ID | 优先级 | 状态 | 工作项 | 前置 | 验收标准 |
 | --- | --- | --- | --- | --- | --- |
-| `CRM-20-01` | P1 | `planned` | 定义行动任务模型：来源、所属 Case、负责人、截止时间、优先级、状态、完成证据。 | `CRM-10-01` | 任务可独立于页面展示保存，不只是临时筛选结果。 |
+| `CRM-20-01` | P1 | `done` | 定义行动任务模型：来源、所属 Case、负责人、截止时间、优先级、状态、完成证据。 | `CRM-10-01` | 任务可独立于页面展示保存，不只是临时筛选结果。 |
 | `CRM-20-02` | P1 | `planned` | 根据规则生成并去重“新回信待处理、三天未回复、待补地址、待寄样、待确认报价、待发布、待数据回收、待人工归档”。 | `CRM-20-01` | 同一事实不会重复生成多条待办；条件消失后任务自动关闭或标记失效。 |
 | `CRM-20-03` | P1 | `planned` | 建立首页“今日推进”中枢，支持按品牌、负责人、优先级、截止时间与任务类型筛选。 | `CRM-20-02` | 用户可在一个队列中完成/跳过/延期/进入对应 Case，不必逐个看板查找。 |
 | `CRM-20-04` | P2 | `planned` | 支持任务指派、备注、延期理由和操作历史。 | `CRM-20-03` | 团队协作时能知道谁正在处理、何时处理、为什么延后。 |
@@ -154,6 +154,8 @@
 | 2026-09-11 | `CRM-10-03` | `active -> done` | `app/app.js`、`app/styles.css`、`tools/case-display-regression-test.cjs`、`package.json`、`docs/CRM_EXECUTION_TASKS.md` | `npm.cmd run test:case-display`、`npm.cmd run check`、`npm.cmd run test:crm-regression`、`npm.cmd run test:followup-isolation`、Python AST 解析和 `git diff --check` 全部通过。验证 Case 优先展示、旧 FollowUp 回退、邮件/合作/多产品关联、阶段事件写入 `case_id`、品牌隔离和紧凑详情样式。未读取或写入正式业务资料，未调用真实邮箱或 AI。 | `7e45acb`（功能提交） | Case 中心展示闭环完成；回滚 `7e45acb` 即可，旧 FollowUp 字段仍可读取。下一门槛为 `CRM-10-04`：增加审计字段与人工阶段变更原因；不提前启动任务队列、分诊台、自动跟进、并发重构或定时同步。 |
 | 2026-09-11 | `CRM-10-04` | `planned -> active` | `docs/CRM_EXECUTION_TASKS.md` | 已核对当前执行指针、最近三条完成记录及前置 `CRM-10-03`；现有阶段事件缺少统一的前后阶段、人工原因、操作者、证据和 Case 版本审计字段。 | 待提交 | 本阶段只补 Case 阶段审计与人工理由，保持 AI 建议必须由人工确认；不启动任务队列、邮件分诊、定时同步、自动发送或并发存储重构。 |
 | 2026-09-11 | `CRM-10-04` | `active -> done` | `app/app.js`、`app/styles.css`、`tools/sqlite_store.py`、`tools/crm-domain.cjs`、`tools/crm-regression-test.cjs`、`tools/case-display-regression-test.cjs`、`docs/SCHEMA.md`、`docs/CRM_EXECUTION_TASKS.md` | `npm.cmd run check`、`npm.cmd run test:case-display`、`npm.cmd run test:crm-regression`、`npm.cmd run test:followup-isolation`、Python AST 解析与 `git diff --check` 全部通过。验证手动/编辑页阶段变更必须填写原因，AI 仅能在人工点击应用后写入；Case、兼容 FollowUp、Case 版本及结构化审计事件保持一致，跨品牌写入被拒绝。未读取或写入正式业务资料，未调用真实 IMAP、SMTP 或 AI。 | `b6570d2`（功能提交） | 阶段审计闭环完成；回滚 `b6570d2` 即可，SQLite 采用新增列迁移不删除旧数据。已核对未提前启动 CRM-20 任务队列、CRM-30 邮件分诊、CRM-40 AI 工作台、CRM-50 并发重构、CRM-60 定时同步、CRM-70 联系人/投递治理。下一执行门槛为 `CRM-20-01`，当前仅标记 planned。 |
+| 2026-09-11 | `CRM-20-01` | `planned -> active` | `docs/CRM_EXECUTION_TASKS.md` | 已核对 `CRM-10-04` 的完成记录、当前状态源、SQLite、前后端状态归一化与 CRM 领域回归。发现 `actionTasks` 仅存在于领域测试夹具，尚未持久化到正式状态、SQLite 或线上归一化，因此不计作已完成。 | 待提交 | 本阶段只定义并接入可独立保存的行动任务数据契约、品牌/Case 隔离与最小领域校验；不调用生成规则、不增加今日推进 UI、不处理邮件分诊、AI 自动化、定时同步或并发重构。 |
+| 2026-09-11 | `CRM-20-01` | `active -> done` | `tools/sqlite_store.py`、`tools/local-server.cjs`、`api/[...route].mjs`、`app/app.js`、`tools/crm-domain.cjs`、`tools/action-task-storage-test.cjs`、`tools/crm-regression-test.cjs`、`docs/SCHEMA.md`、`package.json`、`docs/CRM_EXECUTION_TASKS.md` | `npm.cmd run check`、`npm.cmd run test:action-task-storage`、`npm.cmd run test:case-display`、`npm.cmd run test:crm-regression`、`npm.cmd run test:followup-isolation`、Python AST 解析与 `git diff --check` 全部通过。隔离 SQLite 往返确认任务可独立保存；创建/完成动作验证 Case 存在、品牌一致、标题和完成证据。 | `c08db7e`（功能提交） | 数据影响：仅新增 SQLite `actionTasks` 表和状态集合，未读取或写入正式业务资料、IMAP、SMTP 或 AI；回滚：`git revert c08db7e`，新增表为可安全闲置的加法，任何破坏性数据库降级前先导出。核对：既有领域夹具不再被误报为上线功能；未启动 `CRM-20-02` 规则生成、`CRM-20-03` 任务中心、`CRM-20-04` 协作界面、`CRM-30+` 分诊、`CRM-40+` AI 工作台、`CRM-50+` 并发重构、`CRM-60` 定时同步或 `CRM-70+` 联系人治理。下一门槛：仅激活 `CRM-20-02`。 |
 
 ## 阶段完成记录模板
 
