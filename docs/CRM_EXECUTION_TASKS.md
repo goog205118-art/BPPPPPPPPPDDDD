@@ -37,12 +37,12 @@
 
 | 项目 | 当前值 |
 | --- | --- |
-| 当前任务 | `CRM-20-02` |
+| 当前任务 | `CRM-20-03` |
 | 当前状态 | `planned` |
-| 当前目标 | 根据确定规则生成并去重行动任务；条件消失时关闭或标记失效。 |
-| 已完成前序 | `CRM-00` 基线与执行治理；`CRM-10` Case 模型、兼容迁移、Case 中心展示与阶段审计；`CRM-20-01` 持久化行动任务数据契约。 |
+| 当前目标 | 建立首页“今日推进”中枢；在不改变当前人工确认边界的前提下展示、筛选和处理已持久化的行动任务。 |
+| 已完成前序 | `CRM-00` 基线与执行治理；`CRM-10` Case 模型、兼容迁移、Case 中心展示与阶段审计；`CRM-20-01` 持久化行动任务数据契约；`CRM-20-02` 规则生成、去重与失效生命周期。 |
 | 禁止提前启动 | `CRM-60` 定时同步、自动发送、AI 自动推进高风险阶段。 |
-| 最近已验证基线 | `npm.cmd run check`、`npm.cmd run test:action-task-storage`、`npm.cmd run test:case-display`、`npm.cmd run test:crm-regression`、`npm.cmd run test:followup-isolation`、Python AST 解析、`git diff --check`（功能提交 `c08db7e`）。 |
+| 最近已验证基线 | `npm.cmd run check`、`npm.cmd run test:action-task-storage`、`npm.cmd run test:case-display`、`npm.cmd run test:crm-regression`、`npm.cmd run test:followup-isolation`、Python AST 解析、`git diff --check`（功能提交 `140b6f2`）。 |
 
 ## 总体闭环与完成定义
 
@@ -76,7 +76,7 @@
 | ID | 优先级 | 状态 | 工作项 | 前置 | 验收标准 |
 | --- | --- | --- | --- | --- | --- |
 | `CRM-20-01` | P1 | `done` | 定义行动任务模型：来源、所属 Case、负责人、截止时间、优先级、状态、完成证据。 | `CRM-10-01` | 任务可独立于页面展示保存，不只是临时筛选结果。 |
-| `CRM-20-02` | P1 | `planned` | 根据规则生成并去重“新回信待处理、三天未回复、待补地址、待寄样、待确认报价、待发布、待数据回收、待人工归档”。 | `CRM-20-01` | 同一事实不会重复生成多条待办；条件消失后任务自动关闭或标记失效。 |
+| `CRM-20-02` | P1 | `done` | 根据规则生成并去重“新回信待处理、三天未回复、待补地址、待寄样、待确认报价、待发布、待数据回收、待人工归档”。 | `CRM-20-01` | 同一事实不会重复生成多条待办；条件消失后任务自动关闭或标记失效。 |
 | `CRM-20-03` | P1 | `planned` | 建立首页“今日推进”中枢，支持按品牌、负责人、优先级、截止时间与任务类型筛选。 | `CRM-20-02` | 用户可在一个队列中完成/跳过/延期/进入对应 Case，不必逐个看板查找。 |
 | `CRM-20-04` | P2 | `planned` | 支持任务指派、备注、延期理由和操作历史。 | `CRM-20-03` | 团队协作时能知道谁正在处理、何时处理、为什么延后。 |
 
@@ -156,6 +156,8 @@
 | 2026-09-11 | `CRM-10-04` | `active -> done` | `app/app.js`、`app/styles.css`、`tools/sqlite_store.py`、`tools/crm-domain.cjs`、`tools/crm-regression-test.cjs`、`tools/case-display-regression-test.cjs`、`docs/SCHEMA.md`、`docs/CRM_EXECUTION_TASKS.md` | `npm.cmd run check`、`npm.cmd run test:case-display`、`npm.cmd run test:crm-regression`、`npm.cmd run test:followup-isolation`、Python AST 解析与 `git diff --check` 全部通过。验证手动/编辑页阶段变更必须填写原因，AI 仅能在人工点击应用后写入；Case、兼容 FollowUp、Case 版本及结构化审计事件保持一致，跨品牌写入被拒绝。未读取或写入正式业务资料，未调用真实 IMAP、SMTP 或 AI。 | `b6570d2`（功能提交） | 阶段审计闭环完成；回滚 `b6570d2` 即可，SQLite 采用新增列迁移不删除旧数据。已核对未提前启动 CRM-20 任务队列、CRM-30 邮件分诊、CRM-40 AI 工作台、CRM-50 并发重构、CRM-60 定时同步、CRM-70 联系人/投递治理。下一执行门槛为 `CRM-20-01`，当前仅标记 planned。 |
 | 2026-09-11 | `CRM-20-01` | `planned -> active` | `docs/CRM_EXECUTION_TASKS.md` | 已核对 `CRM-10-04` 的完成记录、当前状态源、SQLite、前后端状态归一化与 CRM 领域回归。发现 `actionTasks` 仅存在于领域测试夹具，尚未持久化到正式状态、SQLite 或线上归一化，因此不计作已完成。 | 待提交 | 本阶段只定义并接入可独立保存的行动任务数据契约、品牌/Case 隔离与最小领域校验；不调用生成规则、不增加今日推进 UI、不处理邮件分诊、AI 自动化、定时同步或并发重构。 |
 | 2026-09-11 | `CRM-20-01` | `active -> done` | `tools/sqlite_store.py`、`tools/local-server.cjs`、`api/[...route].mjs`、`app/app.js`、`tools/crm-domain.cjs`、`tools/action-task-storage-test.cjs`、`tools/crm-regression-test.cjs`、`docs/SCHEMA.md`、`package.json`、`docs/CRM_EXECUTION_TASKS.md` | `npm.cmd run check`、`npm.cmd run test:action-task-storage`、`npm.cmd run test:case-display`、`npm.cmd run test:crm-regression`、`npm.cmd run test:followup-isolation`、Python AST 解析与 `git diff --check` 全部通过。隔离 SQLite 往返确认任务可独立保存；创建/完成动作验证 Case 存在、品牌一致、标题和完成证据。 | `c08db7e`（功能提交） | 数据影响：仅新增 SQLite `actionTasks` 表和状态集合，未读取或写入正式业务资料、IMAP、SMTP 或 AI；回滚：`git revert c08db7e`，新增表为可安全闲置的加法，任何破坏性数据库降级前先导出。核对：既有领域夹具不再被误报为上线功能；未启动 `CRM-20-02` 规则生成、`CRM-20-03` 任务中心、`CRM-20-04` 协作界面、`CRM-30+` 分诊、`CRM-40+` AI 工作台、`CRM-50+` 并发重构、`CRM-60` 定时同步或 `CRM-70+` 联系人治理。下一门槛：仅激活 `CRM-20-02`。 |
+| 2026-09-11 | `CRM-20-02` | `planned -> active` | `docs/CRM_EXECUTION_TASKS.md` | 已读取当前执行指针、最近完成记录、`crm-domain.cjs`、前后端状态保存入口与现有回归。确认领域层已有部分任务规格和去重雏形，但未覆盖全部八类任务，且未在本地/线上常规保存与邮箱同步保存后统一重算。 | 待提交 | 本阶段只实现规则生成、去重、条件消失失效和运行时保存接入；计划覆盖新回信、三天未回复、地址、寄样、报价、发布、数据回收、人工归档八类任务，并新增隔离回归。不得启动今日推进 UI、指派/历史界面、邮件分诊台、AI 工作台、定时同步、自动发送或并发存储重构。 |
+| 2026-09-11 | `CRM-20-02` | `active -> done` | `tools/crm-domain.cjs`、`tools/local-server.cjs`、`api/[...route].mjs`、`tools/crm-regression-test.cjs`、`docs/SCHEMA.md`、`docs/CRM_EXECUTION_TASKS.md` | `npm.cmd run check`、`npm.cmd run test:action-task-storage`、`npm.cmd run test:case-display`、`npm.cmd run test:crm-regression`、`npm.cmd run test:followup-isolation`、Python AST 解析与 `git diff --check` 全部通过。回归覆盖八类规则、同一事实去重、条件消失失效、失效任务恢复、已完成任务不重开、同品牌 Case 隔离、最新未读回信识别、跨品牌事件排除和唯一候选待归档邮件。 | `140b6f2`（功能提交） | 数据影响：保存时新增规则重算；未读取或写入正式业务资料，未调用真实 IMAP、SMTP 或 AI。新回信只依据同品牌、当前 Case 的 `has_unread_reply` 与最新有效入站事件，避免历史邮件误报。回滚：`git revert 140b6f2`。核对：已比对 `CRM-20-01` 的持久化契约，未重复实现其数据表；未启动 `CRM-20-03` 今日推进 UI、`CRM-20-04` 指派/历史、`CRM-30+` 分诊、`CRM-40+` AI 工作台、`CRM-50+` 并发重构、`CRM-60` 定时同步或 `CRM-70+` 联系人治理。下一门槛：仅可激活 `CRM-20-03`。 |
 
 ## 阶段完成记录模板
 
