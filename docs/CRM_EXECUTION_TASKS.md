@@ -42,7 +42,7 @@
 | 当前目标 | 基于用户选定策略生成可编辑邮件草稿，统一应用品牌邮箱的 HTML/文本/图片签名规范，并要求发送确认。 |
 | 已完成前序 | `CRM-00` 基线与执行治理；`CRM-10` Case 模型、兼容迁移、Case 中心展示与阶段审计；`CRM-20-01` 持久化行动任务数据契约；`CRM-20-02` 规则生成、去重与失效生命周期；`CRM-20-03` 今日推进中枢；`CRM-20-04` 协作指派、备注、延期理由与操作历史。 |
 | 禁止提前启动 | `CRM-60` 定时同步、自动发送、AI 自动推进高风险阶段。 |
-| 最近已验证基线 | `npm.cmd run check`、`npm.cmd run test:followup-ai-context`、`npm.cmd run test:mail-triage-lead`、`npm.cmd run test:mail-triage-case-actions`、`npm.cmd run test:mail-triage-console`、`npm.cmd run test:mail-routing-score`、`npm.cmd run test:crm-regression`、`npm.cmd run test:case-display`、`npm.cmd run test:action-task-storage`、`npm.cmd run test:today-action-center`、`npm.cmd run test:task-collaboration`、`npm.cmd run test:followup-isolation`、Python AST 解析、`git diff --check`（功能提交 `b5ac33c`）。 |
+| 最近已验证基线 | `npm.cmd run check`、`npm.cmd run test:followup-ai-analysis`、`npm.cmd run test:followup-ai-context`、`npm.cmd run test:mail-triage-lead`、`npm.cmd run test:mail-triage-case-actions`、`npm.cmd run test:mail-triage-console`、`npm.cmd run test:mail-routing-score`、`npm.cmd run test:crm-regression`、`npm.cmd run test:case-display`、`npm.cmd run test:action-task-storage`、`npm.cmd run test:today-action-center`、`npm.cmd run test:task-collaboration`、`npm.cmd run test:followup-isolation`、Python AST 解析、`git diff --check`（功能提交 `393bd85`，检查点 `3cbd9eb`）。 |
 
 ## 总体闭环与完成定义
 
