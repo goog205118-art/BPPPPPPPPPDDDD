@@ -19,6 +19,11 @@ const {
   testSmtpConnection,
   sendMailAccount,
 } = require("./mail-sync.cjs");
+const {
+  linkLegacyCaseReferences,
+  migrateLegacyFollowUps,
+  rollbackLegacyCaseMigration,
+} = require("./case-migration.cjs");
 
 const rootDir = path.resolve(__dirname, "..");
 const appDir = path.join(rootDir, "app");
@@ -246,19 +251,16 @@ function normalizeBusinessState(rawState) {
         }, brandsById.get(textValue(creator?.brand_id || cooperation?.brand_id)));
       })
     : [];
-  const caseById = new Map(cases.map((row) => [textValue(row.id), row]));
-  for (const followUp of followUps) {
-    const linkedCase = caseById.get(textValue(followUp.case_id));
-    if (linkedCase) {
-      followUp.case_id = linkedCase.id;
-      continue;
-    }
-    if (!textValue(followUp.creator_id) && !textValue(followUp.lead_id)) {
-      followUp.case_id = "";
-      continue;
-    }
-    const migratedCase = resolveBrand({
-      id: `CASE-FU-${textValue(followUp.id)}`,
+  const migrationState = {
+    meta: state.meta,
+    cases,
+    followUps,
+    cooperations,
+  };
+  migrateLegacyFollowUps(
+    migrationState,
+    (followUp, caseId) => resolveBrand({
+      id: caseId,
       brand_id: followUp.brand_id,
       brand: followUp.brand,
       creator_id: followUp.creator_id,
@@ -280,22 +282,15 @@ function normalizeBusinessState(rawState) {
       version: 1,
       createdAt: textValue(followUp.createdAt),
       updatedAt: textValue(followUp.updatedAt),
-    }, brandsById.get(textValue(followUp.brand_id)));
-    cases.push(migratedCase);
-    caseById.set(migratedCase.id, migratedCase);
-    followUp.case_id = migratedCase.id;
-  }
-  for (const cooperation of cooperations) {
-    const linkedCase = caseById.get(textValue(cooperation.case_id))
-      || cases.find((item) => textValue(item.cooperation_id) === textValue(cooperation.id));
-    cooperation.case_id = linkedCase ? linkedCase.id : "";
-  }
+    }, brandsById.get(textValue(followUp.brand_id))),
+  );
+  state.meta = migrationState.meta;
   const followUpById = new Map(followUps.map((row) => [textValue(row.id), row]));
   const followUpEvents = Array.isArray(state.followUpEvents)
     ? state.followUpEvents.map((row) => {
         const followUp = followUpById.get(textValue(row.follow_up_id));
         return resolveBrand(
-          { ...row, case_id: textValue(row.case_id || followUp?.case_id), brand_id: textValue(row.brand_id || followUp?.brand_id), body: textValue(row.body) },
+          { ...row, case_id: textValue(row.case_id), brand_id: textValue(row.brand_id || followUp?.brand_id), body: textValue(row.body) },
           brandsById.get(textValue(followUp?.brand_id)),
         );
       })
@@ -313,12 +308,16 @@ function normalizeBusinessState(rawState) {
         const followUp = followUpById.get(textValue(row.follow_up_id));
         return resolveBrand({
           ...row,
-          case_id: textValue(row.case_id || followUp?.case_id),
+          case_id: textValue(row.case_id),
           email: textValue(row.email),
           person_type: textValue(row.person_type) || "creator",
         });
       })
     : [];
+  migrationState.followUpEvents = followUpEvents;
+  migrationState.contactTracks = contactTracks;
+  linkLegacyCaseReferences(migrationState);
+  state.meta = migrationState.meta;
 
   return {
     ...defaultState,
@@ -431,6 +430,30 @@ function saveState(nextState) {
   } catch {
     // The project-side JSON mirror is best effort; SQLite remains the source of truth.
   }
+}
+
+function resumeCaseMigration() {
+  const state = loadState();
+  const migration = state.meta?.caseMigration;
+  if (textValue(migration?.status) === "rolled_back") {
+    state.meta = {
+      ...(state.meta || {}),
+      caseMigration: {
+        ...migration,
+        status: "completed",
+        resumedAt: new Date().toISOString(),
+      },
+    };
+  }
+  saveState(state);
+  return loadState();
+}
+
+function rollbackCaseMigration() {
+  const state = loadState();
+  const result = rollbackLegacyCaseMigration(state);
+  saveState(state);
+  return { result, state: loadState() };
 }
 
 function credentialKeyMaterial() {
@@ -2597,6 +2620,26 @@ function handleApi(req, res, pathname) {
   if (req.method === "GET" && pathname === "/api/state") {
     const state = loadState();
     send(res, 200, JSON.stringify(state, null, 2));
+    return true;
+  }
+
+  if (req.method === "POST" && pathname === "/api/cases/migration") {
+    try {
+      const state = resumeCaseMigration();
+      jsonResponse(res, 200, { ok: true, migration: state.meta?.caseMigration || null, state });
+    } catch (error) {
+      jsonResponse(res, 400, { ok: false, error: error.message });
+    }
+    return true;
+  }
+
+  if (req.method === "POST" && pathname === "/api/cases/migration/rollback") {
+    try {
+      const { result, state } = rollbackCaseMigration();
+      jsonResponse(res, 200, { ok: true, ...result, state });
+    } catch (error) {
+      jsonResponse(res, 400, { ok: false, error: error.message });
+    }
     return true;
   }
 

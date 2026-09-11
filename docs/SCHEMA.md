@@ -174,8 +174,24 @@
 - `notes`
 - `version`（记录级乐观锁版本；后续实体写入接口必须校验）
 - `createdAt`、`updatedAt`
+- `migration_source_follow_up_id`（兼容迁移创建的 Case 所对应的旧 `followUps.id`；人工创建的 Case 为空）
+- `migration_version`（兼容迁移版本号；当前为 `1`）
+- `migration_created_at`（兼容迁移创建时间）
 
 阶段契约为：`待开发 -> 已联系待回复 -> 初步沟通 -> 合作协商 -> 待寄样 -> 已寄样/运输中/已签收 -> 待发布 -> 已发布 -> 待数据回收 -> 合作完成 -> 已结案`。旧阶段名称在兼容期内继续允许读取；报价、条款、寄样、签收、发布和结案仍必须人工确认，不允许 AI 自动跨阶段。
+
+### 旧跟进兼容迁移
+
+`POST /api/cases/migration` 用于显式把仍未关联 Case 的旧 `followUps` 映射为 `CASE-FU-{follow_up_id}`。迁移只补齐兼容身份和关联，不删除旧跟进，也不删除邮件正文、产品或物流资料。迁移结果写入 `meta.caseMigration`：
+
+- `version`、`status`（`completed` 或 `rolled_back`）
+- `migratedAt`、`lastMigratedAt`、`rolledBackAt`
+- `sourceFollowUpCount`
+- `migratedFollowUpIds`
+- `createdCaseIds`
+- `snapshot.followUps`、`snapshot.cooperations`、`snapshot.followUpEvents`、`snapshot.contactTracks`（仅保存本次被补写的原 `case_id`）
+
+迁移是幂等的：重复调用不会重复创建 Case，也不会在没有实际变化时刷新 `lastMigratedAt`。`POST /api/cases/migration/rollback` 只删除本次迁移创建且未被人工修改的 Case，并按快照恢复关联字段；如果检测到迁移后的人工修改，默认返回错误并拒绝覆盖。回滚后普通读取不会自动重建兼容 Case，必须再次显式调用迁移接口恢复。这两个接口仅用于兼容迁移和人工恢复，不代表开放自动阶段推进。
 
 ## followUpEvents
 

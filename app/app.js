@@ -1491,6 +1491,7 @@ function ensureStateShape(nextState) {
     filterPreferences: normalizeFilterPreferences(nextState?.meta?.filterPreferences),
     timeZones: normalizeTimeZones(nextState?.meta?.timeZones),
   };
+  const caseMigrationPaused = text(shaped.meta.caseMigration?.status) === "rolled_back";
 
   shaped.brands = [];
   for (const brand of Array.isArray(nextState?.brands) ? nextState.brands : []) {
@@ -1540,39 +1541,41 @@ function ensureStateShape(nextState) {
     ? nextState.followUps.map((row) => normalizeFollowUp({ ...row }, shaped.creators, shaped.cooperations, shaped))
     : [];
   const caseById = new Map(shaped.cases.map((row) => [text(row.id), row]));
-  for (const followUp of shaped.followUps) {
-    if (caseById.has(text(followUp.case_id))) continue;
-    if (!text(followUp.creator_id) && !text(followUp.lead_id)) {
-      followUp.case_id = "";
-      continue;
+  if (!caseMigrationPaused) {
+    for (const followUp of shaped.followUps) {
+      if (caseById.has(text(followUp.case_id))) continue;
+      if (!text(followUp.creator_id) && !text(followUp.lead_id)) {
+        followUp.case_id = "";
+        continue;
+      }
+      const migratedCase = applyRecordBrand({
+        id: `CASE-FU-${text(followUp.id)}`,
+        brand_id: followUp.brand_id,
+        brand: followUp.brand,
+        creator_id: followUp.creator_id,
+        lead_id: followUp.lead_id,
+        cooperation_id: followUp.cooperation_id,
+        product_ids: text(followUp.product_id) ? [text(followUp.product_id)] : [],
+        stage: text(followUp.stage) || "待开发",
+        priority: text(followUp.priority) || "普通",
+        cooperation_mode: text(followUp.cooperation_mode),
+        budget: followUp.budget,
+        shipping_status: text(followUp.shipping_status),
+        tracking_no: text(followUp.tracking_no),
+        publish_due_at: text(followUp.publish_due_at),
+        publish_url: text(followUp.publish_url),
+        next_action: text(followUp.next_action),
+        next_action_at: text(followUp.next_follow_up_at),
+        last_outreach_at: text(followUp.last_email_at),
+        notes: text(followUp.notes),
+        version: 1,
+        createdAt: text(followUp.createdAt),
+        updatedAt: text(followUp.updatedAt),
+      }, shaped);
+      shaped.cases.push(migratedCase);
+      caseById.set(migratedCase.id, migratedCase);
+      followUp.case_id = migratedCase.id;
     }
-    const migratedCase = applyRecordBrand({
-      id: `CASE-FU-${text(followUp.id)}`,
-      brand_id: followUp.brand_id,
-      brand: followUp.brand,
-      creator_id: followUp.creator_id,
-      lead_id: followUp.lead_id,
-      cooperation_id: followUp.cooperation_id,
-      product_ids: text(followUp.product_id) ? [text(followUp.product_id)] : [],
-      stage: text(followUp.stage) || "待开发",
-      priority: text(followUp.priority) || "普通",
-      cooperation_mode: text(followUp.cooperation_mode),
-      budget: followUp.budget,
-      shipping_status: text(followUp.shipping_status),
-      tracking_no: text(followUp.tracking_no),
-      publish_due_at: text(followUp.publish_due_at),
-      publish_url: text(followUp.publish_url),
-      next_action: text(followUp.next_action),
-      next_action_at: text(followUp.next_follow_up_at),
-      last_outreach_at: text(followUp.last_email_at),
-      notes: text(followUp.notes),
-      version: 1,
-      createdAt: text(followUp.createdAt),
-      updatedAt: text(followUp.updatedAt),
-    }, shaped);
-    shaped.cases.push(migratedCase);
-    caseById.set(migratedCase.id, migratedCase);
-    followUp.case_id = migratedCase.id;
   }
   for (const cooperation of shaped.cooperations) {
     const linkedCase = caseById.get(text(cooperation.case_id))

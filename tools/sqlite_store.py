@@ -141,6 +141,9 @@ SCHEMA = {
     },
     "cases": {
         "id": "TEXT PRIMARY KEY",
+        "migration_source_follow_up_id": "TEXT",
+        "migration_version": "REAL",
+        "migration_created_at": "TEXT",
         "brand_id": "TEXT",
         "brand": "TEXT",
         "creator_id": "TEXT",

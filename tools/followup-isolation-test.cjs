@@ -1300,8 +1300,12 @@ function fixtureState() {
         priority: "中",
         cooperation_mode: "待确认",
         budget: 1234.5,
+        shipping_status: "运输中",
+        tracking_no: "TRACK-A",
+        publish_due_at: "2026-09-30",
         has_unread_reply: true,
         next_action: "确认合作",
+        notes: "迁移保留的跟进备注",
         createdAt: now,
         updatedAt: now,
       },
@@ -1330,6 +1334,7 @@ function fixtureState() {
         direction: "inbound",
         subject: "A inbound",
         excerpt: "A message summary",
+        body: "A complete inbound body",
         message_id: "same-message-id@example.com",
         fingerprint: "same-message-fingerprint",
         source: "fixture",
@@ -1349,6 +1354,20 @@ function fixtureState() {
         fingerprint: "same-message-fingerprint",
         source: "fixture",
         occurred_at: now,
+        createdAt: now,
+        updatedAt: now,
+      },
+    ],
+    contactTracks: [
+      {
+        id: "CT-A",
+        brand_id: "BR-A",
+        person_type: "creator",
+        person_id: "CR-A",
+        person_name: "Creator A",
+        email: "shared@example.com",
+        follow_up_id: "FU-A",
+        status: "waiting_reply",
         createdAt: now,
         updatedAt: now,
       },
@@ -1584,10 +1603,70 @@ async function run() {
   assert.equal(result.payload.followUpEvents.filter((row) => row.brand_id === "BR-A").length, 1);
   assert.equal(result.payload.followUpEvents.filter((row) => row.brand_id === "BR-B").length, 1);
   assert.equal(result.payload.followUpEvents.find((row) => row.id === "EV-A").case_id, "CASE-FU-FU-A");
+  assert.equal(result.payload.followUpEvents.find((row) => row.id === "EV-A").body, "A complete inbound body");
+  assert.equal(result.payload.contactTracks.find((row) => row.id === "CT-A").case_id, "CASE-FU-FU-A");
   assert.equal(result.payload.cooperations.find((row) => row.id === "CO-A").case_id, "CASE-FU-FU-A");
+  assert.equal(result.payload.cases.find((row) => row.id === "CASE-FU-FU-A").shipping_status, "运输中");
+  assert.equal(result.payload.cases.find((row) => row.id === "CASE-FU-FU-A").tracking_no, "TRACK-A");
+  assert.equal(result.payload.cases.find((row) => row.id === "CASE-FU-FU-A").notes, "迁移保留的跟进备注");
+  assert.equal(result.payload.cases.find((row) => row.id === "CASE-FU-FU-A").migration_source_follow_up_id, "FU-A");
+  assert.equal(result.payload.cases.find((row) => row.id === "CASE-FU-FU-A").migration_version, 1);
+  assert.match(String(result.payload.cases.find((row) => row.id === "CASE-FU-FU-A").migration_created_at || ""), /^\d{4}-\d{2}-\d{2}T/);
+  assert.equal(result.payload.meta.caseMigration.version, 1);
+  assert.equal(result.payload.meta.caseMigration.status, "completed");
+  assert.deepEqual(
+    result.payload.meta.caseMigration.createdCaseIds.sort(),
+    ["CASE-FU-FU-A", "CASE-FU-FU-B"],
+    "兼容迁移应记录本次创建的 Case，供幂等和回滚使用。",
+  );
+  assert.deepEqual(result.payload.meta.caseMigration.snapshot.followUps, [
+    { id: "FU-A", case_id: "" },
+    { id: "FU-B", case_id: "" },
+  ]);
+  assert.deepEqual(result.payload.meta.caseMigration.snapshot.followUpEvents, [
+    { id: "EV-A", case_id: "" },
+    { id: "EV-B", case_id: "" },
+  ]);
+  assert.deepEqual(result.payload.meta.caseMigration.snapshot.contactTracks, [{ id: "CT-A", case_id: "" }]);
   assert.equal(result.payload.mailInbox.filter((row) => row.brand_id === "BR-A").length, 1);
   assert.equal(result.payload.mailInbox.filter((row) => row.brand_id === "BR-B").length, 1);
   assert.equal(result.payload.followUpEvents.length, 2, "不同品牌的相同邮件标识不应互相去重。");
+
+  const migrationTimestamp = result.payload.meta.caseMigration.lastMigratedAt;
+  result = await request("/api/cases/migration", jsonOptions("POST", {}));
+  assert.equal(result.response.status, 200, `重复执行 Case 迁移失败：${result.payload.error || output}`);
+  assert.equal(result.payload.state.cases.length, 3, "重复迁移不得重复创建 Case。");
+  assert.equal(result.payload.state.meta.caseMigration.lastMigratedAt, migrationTimestamp, "无实际改动时不得刷新迁移时间。");
+
+  result = await request("/api/cases/migration/rollback", jsonOptions("POST", {}));
+  assert.equal(result.response.status, 200, `Case 迁移回滚失败：${result.payload.error || output}`);
+  assert.deepEqual(result.payload.removedCaseIds.sort(), ["CASE-FU-FU-A", "CASE-FU-FU-B"]);
+  assert.equal(result.payload.state.cases.length, 1, "回滚只应删除本次迁移创建的 Case。");
+  assert.equal(result.payload.state.followUps.find((row) => row.id === "FU-A").case_id, "");
+  assert.equal(result.payload.state.followUps.find((row) => row.id === "FU-B").case_id, "");
+  assert.equal(result.payload.state.followUpEvents.find((row) => row.id === "EV-A").case_id, "");
+  assert.equal(result.payload.state.contactTracks.find((row) => row.id === "CT-A").case_id, "");
+  assert.equal(result.payload.state.cooperations.find((row) => row.id === "CO-A").case_id, "");
+  assert.equal(result.payload.state.followUpEvents.find((row) => row.id === "EV-A").body, "A complete inbound body", "回滚不得删除邮件正文。");
+  assert.equal(result.payload.state.products.find((row) => row.id === "PR-A").name, "Product A", "回滚不得删除产品资料。");
+  assert.equal(result.payload.state.meta.caseMigration.status, "rolled_back");
+
+  result = await request("/api/state");
+  assert.equal(result.payload.cases.length, 1, "回滚后读取状态不得自动重建兼容 Case。");
+
+  result = await request("/api/cases/migration", jsonOptions("POST", {}));
+  assert.equal(result.response.status, 200, `回滚后的 Case 迁移恢复失败：${result.payload.error || output}`);
+  assert.equal(result.payload.state.cases.length, 3, "显式恢复迁移后应重新建立兼容 Case。");
+  assert.equal(result.payload.state.followUps.find((row) => row.id === "FU-A").case_id, "CASE-FU-FU-A");
+
+  const manuallyEditedState = result.payload.state;
+  manuallyEditedState.cases.find((row) => row.id === "CASE-FU-FU-A").updatedAt = "2030-01-01T00:00:00.000Z";
+  result = await request("/api/state", jsonOptions("POST", manuallyEditedState));
+  assert.equal(result.response.status, 200, `写入人工修改 Case 的隔离资料失败：${result.payload.error || output}`);
+  result = await request("/api/cases/migration/rollback", jsonOptions("POST", {}));
+  assert.equal(result.response.status, 400, "迁移后人工修改 Case 时必须拒绝自动回滚。");
+  assert.match(String(result.payload.error || ""), /人工|回滚/);
+  assert.equal((await request("/api/state")).payload.cases.some((row) => row.id === "CASE-FU-FU-A"), true);
 
   result = await request(
     "/api/mail/settings",
