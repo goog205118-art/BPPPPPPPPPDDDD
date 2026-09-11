@@ -138,9 +138,10 @@
 
 | 时间 | 任务 ID | 状态变化 | 改动文件 | 验证/证据 | 提交 | 结论与下一门槛 |
 | --- | --- | --- | --- | --- | --- | --- |
-| 2026-09-11 | `CRM-00-01` | `planned -> active` | `docs/CRM_EXECUTION_TASKS.md` | 已对照 `CURRENT_STATUS.md`、`SCHEMA.md`、`FOLLOWUP_EMAIL_EXECUTION.md`、`README.md` 与最近提交 `66eb6a1` 建立基线。 | 待提交 | 台账已创建；下一步完成 README/状态文档的正文缓存说明统一后，才进入 Case 数据模型设计。 |
-| 2026-09-11 | `CRM-00-01` | `active -> done` | `docs/CRM_EXECUTION_TASKS.md` | 任务表已包含固定编号、状态定义、前置依赖、验收条件、禁止提前启动项、恢复指针和追加日志模板。 | 待提交 | 执行治理完成；后续实现先查询本台账。 |
-| 2026-09-11 | `CRM-00-02` | `planned -> done` | `README.md`、`docs/CURRENT_STATUS.md`、`docs/CRM_EXECUTION_TASKS.md` | README 已改为“默认摘要 + 可选纯文本正文缓存 + 保留期 + AI 授权”；当前状态文档已指向统一台账。`git diff --check` 通过。 | 待提交 | 文档说明已统一；下一任务为 `CRM-00-03` 回归基线。 |
+| 2026-09-11 | `CRM-00-01` | `planned -> active` | `docs/CRM_EXECUTION_TASKS.md` | 已对照 `CURRENT_STATUS.md`、`SCHEMA.md`、`FOLLOWUP_EMAIL_EXECUTION.md`、`README.md` 与最近提交 `66eb6a1` 建立基线。 | `978ae3d` | 台账已创建；下一步完成 README/状态文档的正文缓存说明统一后，才进入 Case 数据模型设计。 |
+| 2026-09-11 | `CRM-00-01` | `active -> done` | `docs/CRM_EXECUTION_TASKS.md` | 任务表已包含固定编号、状态定义、前置依赖、验收条件、禁止提前启动项、恢复指针和追加日志模板。 | `978ae3d` | 执行治理完成；后续实现先查询本台账。 |
+| 2026-09-11 | `CRM-00-02` | `planned -> done` | `README.md`、`docs/CURRENT_STATUS.md`、`docs/CRM_EXECUTION_TASKS.md` | README 已改为“默认摘要 + 可选纯文本正文缓存 + 保留期 + AI 授权”；当前状态文档已指向统一台账。`git diff --check` 通过。 | `978ae3d` | 文档说明已统一；下一任务为 `CRM-00-03` 回归基线。 |
+| 2026-09-11 | `CRM-00-03` | 保持 `planned` | `docs/CRM_EXECUTION_TASKS.md` | 检查点：确认当前尚未增加 Case、任务队列或邮件归档代码；仅完成治理与文档一致性，避免把准备工作误报为功能完成。 | `待提交` | 下次从隔离回归基线开始，先定义测试数据和不可回归的现有行为。 |
 
 ## 阶段完成记录模板
 
