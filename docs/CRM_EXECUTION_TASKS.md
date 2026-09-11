@@ -42,7 +42,7 @@
 | 当前目标 | 为 Case 增加审计字段与人工阶段变更原因。 |
 | 已完成前序 | `CRM-00` 基线与执行治理；`CRM-10-01` Case 数据模型、阶段契约和稳定关联。 |
 | 禁止提前启动 | `CRM-60` 定时同步、自动发送、AI 自动推进高风险阶段。 |
-| 最近已验证基线 | `npm.cmd run check`、`npm.cmd run test:case-display`、`npm.cmd run test:crm-regression`、`npm.cmd run test:followup-isolation`、Python AST 解析、`git diff --check`（本阶段提交待生成）。 |
+| 最近已验证基线 | `npm.cmd run check`、`npm.cmd run test:case-display`、`npm.cmd run test:crm-regression`、`npm.cmd run test:followup-isolation`、Python AST 解析、`git diff --check`（功能提交 `7e45acb`）。 |
 
 ## 总体闭环与完成定义
 
@@ -151,7 +151,7 @@
 | 2026-09-11 | `CRM-10-01` | 保持 `done`，提交前复验 | `api/[...route].mjs`、`app/app.js`、`tools/local-server.cjs`、`tools/sqlite_store.py`、`tools/crm-domain.cjs`、两套回归测试、`docs/SCHEMA.md` | 已再次执行 `npm.cmd run check`、`npm.cmd run test:crm-regression`、`npm.cmd run test:followup-isolation`、Python AST 解析和 `git diff --check`，全部通过。 | `16765f0` | Case 数据模型基线已冻结；继续唯一激活任务 `CRM-10-02`，不触碰正式业务资料。 |
 | 2026-09-11 | `CRM-10-02` | `active -> done` | `tools/case-migration.cjs`、`tools/local-server.cjs`、`api/[...route].mjs`、`app/app.js`、`tools/sqlite_store.py`、`tools/followup-isolation-test.cjs`、`docs/SCHEMA.md`、`docs/CRM_EXECUTION_TASKS.md` | `npm.cmd run check`、`npm.cmd run test:crm-regression`、`npm.cmd run test:followup-isolation`、Python AST 解析和 `git diff --check` 全部通过。回归覆盖兼容 Case 创建、物流/备注/产品/邮件正文保留、邮件事件与联系人轨迹关联、幂等、回滚、回滚后不自动重建、显式恢复及人工修改拒绝回滚。 | `fd2e096` | 迁移闭环完成；正式资料未读取或写入。下一门槛为 `CRM-10-03`：仅将界面展示改为 Case 中心，不启动任务队列、分诊台、AI 自动推进或定时同步。 |
 | 2026-09-11 | `CRM-10-03` | `planned -> active` | `docs/CRM_EXECUTION_TASKS.md` | 已确认 `CRM-10-02` 已完成且提交为 `fd2e096`；本阶段只审查并调整合作跟进看板、详情抽屉和历史合作展示，不启动 `CRM-20`、`CRM-30`、`CRM-40`、`CRM-50` 或 `CRM-60`。 | 待提交 | 计划：以兼容生成后的 Case 作为展示聚合源，保留旧 `followUps` 编辑/保存入口；验证 Case/旧跟进一致、品牌隔离、邮件正文授权范围和历史合作关联。下一门槛为完成展示改动并通过现有回归。 |
-| 2026-09-11 | `CRM-10-03` | `active -> done` | `app/app.js`、`app/styles.css`、`tools/case-display-regression-test.cjs`、`package.json`、`docs/CRM_EXECUTION_TASKS.md` | `npm.cmd run test:case-display`、`npm.cmd run check`、`npm.cmd run test:crm-regression`、`npm.cmd run test:followup-isolation`、Python AST 解析和 `git diff --check` 全部通过。验证 Case 优先展示、旧 FollowUp 回退、邮件/合作/多产品关联、阶段事件写入 `case_id`、品牌隔离和紧凑详情样式。未读取或写入正式业务资料，未调用真实邮箱或 AI。 | 待提交 | Case 中心展示闭环完成；回滚本阶段提交即可，旧 FollowUp 字段仍可读取。下一门槛为 `CRM-10-04`：增加审计字段与人工阶段变更原因；不提前启动任务队列、分诊台、自动跟进、并发重构或定时同步。 |
+| 2026-09-11 | `CRM-10-03` | `active -> done` | `app/app.js`、`app/styles.css`、`tools/case-display-regression-test.cjs`、`package.json`、`docs/CRM_EXECUTION_TASKS.md` | `npm.cmd run test:case-display`、`npm.cmd run check`、`npm.cmd run test:crm-regression`、`npm.cmd run test:followup-isolation`、Python AST 解析和 `git diff --check` 全部通过。验证 Case 优先展示、旧 FollowUp 回退、邮件/合作/多产品关联、阶段事件写入 `case_id`、品牌隔离和紧凑详情样式。未读取或写入正式业务资料，未调用真实邮箱或 AI。 | `7e45acb`（功能提交） | Case 中心展示闭环完成；回滚 `7e45acb` 即可，旧 FollowUp 字段仍可读取。下一门槛为 `CRM-10-04`：增加审计字段与人工阶段变更原因；不提前启动任务队列、分诊台、自动跟进、并发重构或定时同步。 |
 
 ## 阶段完成记录模板
 
