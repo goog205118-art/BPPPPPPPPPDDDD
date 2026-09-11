@@ -296,65 +296,152 @@ function latestEvent(events, predicate) {
     .sort((left, right) => new Date(right.occurred_at || 0) - new Date(left.occurred_at || 0))[0] || null;
 }
 
+function taskSpec(type, sourceId, title, priority, dueAt, description = "") {
+  return {
+    type,
+    source_id: text(sourceId),
+    title,
+    description,
+    priority,
+    due_at: text(dueAt),
+  };
+}
+
+function isPendingTriageMail(mailRow) {
+  return text(mailRow?.status) !== "已归档"
+    && text(mailRow?.direction) === "inbound";
+}
+
+function mailBelongsUniquelyToCase(mailRow, caseId, brandId) {
+  if (text(mailRow?.brand_id) !== text(brandId)) return false;
+  if (text(mailRow?.case_id) === text(caseId)) return true;
+  const candidates = Array.isArray(mailRow?.candidate_case_ids)
+    ? mailRow.candidate_case_ids.map(text).filter(Boolean)
+    : [];
+  return candidates.length === 1 && candidates[0] === text(caseId);
+}
+
+function unreadReplyEventForCase(state, caseRow, events) {
+  const unreadFollowUpIds = new Set(
+    (Array.isArray(state?.followUps) ? state.followUps : [])
+      .filter((followUp) => text(followUp.case_id) === text(caseRow.id)
+        && text(followUp.brand_id) === text(caseRow.brand_id)
+        && flag(followUp.has_unread_reply))
+      .map((followUp) => text(followUp.id))
+      .filter(Boolean),
+  );
+  if (!unreadFollowUpIds.size) return null;
+
+  const latestOutbound = latestEvent(events, (item) => text(item.direction) === "outbound");
+  const latestUnreadInbound = latestEvent(
+    events,
+    (item) => text(item.direction) === "inbound"
+      && unreadFollowUpIds.has(text(item.follow_up_id))
+      && (!latestOutbound || new Date(item.occurred_at || 0) >= new Date(latestOutbound.occurred_at || 0)),
+  );
+  return latestUnreadInbound;
+}
+
 function generatedTaskSpecs(state, caseRow, now) {
   const events = (Array.isArray(state.followUpEvents) ? state.followUpEvents : [])
-    .filter((item) => text(item.case_id) === text(caseRow.id));
+    .filter((item) => text(item.case_id) === text(caseRow.id)
+      && text(item.brand_id) === text(caseRow.brand_id));
   const inbox = (Array.isArray(state.mailInbox) ? state.mailInbox : [])
-    .filter((item) => text(item.case_id) === text(caseRow.id));
+    .filter((item) => mailBelongsUniquelyToCase(item, caseRow.id, caseRow.brand_id));
   const specs = [];
-  const unreadInbound = latestEvent(events, (item) => text(item.direction) === "inbound" && item.needs_action !== false)
-    || latestEvent(inbox, (item) => text(item.direction) === "inbound" && text(item.status) !== "已归档");
-  if (unreadInbound) {
-    specs.push({
-      type: "new_reply",
-      source_id: text(unreadInbound.id),
-      title: "达人新回信待处理",
-      priority: "高",
-      due_at: text(unreadInbound.occurred_at) || iso(now),
-    });
+
+  const unreadReply = unreadReplyEventForCase(state, caseRow, events);
+  if (unreadReply) {
+    specs.push(taskSpec(
+      "new_reply",
+      unreadReply.id,
+      "达人新回信待处理",
+      "高",
+      text(unreadReply.occurred_at) || iso(now),
+      "已归档到当前合作 Case 的新回信尚未标记已读，待人工阅读、判断和推进。",
+    ));
+  }
+
+  for (const mail of inbox.filter(isPendingTriageMail)) {
+    specs.push(taskSpec(
+      "mail_triage",
+      mail.id,
+      "待人工归档邮件",
+      "高",
+      text(mail.occurred_at) || iso(now),
+      "邮件已唯一匹配当前 Case，但尚未完成归档确认；确认前不写入沟通时间线。",
+    ));
   }
 
   const latestOutbound = latestEvent(events, (item) => text(item.direction) === "outbound");
-  const latestInbound = latestEvent(events, (item) => text(item.direction) === "inbound");
+  const latestInbound = latestEvent(
+    [...events.filter((item) => text(item.direction) === "inbound"), ...inbox.filter(isPendingTriageMail)],
+    () => true,
+  );
   const outboundAt = latestOutbound?.occurred_at || caseRow.last_outreach_at;
   const hasNewerReply = latestInbound && outboundAt && new Date(latestInbound.occurred_at) >= new Date(outboundAt);
   const daysSinceOutbound = outboundAt ? (new Date(now).getTime() - new Date(outboundAt).getTime()) / 86400000 : 0;
   if (caseRow.stage === "已联系待回复" && outboundAt && daysSinceOutbound >= 3 && !hasNewerReply) {
-    specs.push({
-      type: "reply_overdue",
-      source_id: text(outboundAt),
-      title: "已联系超过三天未回复",
-      priority: "中",
-      due_at: iso(now),
-    });
+    specs.push(taskSpec(
+      "reply_overdue",
+      outboundAt,
+      "已联系超过三天未回复",
+      "中",
+      iso(now),
+      "最近一次外联后三天仍无更晚的达人回信，建议人工决定是否复联。",
+    ));
   }
 
   if (caseRow.stage === "待寄样" && !text(caseRow.shipping_address)) {
-    specs.push({
-      type: "address_needed",
-      source_id: "shipping_address",
-      title: "待补寄样地址",
-      priority: "高",
-      due_at: iso(now),
-    });
+    specs.push(taskSpec(
+      "address_needed",
+      "shipping_address",
+      "待补寄样地址",
+      "高",
+      iso(now),
+      "已进入寄样阶段，但当前 Case 未保存收件地址。",
+    ));
   }
   if (caseRow.stage === "待寄样" && text(caseRow.shipping_address) && !text(caseRow.tracking_no)) {
-    specs.push({
-      type: "sample_pending",
-      source_id: "shipping",
-      title: "待安排寄样",
-      priority: "高",
-      due_at: iso(now),
-    });
+    specs.push(taskSpec(
+      "sample_pending",
+      "shipping",
+      "待安排寄样",
+      "高",
+      iso(now),
+      "收件地址已具备，但尚未登记物流单号或寄样动作。",
+    ));
   }
-  if (caseRow.stage === "待发布" && text(caseRow.publish_due_at)) {
-    specs.push({
-      type: "publish_pending",
-      source_id: text(caseRow.publish_due_at),
-      title: "待确认内容发布",
-      priority: "中",
-      due_at: text(caseRow.publish_due_at),
-    });
+
+  if (["合作协商", "谈合作方式 / 报价"].includes(text(caseRow.stage))) {
+    specs.push(taskSpec(
+      "quote_confirmation_pending",
+      "quote_confirmation",
+      "待确认报价与合作方式",
+      "高",
+      iso(now),
+      "当前处于合作协商阶段，报价、合作方式或条款尚需人工确认。",
+    ));
+  }
+  if (caseRow.stage === "待发布") {
+    specs.push(taskSpec(
+      "publish_pending",
+      "publication",
+      "待确认内容发布",
+      "中",
+      text(caseRow.publish_due_at) || iso(now),
+      "样品合作已进入待发布阶段，需人工核对发布时间或发布链接。",
+    ));
+  }
+  if (caseRow.stage === "待数据回收") {
+    specs.push(taskSpec(
+      "performance_data_pending",
+      "performance_data",
+      "待回收合作数据",
+      "中",
+      iso(now),
+      "内容已发布或已到数据回收阶段，需人工收集点击、订单或其他约定数据。",
+    ));
   }
   return specs;
 }
@@ -369,10 +456,18 @@ function reconcileCaseTasks(state, now = new Date().toISOString()) {
     for (const spec of generatedTaskSpecs(state, caseRow, timestamp)) {
       const dedupe_key = taskKey(caseRow.id, spec.type, spec.source_id);
       activeKeys.add(dedupe_key);
-      const existing = tasks.find((item) => text(item.dedupe_key) === dedupe_key);
+      const existing = tasks.find((item) => text(item.dedupe_key) === dedupe_key
+        && text(item.case_id) === text(caseRow.id)
+        && text(item.brand_id) === text(caseRow.brand_id));
       if (existing) {
         if (text(existing.status) === "已失效") {
           existing.status = "待处理";
+          existing.title = spec.title;
+          existing.description = spec.description;
+          existing.priority = spec.priority;
+          existing.due_at = spec.due_at;
+          existing.validation_error = "";
+          existing.version = Math.max(1, Number(existing.version) || 1) + 1;
           existing.updatedAt = timestamp;
         }
         continue;
@@ -399,8 +494,12 @@ function reconcileCaseTasks(state, now = new Date().toISOString()) {
 
   const invalidated = [];
   for (const task of tasks) {
-    if (task.generated && text(task.status) === "待处理" && !activeKeys.has(text(task.dedupe_key))) {
+    if (task.generated
+      && text(task.source) === "case_rule"
+      && text(task.status) === "待处理"
+      && !activeKeys.has(text(task.dedupe_key))) {
       task.status = "已失效";
+      task.version = Math.max(1, Number(task.version) || 1) + 1;
       task.updatedAt = timestamp;
       invalidated.push(task);
     }

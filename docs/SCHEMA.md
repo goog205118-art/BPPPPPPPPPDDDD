@@ -185,6 +185,24 @@
 
 阶段契约为：`待开发 -> 已联系待回复 -> 初步沟通 -> 合作协商 -> 待寄样 -> 已寄样/运输中/已签收 -> 待发布 -> 已发布 -> 待数据回收 -> 合作完成 -> 已结案`。旧阶段名称在兼容期内继续允许读取；报价、条款、寄样、签收、发布和结案仍必须人工确认，不允许 AI 自动跨阶段。
 
+## actionTasks
+
+行动任务是独立于页面筛选和看板显示保存的推进事项，必须稳定关联到一个同品牌 Case。当前由每次常规业务状态保存、邮箱同步保存和发信保存时的规则重算生成；不依赖定时任务，也不会自动发送邮件或自动推进合作阶段。
+
+- `id`
+- `brand_id`、`brand`
+- `case_id`
+- `source`、`source_id`、`dedupe_key`
+- `type`、`title`、`description`
+- `owner_id`、`owner_name`
+- `priority`、`due_at`
+- `status`（`待处理`、`已完成`、`已失效`、`已跳过`、`待修复`）
+- `completion_evidence`、`completed_at`
+- `generated`、`validation_error`、`version`
+- `createdAt`、`updatedAt`
+
+当前自动规则覆盖：已归档新回信待处理、首次外联后三天未回复、待补寄样地址、地址齐备但待安排寄样、待确认报价与合作方式、待确认内容发布、待回收合作数据，以及已唯一匹配到 Case 但待人工归档的入站邮件。新回信规则仅采用同品牌、已关联当前 Case 且 `has_unread_reply = true` 的旧跟进记录，并要求存在其最新的入站邮件事件，避免把历史邮件重复列为待办。`dedupe_key = case_id + type + source_id`；同一事实重复保存不会重复创建任务。条件消失时仅将未完成的 `case_rule` 任务标记为 `已失效`，不会覆盖人工完成或跳过的记录。歧义或跨品牌待归档邮件不生成 Case 任务，留待 `CRM-30` 邮件分诊台处理。
+
 ### 旧跟进兼容迁移
 
 `POST /api/cases/migration` 用于显式把仍未关联 Case 的旧 `followUps` 映射为 `CASE-FU-{follow_up_id}`。迁移只补齐兼容身份和关联，不删除旧跟进，也不删除邮件正文、产品或物流资料。迁移结果写入 `meta.caseMigration`：

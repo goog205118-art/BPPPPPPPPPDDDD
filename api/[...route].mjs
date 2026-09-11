@@ -24,6 +24,7 @@ const {
   migrateLegacyFollowUps,
   rollbackLegacyCaseMigration,
 } = require("../tools/case-migration.cjs");
+const { reconcileCaseTasks } = require("../tools/crm-domain.cjs");
 
 const defaultState = {
   meta: { version: 1, updatedAt: new Date().toISOString() },
@@ -462,6 +463,7 @@ async function saveState(nextState) {
     ...nextState,
     meta: { ...(nextState?.meta || {}), version: 1, updatedAt: new Date().toISOString() },
   });
+  reconcileCaseTasks(state);
   await writeBlobJson(STATE_BLOB, state);
   return state;
 }

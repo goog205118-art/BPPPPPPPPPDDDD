@@ -28,12 +28,18 @@ function fixture() {
   }, now);
   return {
     cases: [caseA, caseB],
+    followUps: [{
+      id: "FU-A",
+      case_id: "CASE-A",
+      brand_id: "BR-A",
+      has_unread_reply: true,
+    }],
     followUpEvents: [{
       id: "EV-A-REPLY",
       brand_id: "BR-A",
       case_id: "CASE-A",
+      follow_up_id: "FU-A",
       direction: "inbound",
-      needs_action: true,
       subject: "Re: Collaboration",
       occurred_at: "2026-09-11T10:00:00.000Z",
     }, {
@@ -92,22 +98,54 @@ function testCaseIsolationAndTriage() {
 
 function testTaskLifecycle() {
   const state = fixture();
+  state.followUpEvents.push({
+    id: "EV-A-OLDER-REPLY",
+    brand_id: "BR-A",
+    case_id: "CASE-A",
+    follow_up_id: "FU-A",
+    direction: "inbound",
+    occurred_at: "2026-09-11T08:00:00.000Z",
+  }, {
+    id: "EV-A-OUTBOUND",
+    brand_id: "BR-A",
+    case_id: "CASE-A",
+    follow_up_id: "FU-A",
+    direction: "outbound",
+    occurred_at: "2026-09-11T09:00:00.000Z",
+  }, {
+    id: "EV-A-CROSS-BRAND",
+    brand_id: "BR-B",
+    case_id: "CASE-A",
+    follow_up_id: "FU-A",
+    direction: "inbound",
+    occurred_at: "2026-09-11T11:00:00.000Z",
+  });
   let result = reconcileCaseTasks(state, now);
   const types = result.created.map((task) => task.type).sort();
-  assert.deepEqual(types, ["address_needed", "new_reply", "reply_overdue"]);
+  assert.deepEqual(types, ["address_needed", "mail_triage", "mail_triage", "new_reply"]);
 
   result = reconcileCaseTasks(state, now);
   assert.equal(result.created.length, 0, "同一事实重复同步不能重复生成待办。");
-  assert.equal(state.actionTasks.length, 3);
+  assert.equal(state.actionTasks.length, 4);
 
   const replyTask = state.actionTasks.find((task) => task.type === "new_reply");
+  assert.equal(replyTask.source_id, "EV-A-REPLY", "新回信待办必须取同品牌、最新且晚于最近外联的回信事件。");
+  state.followUps.find((item) => item.id === "FU-A").has_unread_reply = false;
+  result = reconcileCaseTasks(state, "2026-09-11T13:00:00.000Z");
+  assert.equal(result.invalidated.some((task) => task.id === replyTask.id), true, "打开跟进并标记已读后，开放的新回信任务应失效。");
+  assert.equal(replyTask.status, "已失效");
+
+  state.followUps.find((item) => item.id === "FU-A").has_unread_reply = true;
+  result = reconcileCaseTasks(state, "2026-09-11T13:30:00.000Z");
+  assert.equal(result.created.length, 0, "同一回信重新变为未读时，应恢复既有任务而非新建重复任务。");
+  assert.equal(replyTask.status, "待处理");
+
   const completed = completeTask(state, replyTask.id, "已阅读并准备回复", now);
   assert.equal(completed.status, "已完成");
   assert.equal(completed.completion_evidence, "已阅读并准备回复");
-
-  state.followUpEvents.find((item) => item.id === "EV-A-REPLY").needs_action = false;
-  result = reconcileCaseTasks(state, "2026-09-11T13:00:00.000Z");
-  assert.equal(result.invalidated.some((task) => task.type === "new_reply"), false, "已完成的任务不应被覆盖为失效。");
+  state.followUps.find((item) => item.id === "FU-A").has_unread_reply = false;
+  result = reconcileCaseTasks(state, "2026-09-11T13:45:00.000Z");
+  assert.equal(result.invalidated.some((task) => task.id === replyTask.id), false, "已完成的新回信任务不应被覆盖为失效。");
 
   state.cases.find((item) => item.id === "CASE-A").shipping_address = "Madrid, Spain";
   result = reconcileCaseTasks(state, "2026-09-11T14:00:00.000Z");
@@ -117,6 +155,81 @@ function testTaskLifecycle() {
     "条件消失后尚未完成的自动任务应失效。",
   );
   assert.equal(result.created.some((task) => task.type === "sample_pending"), true);
+}
+
+function testAllGeneratedTaskRules() {
+  const state = {
+    cases: [
+      createCase({ id: "CASE-QUOTE", brand_id: "BR-A", creator_id: "CR-A", stage: "谈合作方式 / 报价" }, now),
+      createCase({ id: "CASE-PUBLISH", brand_id: "BR-A", creator_id: "CR-B", stage: "待发布", publish_due_at: "2026-09-15T09:00:00.000Z" }, now),
+      createCase({ id: "CASE-DATA", brand_id: "BR-A", creator_id: "CR-C", stage: "待数据回收" }, now),
+      createCase({ id: "CASE-TRIAGE", brand_id: "BR-A", creator_id: "CR-D", stage: "初步沟通" }, now),
+      createCase({ id: "CASE-OTHER-BRAND", brand_id: "BR-B", creator_id: "CR-E", stage: "初步沟通" }, now),
+      createCase({
+        id: "CASE-OVERDUE",
+        brand_id: "BR-A",
+        creator_id: "CR-F",
+        stage: "已联系待回复",
+        last_outreach_at: "2026-09-07T08:00:00.000Z",
+      }, now),
+    ],
+    followUpEvents: [],
+    mailInbox: [{
+      id: "MAIL-TRIAGE-UNIQUE",
+      brand_id: "BR-A",
+      direction: "inbound",
+      status: "待人工归档",
+      occurred_at: now,
+      candidate_case_ids: ["CASE-TRIAGE"],
+    }, {
+      id: "MAIL-TRIAGE-AMBIGUOUS",
+      brand_id: "BR-A",
+      direction: "inbound",
+      status: "待人工归档",
+      occurred_at: now,
+      candidate_case_ids: ["CASE-TRIAGE", "CASE-QUOTE"],
+    }, {
+      id: "MAIL-TRIAGE-CROSS-BRAND",
+      brand_id: "BR-B",
+      direction: "inbound",
+      status: "待人工归档",
+      occurred_at: now,
+      candidate_case_ids: ["CASE-TRIAGE"],
+    }],
+    actionTasks: [],
+  };
+
+  let result = reconcileCaseTasks(state, now);
+  assert.deepEqual(
+    result.created.map((task) => task.type).sort(),
+    ["mail_triage", "performance_data_pending", "publish_pending", "quote_confirmation_pending", "reply_overdue"],
+    "应覆盖报价、发布、数据回收、三天未回复和唯一关联待归档邮件；歧义和跨品牌邮件不可猜测性建任务。",
+  );
+
+  const publishTask = state.actionTasks.find((task) => task.type === "publish_pending");
+  assert.equal(publishTask.due_at, "2026-09-15T09:00:00.000Z");
+  state.cases.find((item) => item.id === "CASE-PUBLISH").publish_due_at = "2026-09-16T09:00:00.000Z";
+  result = reconcileCaseTasks(state, "2026-09-11T13:00:00.000Z");
+  assert.equal(result.created.length, 0, "同一待发布事实变更截止时间不能创建重复任务。");
+  assert.equal(publishTask.due_at, "2026-09-15T09:00:00.000Z", "活动任务不应在规则重算中覆盖人工可能已调整的截止时间。");
+
+  state.cases.find((item) => item.id === "CASE-QUOTE").stage = "待寄样";
+  state.cases.find((item) => item.id === "CASE-PUBLISH").stage = "已发布";
+  state.cases.find((item) => item.id === "CASE-DATA").stage = "合作完成";
+  state.cases.find((item) => item.id === "CASE-OVERDUE").stage = "初步沟通";
+  state.mailInbox.find((item) => item.id === "MAIL-TRIAGE-UNIQUE").status = "已归档";
+  result = reconcileCaseTasks(state, "2026-09-11T14:00:00.000Z");
+  assert.deepEqual(
+    result.invalidated.map((task) => task.type).sort(),
+    ["mail_triage", "performance_data_pending", "publish_pending", "quote_confirmation_pending", "reply_overdue"],
+    "条件不再成立的未完成自动任务必须失效。",
+  );
+  const quoteTask = state.actionTasks.find((task) => task.type === "quote_confirmation_pending");
+  completeTask(state, quoteTask.id, "报价已人工确认", "2026-09-11T14:10:00.000Z");
+  state.cases.find((item) => item.id === "CASE-QUOTE").stage = "谈合作方式 / 报价";
+  result = reconcileCaseTasks(state, "2026-09-11T14:20:00.000Z");
+  assert.equal(result.created.length, 0, "同一已完成自动任务不应被规则重开。");
+  assert.equal(quoteTask.status, "已完成");
 }
 
 function testPersistedTaskContract() {
@@ -274,6 +387,7 @@ function testCaseStageAuditContract() {
 
 testCaseIsolationAndTriage();
 testTaskLifecycle();
+testAllGeneratedTaskRules();
 testPersistedTaskContract();
 testOptimisticLocking();
 testCaseStageContract();

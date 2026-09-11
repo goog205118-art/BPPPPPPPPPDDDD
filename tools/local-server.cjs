@@ -24,6 +24,7 @@ const {
   migrateLegacyFollowUps,
   rollbackLegacyCaseMigration,
 } = require("./case-migration.cjs");
+const { reconcileCaseTasks } = require("./crm-domain.cjs");
 
 const rootDir = path.resolve(__dirname, "..");
 const appDir = path.join(rootDir, "app");
@@ -470,6 +471,7 @@ function saveState(nextState) {
       updatedAt: new Date().toISOString(),
     },
   });
+  reconcileCaseTasks(payload);
   const bridgeResult = runSqliteBridge("save_state", payload);
   const committedState = bridgeResult ? runSqliteBridge("load_state") || payload : payload;
   try {
