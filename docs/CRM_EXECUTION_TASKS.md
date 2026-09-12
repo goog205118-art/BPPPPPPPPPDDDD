@@ -6,8 +6,8 @@
 
 - 建立日期：2026-09-11
 - 当前里程碑：`CRM-60-02` 受控定时 AI 建议
-- 总体状态：`active`
-- 本轮范围：在既有默认关闭的定时收件同步后，增加默认关闭、可审计、仅生成待审核建议的定时 AI 步骤；不得自动发信或推进高风险阶段。
+- 总体状态：`done`
+- 本轮范围：已完成默认关闭、可审计、仅生成待审核建议的定时 AI 步骤；不得自动发信或推进高风险阶段。
 - 数据原则：不改动正式业务资料、不暴露邮箱授权码或 AI Key。
 - 自动化原则：AI 只摘要、建议和起草；发信、价格/条款确认、寄样、签收、发布和结案等高风险动作必须人工确认。
 
@@ -37,12 +37,12 @@
 
 | 项目 | 当前值 |
 | --- | --- |
-| 当前任务 | `CRM-60-02` |
-| 当前状态 | `active` |
-| 当前目标 | 设计定时生成“待审核 AI 建议”；不自动发信、不自动推进阶段。 |
-| 已完成前序 | `CRM-00` 基线与执行治理；`CRM-10` Case 模型、兼容迁移、Case 中心展示与阶段审计；`CRM-20` 今日推进与任务生命周期；`CRM-30` 邮件分诊与可靠归档；`CRM-40-01` 至 `CRM-40-04` 人工主导的 AI 跟进工作台。 |
+| 当前任务 | 无，等待新增需求先登记编号后再激活。 |
+| 当前状态 | `done` |
+| 当前目标 | 已完成受控定时生成“待审核 AI 建议”；不自动发信、不自动推进阶段。 |
+| 已完成前序 | `CRM-00` 基线与执行治理；`CRM-10` Case 模型、兼容迁移、Case 中心展示与阶段审计；`CRM-20` 今日推进与任务生命周期；`CRM-30` 邮件分诊与可靠归档；`CRM-40-01` 至 `CRM-40-04` 人工主导的 AI 跟进工作台；`CRM-50` 多人协作与存储并发；`CRM-60-01` 受控定时同步；`CRM-60-02` 受控定时 AI 建议；`CRM-70` 联系人身份、投递治理与保留控制。 |
 | 禁止提前启动 | 自动发送、AI 自动推进高风险阶段、全量历史邮箱迁移、附件抓取、HTML/MIME 原文保存。 |
-| 最近已验证基线 | `npm.cmd run check`、`npm.cmd run test:mail-scheduler`、`npm.cmd run test:mail-scheduler-executor`、`npm.cmd run test:compliance-retention`、`npm.cmd run test:delivery-governance`、`npm.cmd run test:contact-identity`、`npm.cmd run test:storage-concurrency`、`npm.cmd run test:storage-record-transaction`、`npm.cmd run test:online-record-store`、`npm.cmd run test:storage-audit-conflict`、`npm.cmd run test:followup-ai-context`、`npm.cmd run test:followup-ai-analysis`、`npm.cmd run test:followup-ai-draft-send`、`npm.cmd run test:followup-ai-stage-application`、`npm.cmd run test:followup-isolation`、`npm.cmd run test:crm-regression`、`npm.cmd run test:case-display`、`npm.cmd run test:action-task-storage`、`npm.cmd run test:today-action-center`、`npm.cmd run test:task-collaboration`、`npm.cmd run test:mail-routing-score`、`npm.cmd run test:mail-triage-console`、`npm.cmd run test:mail-triage-case-actions`、`npm.cmd run test:mail-triage-lead`、Python AST 解析与 `git diff --check` 均通过；隔离空存储下的 `/api/mail/scheduler/check` 返回 `skipped`、零账户且未启动 IMAP。 |
+| 最近已验证基线 | `npm.cmd run check`、`npm.cmd run test:mail-ai-suggestions`、`npm.cmd run test:mail-ai-suggestions-runtime`、`npm.cmd run test:mail-ai-suggestions-ui`、`npm.cmd run test:mail-scheduler`、`npm.cmd run test:mail-scheduler-executor`、`npm.cmd run test:compliance-retention`、`npm.cmd run test:delivery-governance`、`npm.cmd run test:contact-identity`、`npm.cmd run test:storage-concurrency`、`npm.cmd run test:storage-record-transaction`、`npm.cmd run test:online-record-store`、`npm.cmd run test:storage-audit-conflict`、`npm.cmd run test:followup-ai-context`、`npm.cmd run test:followup-ai-analysis`、`npm.cmd run test:followup-ai-draft-send`、`npm.cmd run test:followup-ai-stage-application`、`npm.cmd run test:followup-isolation`、`npm.cmd run test:crm-regression`、`npm.cmd run test:case-display`、`npm.cmd run test:action-task-storage`、`npm.cmd run test:today-action-center`、`npm.cmd run test:task-collaboration`、`npm.cmd run test:mail-routing-score`、`npm.cmd run test:mail-triage-console`、`npm.cmd run test:mail-triage-case-actions`、`npm.cmd run test:mail-triage-lead`、Python AST 解析与 `git diff --check` 均通过；隔离空存储下的 `/api/mail/scheduler/check` 返回 `skipped`、零账户且未启动 IMAP。 |
 
 ## 总体闭环与完成定义
 
@@ -112,7 +112,7 @@
 | ID | 优先级 | 状态 | 工作项 | 前置 | 验收标准 |
 | --- | --- | --- | --- | --- | --- |
 | `CRM-60-01` | P1 | `done` | 定义定时 IMAP 同步的开关、频率、邮箱范围、日志、失败重试、幂等与告警。 | `CRM-20-03`, `CRM-30-03`, `CRM-50-03` | 仅在人工链路验收后解锁；可随时关闭，失败不重复导入或丢失邮件。 |
-| `CRM-60-02` | P2 | `active` | 定时触发 AI 仅生成“待审核建议”，绝不自动发信或自动推进高风险阶段。 | `CRM-40-04`, `CRM-60-01` | 所有建议进入今日推进并等待人工审核。 |
+| `CRM-60-02` | P2 | `done` | 定时触发 AI 仅生成“待审核建议”，绝不自动发信或自动推进高风险阶段。 | `CRM-40-04`, `CRM-60-01` | 所有建议进入今日推进并等待人工审核。 |
 
 ### CRM-70：联系人身份与投递治理
 
@@ -198,6 +198,7 @@
 | 2026-09-12（America/Los_Angeles） | `CRM-60-01` | `active -> done` | `tools/mail-scheduler-domain.cjs`、`tools/mail-scheduler-executor.cjs`、`tools/mail-scheduler-regression-test.cjs`、`tools/mail-scheduler-executor-regression-test.cjs`、`tools/mail-sync.cjs`、`tools/local-server.cjs`、`api/[...route].mjs`、`app/index.html`、`app/app.js`、`app/styles.css`、`package.json`、`README.md`、`DEPLOY_VERCEL.md`、`docs/SCHEMA.md`、`docs/CURRENT_STATUS.md`、`docs/CRM_EXECUTION_TASKS.md` | `npm.cmd run check`；调度器、保留、投递、联系人、并发/事务/线上记录/审计、AI 上下文与人工确认、Case/任务/分诊全部隔离回归通过；Python AST 与 `git diff --check` 通过。空白临时存储启动 `http://localhost:4197` 后，`GET /api/mail/settings` 返回零账户和 `automation.enabled=false`，`POST /api/mail/scheduler/check` 返回 `ok=true`、`status=skipped`、零结果，证明默认不发起 IMAP。Playwright 因受限环境无法安装，未宣称浏览器自动化实测。 | `b9e7b86`（功能提交） | 数据影响：未读取或写入正式业务资料，未连接真实 IMAP、SMTP、AI 或 Vercel Blob；仅在隔离临时目录创建测试运行数据，服务进程已停止。调度器默认关闭；本地还需 `MAIL_AUTOMATION_LOCAL_ENABLED=true`，线上还需部署者设置 `CRON_SECRET` 并显式添加 Cron。全局运行锁保护共享邮箱设置，账户短租约防重叠；歧义邮件仍进人工分诊。回滚：`git revert b9e7b86`；不删除已有邮箱设置或业务状态。核对：未重复已完成的 Case、任务、分诊、AI、存储、联系人或投递工作；未启动自动发送、自动阶段推进、定时 AI、全量历史/附件/HTML/MIME 同步。下一门槛：`CRM-60-02` 保持 `deferred`，仅在用户单独批准且先定义建议审核、频率、可见日志和关闭机制后才可激活。 |
 | 2026-09-12（America/Los_Angeles） | `CRM-60-02` | `deferred -> active` | `docs/CRM_EXECUTION_TASKS.md` | 用户的持续目标已明确要求跟进本台账至全部落地。已复读 `CRM-60-01` 受控同步实现、`CRM-40-01` 至 `CRM-40-04` AI 人工确认链路、任务中心、审计和存储并发基线；现有 `aiSuggestionsEnabled` 仅为未接线占位，不能误报为已实现。 | 待提交 | 本阶段只对已同步、唯一归属、存在待处理回信的同品牌 Case 生成可审核建议；默认关闭、按 Case/新邮件去重、可设最低间隔、记录来源/模型/结果/失败，且不发信、不改 Case 阶段、不创建不可撤销动作。下一门槛：先完成领域契约与隔离回归，再接入定时执行器和审核界面。 |
 | 2026-09-12（America/Los_Angeles） | `CRM-60-02` | 保持 `active`：领域契约完成 | `tools/mail-ai-suggestion-domain.cjs`、`tools/mail-ai-suggestion-regression-test.cjs`、`tools/crm-domain.cjs`、`tools/mail-scheduler-domain.cjs`、`package.json` | `npm.cmd run test:mail-ai-suggestions`、`npm.cmd run test:mail-scheduler`、`npm.cmd run test:mail-scheduler-executor`、`npm.cmd run test:crm-regression`、`npm.cmd run check` 与 `git diff --check` 全部通过。专项回归证明：默认关闭、手动来源绝不调用 AI、唯一同品牌未读回信才生成 `pending_review` 建议、Case + 触发事件幂等去重、账户范围/最小间隔限制、失败记录脱敏且不改变 Case 阶段或未读标记，并与原有 `new_reply` 并存生成 `ai_suggestion_review` 待办。 | `668f845`（功能提交） | 数据影响：仅新增纯领域模块与隔离测试，不读取或写入正式业务资料，未连接真实 IMAP、SMTP、AI 或 Vercel Blob；未接入任何运行时调度路径。回滚：`git revert 668f845`。核对：已复读 `CRM-60-01` 和完整任务表，未重复已完成的受控同步、Case、任务、分诊、人工 AI、并发、联系人或投递治理；未启动自动发送、自动阶段推进、全量历史/附件/HTML/MIME 同步。下一门槛：接入调度执行器，且仅允许 `local_timer` / `vercel_cron` 在同步成功后调用，并以版本化第二次保存记录建议。 |
+| 2026-09-12（America/Los_Angeles） | `CRM-60-02` | `active -> done` | `api/[...route].mjs`、`tools/local-server.cjs`、`tools/mail-ai-suggestion-domain.cjs`、`tools/mail-scheduler-domain.cjs`、`tools/mail-scheduler-executor.cjs`、`tools/online-record-store.cjs`、`tools/sqlite_store.py`、`app/index.html`、`app/app.js`、`app/styles.css`、`package.json`、`tools/mail-ai-suggestion-runtime-regression-test.cjs`、`tools/mail-ai-suggestion-ui-regression-test.cjs`、存储回归 | `npm.cmd run check`、`npm.cmd run test:mail-ai-suggestions`、`npm.cmd run test:mail-ai-suggestions-runtime`、`npm.cmd run test:mail-ai-suggestions-ui`、`npm.cmd run test:mail-scheduler-executor`、`npm.cmd run test:followup-ai-analysis`、`npm.cmd run test:storage-concurrency`、`npm.cmd run test:today-action-center` 与 `git diff --check` 全部通过。运行时回归验证：成功的 `local_timer` / `vercel_cron` 同步后才可能调用模型；手动同步与强制手动执行均不会调用模型；默认关闭、账户范围、最小间隔、单次上限、同一 Case + 回信事件去重、失败脱敏、版本冲突后二次保存合并且绝不重复模型调用均已验证。界面回归验证：设置页保留 AI 调度状态/历史，Case 只读展示建议并仅引导进入既有人工研判。 | `bf51496`（功能提交） | 数据影响：未读取或写入正式业务资料，未连接真实 IMAP、SMTP、AI 或 Vercel Blob；仅执行隔离测试。新增建议持久化兼容本地 SQLite、Local API 与线上记录存储；建议只生成 `ai_suggestion_review` 待办，不发信、不清除未读、不自动改变任何阶段。回滚：`git revert bf51496`。核对：已全览 `CRM-00` 至 `CRM-70` 任务表和上一条日志；本阶段未重复定时同步、Case、今日推进、邮件分诊、人工 AI、并发、联系人或投递治理；自动发送、高风险自动推进、全量历史邮件、附件、HTML/MIME 原文存储仍未启动。下一门槛：有新增需求时，先登记新的任务编号和验收标准，方可激活。 |
 
 ## 阶段完成记录模板
 
