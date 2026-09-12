@@ -37,9 +37,9 @@
 
 | 项目 | 当前值 |
 | --- | --- |
-| 当前任务 | `CRM-50-03` |
+| 当前任务 | `CRM-50-04` |
 | 当前状态 | `planned` |
-| 当前目标 | 将线上 Blob 全量状态覆盖迁移到具备记录级并发控制的数据后端或服务层，避免跨浏览器和邮件同步互相覆盖。 |
+| 当前目标 | 增加变更审计、冲突处理界面及按实体恢复。 |
 | 已完成前序 | `CRM-00` 基线与执行治理；`CRM-10` Case 模型、兼容迁移、Case 中心展示与阶段审计；`CRM-20` 今日推进与任务生命周期；`CRM-30` 邮件分诊与可靠归档；`CRM-40-01` 至 `CRM-40-04` 人工主导的 AI 跟进工作台。 |
 | 禁止提前启动 | `CRM-60` 定时同步、自动发送、AI 自动推进高风险阶段。 |
 | 最近已验证基线 | `npm.cmd run check`、`npm.cmd run test:followup-ai-stage-application`、`npm.cmd run test:followup-ai-draft-send`、`npm.cmd run test:followup-ai-analysis`、`npm.cmd run test:followup-ai-context`、`npm.cmd run test:followup-isolation`、`npm.cmd run test:crm-regression`、`npm.cmd run test:case-display`、`npm.cmd run test:action-task-storage`、`npm.cmd run test:today-action-center`、`npm.cmd run test:task-collaboration`、`npm.cmd run test:mail-routing-score`、`npm.cmd run test:mail-triage-console`、`npm.cmd run test:mail-triage-case-actions`、`npm.cmd run test:mail-triage-lead`、Python AST 解析、`git diff --check`（功能提交 `4fb015b`；验证证据与完成记录已在本台账检查点归档）。 |
@@ -104,7 +104,7 @@
 | --- | --- | --- | --- | --- | --- |
 | `CRM-50-01` | P1 | `done` | 为本地 SQLite 和线上存储制定并发策略：记录级写入、版本号/乐观锁、冲突响应与恢复提示。 | `CRM-00-03` | 两个用户或“同步 + 手工编辑”同时操作时，后写不会静默覆盖前写。 |
 | `CRM-50-02` | P1 | `done` | 将本地全表删除重写替换为针对实体的事务性增删改；保留可恢复备份。 | `CRM-50-01` | 多次保存只写入受影响记录；失败可回滚，不损坏其他实体。 |
-| `CRM-50-03` | P1 | `planned` | 将线上 Blob 全量状态覆盖迁移到具备记录级并发控制的数据后端或服务层。 | `CRM-50-01` | 跨浏览器并发可检测和解决冲突；邮件同步不覆盖人工编辑。 |
+| `CRM-50-03` | P1 | `active` | 将线上 Blob 全量状态覆盖迁移到具备记录级并发控制的数据后端或服务层。 | `CRM-50-01` | 跨浏览器并发可检测和解决冲突；邮件同步不覆盖人工编辑。 |
 | `CRM-50-04` | P2 | `planned` | 增加变更审计、冲突处理界面及按实体恢复。 | `CRM-50-02`, `CRM-50-03` | 可查看谁何时更改，冲突可选择保留版本或合并字段。 |
 
 ### CRM-60：定时同步与受控自动建议
@@ -184,6 +184,8 @@
 
 | 2026-09-12（America/New_York） | `CRM-50-02` | `planned -> active` | `docs/CRM_EXECUTION_TASKS.md` | 已复读当前执行指针与最后三条阶段记录；确认 `CRM-50-01` 已通过版本冲突回归，但 `tools/sqlite_store.py` 仍由 `save_state` 删除各表后整体重写。 | 待提交 | 本阶段只将本地 SQLite 保存改为记录级事务性增删改，保留全局版本校验，并增加可恢复备份、失败回滚与隔离回归；不启动 `CRM-50-03/04`、`CRM-60`、自动发信或 AI 自动推进高风险阶段。 |
 | 2026-09-12（America/New_York） | `CRM-50-02` | `active -> done` | `tools/sqlite_store.py`、`docs/SCHEMA.md`、`tools/storage-record-transaction-regression-test.cjs`、`package.json` | `npm.cmd run test:storage-record-transaction`、`npm.cmd run check`、`npm.cmd run test:storage-concurrency`、`npm.cmd run test:crm-regression`、`npm.cmd run test:followup-isolation`、`npm.cmd run test:followup-ai-context`、`npm.cmd run test:followup-ai-draft-send`、`npm.cmd run test:mail-triage-case-actions`、Python AST 解析与 `git diff --check` 全部通过。专项回归证明修改记录不会触发整表删除、移除记录只删除目标行、异常事务整体回滚、保存前 `.bak` 生成且可恢复上一版本。 | `04697a9`（功能提交） | 数据影响：未读取或写入正式业务资料，未连接真实 IMAP、SMTP 或 AI；本地 SQLite 改为按表内 `id` 增改删，新增保存前自包含 `.bak` 恢复点与 `restore_backup` CLI，`state.json` 继续作为镜像。回滚：`git revert 04697a9`；恢复：执行 `sqlite_store.py restore_backup <db> <state_json>`。核对：已复读 `CRM-00` 至 `CRM-50-01` 完成证据，未重复已完成任务；未启动 `CRM-50-03/04`、`CRM-60` 定时同步、自动发信或 AI 自动推进高风险阶段。下一门槛：仅在明确启动后进入 `CRM-50-03`，先设计线上记录级 CAS/服务层与隔离回归，不直接改线上正式数据。 |
+| 2026-09-12（America/New_York） | `CRM-50-03` | `planned -> active` | `docs/CRM_EXECUTION_TASKS.md` | 已复读 `CRM-50-02` 完成记录与当前工作区；确认线上 `api/[...route].mjs` 仍通过同一个 `state.json` Blob 做全量覆盖，当前阶段只处理线上服务层，不改本地 SQLite、定时同步或自动高风险动作。 | 待提交 | 计划：引入追加式线上记录操作日志和服务端合并/冲突判定；兼容现有快照读取，验证不同实体并发合并、同一实体冲突、不跨品牌覆盖和旧快照迁移；不读取或写入正式线上资料。 |
+| 2026-09-12（America/New_York） | `CRM-50-03` | `active -> done` | `api/[...route].mjs`、`tools/online-record-store.cjs`、`tools/online-record-store-regression-test.cjs`、`tools/storage-concurrency-regression-test.cjs`、`docs/SCHEMA.md`、`package.json` | `npm.cmd run test:online-record-store`、`npm.cmd run test:storage-concurrency`、`npm.cmd run check`、`npm.cmd run test:crm-regression`、`npm.cmd run test:followup-isolation`、`npm.cmd run test:followup-ai-context`、`npm.cmd run test:followup-ai-draft-send`、`npm.cmd run test:mail-triage-case-actions`、`git diff --check` 全部通过。专项回归证明旧快照只读兼容、不同记录的陈旧保存可合并、同一记录冲突返回 `409 version_conflict`、冲突诊断可返回、操作日志不把 `_storageConflicts` 写入业务补丁。 | `bf7cf41`（功能提交） | 数据影响：未读取或写入正式线上资料，未连接真实 IMAP、SMTP 或 AI；线上新保存追加 `resource-workbench/state-operations/<operation-id>.json`，旧 `resource-workbench/state.json` 不再被保存覆盖。回滚：`git revert bf7cf41`；已写入的操作日志需在回滚前保留或按后续维护脚本处理，不直接删除线上 Blob。核对：已复读 `CRM-00` 至 `CRM-50-02` 完成证据，未重复本地 SQLite 事务改造；未启动 `CRM-50-04` 冲突界面/恢复、`CRM-60` 定时同步、自动发信或 AI 自动推进高风险阶段。下一门槛：仅激活 `CRM-50-04`，开始前先读取本台账当前指针与最后三条日志。 |
 
 ## 阶段完成记录模板
 
