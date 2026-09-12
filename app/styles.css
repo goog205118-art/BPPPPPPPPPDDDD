@@ -6712,6 +6712,151 @@ body.access-locked .app-shell {
   gap: 4px;
 }
 
+.storage-conflict-modal {
+  position: fixed;
+  z-index: 86;
+  inset: 0;
+  display: none;
+}
+
+.storage-conflict-modal:not(.hidden) {
+  display: grid;
+  place-items: center;
+}
+
+.storage-conflict-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(3, 8, 14, 0.82);
+  backdrop-filter: blur(3px);
+}
+
+.storage-conflict-dialog {
+  position: relative;
+  display: grid;
+  width: min(760px, calc(100vw - 28px));
+  max-height: min(720px, calc(100vh - 28px));
+  overflow: hidden;
+  border: 1px solid #a56e4d;
+  border-radius: 6px;
+  background: #14202b;
+  box-shadow: 0 28px 80px rgba(0, 0, 0, 0.62);
+}
+
+.storage-conflict-dialog > .editor-head {
+  min-height: 52px;
+  padding: 9px 12px;
+  border-bottom: 1px solid #4e3e38;
+  background: #241f20;
+}
+
+.storage-conflict-dialog > .editor-head h2 {
+  color: #f3d5a8;
+}
+
+.storage-conflict-body {
+  display: grid;
+  min-height: 0;
+  gap: 9px;
+  overflow: auto;
+  padding: 12px;
+  scrollbar-color: #7c5a48 #111a24;
+}
+
+.storage-conflict-alert {
+  display: grid;
+  gap: 3px;
+  padding: 9px 10px;
+  border: 1px solid #845a42;
+  border-left: 3px solid #d08a53;
+  border-radius: 5px;
+  background: #2b2323;
+  color: #e5c7a4;
+  font-size: 0.7rem;
+  line-height: 1.45;
+}
+
+.storage-conflict-alert strong {
+  color: #ffd69b;
+  font-size: 0.74rem;
+}
+
+.storage-conflict-body > .panel-hint {
+  margin: 0;
+  color: #a9bac8;
+  font-size: 0.68rem;
+  line-height: 1.45;
+}
+
+.storage-conflict-list {
+  display: grid;
+  gap: 7px;
+}
+
+.storage-conflict-item {
+  display: grid;
+  gap: 5px;
+  padding: 9px 10px;
+  border: 1px solid #354d61;
+  border-left: 3px solid #c58a52;
+  border-radius: 5px;
+  background: #182633;
+  color: #c9d8e3;
+  font-size: 0.68rem;
+  line-height: 1.4;
+}
+
+.storage-conflict-item-head {
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.storage-conflict-item-head strong {
+  min-width: 0;
+  overflow: hidden;
+  color: #e5f0fa;
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.storage-conflict-item-head span {
+  flex: 0 0 auto;
+  color: #9eb4c5;
+  font-size: 0.63rem;
+}
+
+.storage-conflict-item p {
+  margin: 0;
+  color: #b2c4d1;
+}
+
+.storage-conflict-item label {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  width: fit-content;
+  color: #c7d8e4;
+  cursor: pointer;
+}
+
+.storage-conflict-item input {
+  width: auto;
+  min-height: 0;
+  margin: 0;
+  accent-color: #6ba9d7;
+}
+
+.storage-conflict-dialog > .editor-actions {
+  margin: 0;
+  padding: 9px 12px;
+  border-top: 1px solid #304256;
+  background: #182633;
+}
+
 @media (max-width: 900px) {
   .today-action-filters {
     grid-template-columns: repeat(3, minmax(0, 1fr));
@@ -6742,6 +6887,12 @@ body.access-locked .app-shell {
   .followup-contact-form {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
+
+  .storage-conflict-item-head {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 2px;
+  }
 }
 
 @media (max-width: 560px) {
@@ -6770,6 +6921,22 @@ body.access-locked .app-shell {
 
   .followup-detail-body {
     padding: 7px;
+  }
+
+  .storage-conflict-dialog {
+    width: calc(100vw - 12px);
+    max-height: calc(100vh - 12px);
+    border-radius: 5px;
+  }
+
+  .storage-conflict-body,
+  .storage-conflict-dialog > .editor-actions {
+    padding: 8px;
+  }
+
+  .storage-conflict-dialog > .editor-actions {
+    display: grid;
+    grid-template-columns: 1fr;
   }
 
   .followup-detail-overview,

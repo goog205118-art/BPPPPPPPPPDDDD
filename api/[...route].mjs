@@ -26,7 +26,10 @@ const {
   rollbackLegacyCaseMigration,
 } = require("../tools/case-migration.cjs");
 const { reconcileCaseTasks } = require("../tools/crm-domain.cjs");
-const { createOnlineRecordStore } = require("../tools/online-record-store.cjs");
+const {
+  createOnlineRecordStore,
+  restoreEntityAtVersion,
+} = require("../tools/online-record-store.cjs");
 
 const defaultState = {
   meta: { version: 1, updatedAt: new Date().toISOString() },
@@ -550,10 +553,14 @@ async function loadState() {
 
 async function saveState(nextState, expectedVersion = nextState?.expectedVersion) {
   const payload = { ...(nextState || {}) };
+  const audit = payload._saveAudit && typeof payload._saveAudit === "object"
+    ? { ...payload._saveAudit }
+    : {};
   delete payload.expectedVersion;
+  delete payload._saveAudit;
   const normalized = normalizeBusinessState(payload);
   reconcileCaseTasks(normalized);
-  return getOnlineStateStore().save(normalized, expectedVersion);
+  return getOnlineStateStore().save(normalized, expectedVersion, audit);
 }
 
 async function resumeCaseMigration() {
@@ -2376,7 +2383,7 @@ export default async function handler(req, res) {
     if (req.method === "POST" && pathname === "/api/state") {
       try {
         const body = JSON.parse((await readBody(req)) || "{}");
-      const state = await saveState(body, body.expectedVersion);
+        const state = await saveState(body, body.expectedVersion);
         json(res, 200, { ok: true, state });
       } catch (error) {
         json(res, Number(error.statusCode) || 400, {
@@ -2385,6 +2392,59 @@ export default async function handler(req, res) {
           error: error.message,
           actualVersion: error.actualVersion,
           current: error.current,
+          conflicts: error.conflicts || [],
+        });
+      }
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/state/restore-entity") {
+      try {
+        const body = JSON.parse((await readBody(req)) || "{}");
+        const table = String(body.table || "").trim();
+        const id = String(body.id || "").trim();
+        const targetVersion = Number(body.targetVersion);
+        const expectedVersion = Number(body.expectedVersion);
+        const bundle = await getOnlineStateStore().load();
+        if (!table || !id || !Number.isInteger(targetVersion) || !Number.isInteger(expectedVersion)) {
+          json(res, 400, { ok: false, code: "invalid_restore_request", error: "恢复请求缺少有效的表、记录 ID、目标版本或当前版本。" });
+          return;
+        }
+        if (expectedVersion !== Number(bundle.state?.meta?.version)) {
+          json(res, 409, {
+            ok: false,
+            code: "version_conflict",
+            error: "线上版本已变化，请重新读取后再恢复。",
+            actualVersion: bundle.state?.meta?.version,
+            current: bundle.state,
+            conflicts: bundle.conflicts || [],
+          });
+          return;
+        }
+        const restored = restoreEntityAtVersion(
+          bundle,
+          table,
+          id,
+          targetVersion,
+          normalizeBusinessState,
+        );
+        if (!restored) {
+          json(res, 400, { ok: false, code: "restore_unavailable", error: "目标历史版本不存在，或该实体不允许按记录恢复。" });
+          return;
+        }
+        const audit = body.audit && typeof body.audit === "object"
+          ? { ...body.audit, source: body.audit.source || "manual_restore" }
+          : { source: "manual_restore", reason: `从版本 ${targetVersion} 恢复 ${table}/${id}` };
+        const state = await saveState({ ...restored, _saveAudit: audit }, expectedVersion);
+        json(res, 200, { ok: true, state, restored: { table, id, targetVersion } });
+      } catch (error) {
+        json(res, Number(error.statusCode) || 400, {
+          ok: false,
+          code: error.code || "restore_failed",
+          error: error.message,
+          actualVersion: error.actualVersion,
+          current: error.current,
+          conflicts: error.conflicts || [],
         });
       }
       return;

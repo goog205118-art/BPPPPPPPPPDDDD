@@ -38,6 +38,10 @@
 
 线上 Vercel Blob 兼容层保留旧 `state.json` 作为基线快照，新的保存不再覆盖该快照，而是写入 `state-operations/<operation-id>.json` 唯一操作日志。服务层按 `表名 + 记录 id` 合并不同实体的陈旧修改；同一实体基于同一历史版本产生不同内容时返回 `409 version_conflict`，要求重新读取并人工处理。操作日志可重放生成当前状态，后续可在独立维护窗口增加快照压缩，不影响在线写入。
 
+每条线上操作日志还保留 `audit.actorId`、`audit.actorName`、`audit.source`、`audit.reason`、`createdAt`，这些字段只用于审计和冲突提示，不会进入业务状态补丁。发生同记录冲突时，`/api/state` 返回结构化 `conflicts`，前端默认保留服务端版本，并允许人工逐条选择“保留服务端”或“保留当前页面”后，以最新服务端版本为基线再次保存；未选择的其他记录不会被静默覆盖。线上可通过 `POST /api/state/restore-entity` 在携带当前 `expectedVersion` 的前提下，将单个实体恢复到可用历史版本；不允许恢复 `meta`，目标版本不存在或版本已变化时拒绝操作。
+
+本地保存成功后会尽力追加一行 `<storageDir>/storage-audit.jsonl`，记录操作者、来源、原因和版本。该文件是审计旁车，不参与业务状态读取、版本冲突或恢复；本地当前只提供 SQLite `.bak` 的整体恢复，不把旁车日志伪装成任意历史实体版本。
+
 ## resources
 
 资源库主表，用于记录 Deal 站、社群、联盟、媒体等资源。

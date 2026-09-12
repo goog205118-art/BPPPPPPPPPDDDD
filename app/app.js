@@ -595,6 +595,7 @@ const state = {
   outreach: { open: false, leadIds: [], result: null },
   globalSearch: { open: false, query: "" },
   creatorDrawer: { open: false, creatorId: null },
+  storageConflict: null,
   mailImport: { open: false, followUpId: null, messages: [], status: "" },
   followUpBoardFilter: { query: "", stage: "", priority: "", overdueOnly: false },
   followUpDetail: {
@@ -795,6 +796,13 @@ const elements = {
   followUpBatchBackdrop: document.getElementById("followUpBatchBackdrop"),
   closeFollowUpBatchBtn: document.getElementById("closeFollowUpBatchBtn"),
   followUpBatchBody: document.getElementById("followUpBatchBody"),
+  storageConflictModal: document.getElementById("storageConflictModal"),
+  storageConflictBackdrop: document.getElementById("storageConflictBackdrop"),
+  storageConflictBody: document.getElementById("storageConflictBody"),
+  closeStorageConflictBtn: document.getElementById("closeStorageConflictBtn"),
+  storageConflictReloadBtn: document.getElementById("storageConflictReloadBtn"),
+  storageConflictMergeBtn: document.getElementById("storageConflictMergeBtn"),
+  storageConflictCloseBtn: document.getElementById("storageConflictCloseBtn"),
 };
 
 const formSections = {
@@ -1765,7 +1773,16 @@ async function persist() {
     filterPreferences: normalizeFilterPreferences(state.data.meta.filterPreferences),
     timeZones: normalizeTimeZones(state.data.meta.timeZones),
   };
-  const payloadState = { ...state.data, expectedVersion };
+  const payloadState = {
+    ...state.data,
+    expectedVersion,
+    _saveAudit: {
+      actorId: text(sessionStorage.getItem("workbench-actor-id")),
+      actorName: text(sessionStorage.getItem("workbench-actor-name")) || "当前用户",
+      source: `web:${state.activeTab}`,
+      reason: `保存${state.activeTab === SETTINGS_TAB.key ? "设置" : "业务资料"}`,
+    },
+  };
   const payload = JSON.stringify(payloadState, null, 2);
   const response = await apiFetch(API_STATE, {
     method: "POST",
@@ -1778,7 +1795,16 @@ async function persist() {
     error.code = errorPayload.code || "save_failed";
     error.actualVersion = errorPayload.actualVersion;
     error.current = errorPayload.current;
+    error.conflicts = Array.isArray(errorPayload.conflicts) ? errorPayload.conflicts : [];
     if (response.status === 409 || error.code === "version_conflict") {
+      state.storageConflict = {
+        message: error.message,
+        actualVersion: error.actualVersion,
+        current: error.current ? clone(error.current) : null,
+        local: clone(state.data),
+        conflicts: error.conflicts,
+      };
+      renderStorageConflict();
       error.message = `${error.message} 当前编辑内容未自动覆盖服务端数据，请先重新读取后再合并保存。`;
     }
     throw error;
@@ -1788,6 +1814,92 @@ async function persist() {
     state.data = ensureStateShape(result.state);
   }
   localStorage.setItem(STORAGE_FALLBACK, JSON.stringify(state.data, null, 2));
+}
+
+function storageConflictEntity(conflict, source) {
+  const table = text(conflict?.table);
+  const id = text(conflict?.id) || text(conflict?.key).split("/").pop();
+  const rows = Array.isArray(source?.[table]) ? source[table] : [];
+  return { table, id, row: rows.find((item) => text(item?.id) === id) || null };
+}
+
+function renderStorageConflict() {
+  const conflict = state.storageConflict;
+  if (!conflict) {
+    elements.storageConflictModal.classList.add("hidden");
+    elements.storageConflictModal.setAttribute("aria-hidden", "true");
+    return;
+  }
+  const items = Array.isArray(conflict.conflicts) && conflict.conflicts.length
+    ? conflict.conflicts
+    : [{ table: "meta", id: "", key: "元数据设置" }];
+  elements.storageConflictBody.innerHTML = `
+    <div class="storage-conflict-alert">
+      <strong>当前版本 ${escapeHtml(conflict.actualVersion || "未知")}</strong>
+      <span>${escapeHtml(conflict.message || "服务端数据已发生变化。")}</span>
+    </div>
+    <p class="panel-hint">逐条选择要保留的版本。默认保留服务端版本；未列出的其他记录会继续保留，不会被覆盖。</p>
+    <div class="storage-conflict-list">
+      ${items.map((item, index) => {
+        const local = storageConflictEntity(item, conflict.local);
+        const remote = storageConflictEntity(item, conflict.current);
+        const localLabel = local.row ? `${local.row.name || local.row.title || local.row.subject || local.id}` : "本地已删除";
+        const remoteLabel = remote.row ? `${remote.row.name || remote.row.title || remote.row.subject || remote.id}` : "服务端已删除";
+        const audit = item.competing || {};
+        return `
+          <article class="storage-conflict-item">
+            <div class="storage-conflict-item-head">
+              <strong>${escapeHtml(item.key || `${item.table}/${item.id}`)}</strong>
+              <span>${escapeHtml(audit.actorName || audit.source || "服务端更新")} ${escapeHtml(audit.createdAt || "")}</span>
+            </div>
+            <p>服务端：${escapeHtml(remoteLabel)}　|　当前页面：${escapeHtml(localLabel)}</p>
+            <label><input type="radio" name="storage-conflict-${index}" value="remote" checked /> 保留服务端</label>
+            <label><input type="radio" name="storage-conflict-${index}" value="local" /> 保留当前页面</label>
+          </article>
+        `;
+      }).join("")}
+    </div>
+  `;
+  elements.storageConflictModal.classList.remove("hidden");
+  elements.storageConflictModal.setAttribute("aria-hidden", "false");
+}
+
+function closeStorageConflict() {
+  state.storageConflict = null;
+  renderStorageConflict();
+}
+
+function reloadStorageConflict() {
+  const current = state.storageConflict?.current;
+  if (current) state.data = ensureStateShape(current);
+  closeStorageConflict();
+  render();
+}
+
+async function mergeStorageConflict() {
+  const conflict = state.storageConflict;
+  if (!conflict?.current) return;
+  const merged = clone(conflict.current);
+  const items = Array.isArray(conflict.conflicts) && conflict.conflicts.length
+    ? conflict.conflicts
+    : [];
+  items.forEach((item, index) => {
+    const selected = elements.storageConflictBody.querySelector(`input[name="storage-conflict-${index}"]:checked`)?.value;
+    if (selected !== "local") return;
+    const local = storageConflictEntity(item, conflict.local);
+    if (!local.table || local.table === "meta" || !local.id) return;
+    const rows = Array.isArray(merged[local.table]) ? merged[local.table].filter((row) => text(row?.id) !== local.id) : [];
+    if (local.row) rows.push(clone(local.row));
+    merged[local.table] = rows;
+  });
+  state.data = ensureStateShape(merged);
+  closeStorageConflict();
+  render();
+  try {
+    await withActivity("正在合并保存", "正在以服务端最新版本为基线保存人工选择...", () => persist());
+  } catch (error) {
+    elements.importStatus.textContent = error.message || "合并保存失败";
+  }
 }
 
 async function loadAiSettings() {
@@ -9463,6 +9575,13 @@ function bindEvents() {
   elements.followUpBatchBackdrop.addEventListener("click", (event) => {
     if (event.target === elements.followUpBatchBackdrop) closeFollowUpBatch();
   });
+  elements.closeStorageConflictBtn.addEventListener("click", closeStorageConflict);
+  elements.storageConflictCloseBtn.addEventListener("click", closeStorageConflict);
+  elements.storageConflictReloadBtn.addEventListener("click", reloadStorageConflict);
+  elements.storageConflictMergeBtn.addEventListener("click", () => void mergeStorageConflict());
+  elements.storageConflictBackdrop.addEventListener("click", (event) => {
+    if (event.target === elements.storageConflictBackdrop) closeStorageConflict();
+  });
   elements.outreachResult.addEventListener("click", (event) => {
     const copyButton = event.target.closest("[data-copy-outreach]");
     if (copyButton) {
@@ -9537,6 +9656,11 @@ function bindEvents() {
     if (state.followUpBatch.open) {
       event.preventDefault();
       closeFollowUpBatch();
+      return;
+    }
+    if (state.storageConflict) {
+      event.preventDefault();
+      closeStorageConflict();
       return;
     }
     if (state.creatorDrawer.open) {

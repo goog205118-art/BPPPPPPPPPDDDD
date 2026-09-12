@@ -37,6 +37,7 @@ const storageStateFile = path.join(storageDir, "state.json");
 const dbFile = path.join(storageDir, "resource-workbench.sqlite3");
 const aiSettingsFile = path.join(storageDir, "ai-settings.json");
 const mailSettingsFile = path.join(storageDir, "mail-settings.json");
+const storageAuditFile = path.join(storageDir, "storage-audit.jsonl");
 const excelReader = path.join(rootDir, "tools", "excel_to_json.py");
 const sqliteBridge = path.join(rootDir, "tools", "sqlite_store.py");
 const port = Number(process.env.PORT || 4173);
@@ -508,9 +509,39 @@ function loadState() {
   }
 }
 
+function localConflictItems(requestedState, currentState) {
+  const collections = [
+    "brands", "creators", "resources", "leads", "products", "cooperations",
+    "matches", "followUps", "cases", "actionTasks", "actionTaskEvents",
+    "followUpEvents", "contactTracks", "mailInbox", "importHistory",
+  ];
+  const conflicts = [];
+  for (const table of collections) {
+    const requested = new Map((Array.isArray(requestedState?.[table]) ? requestedState[table] : [])
+      .map((row) => [String(row?.id || ""), row]));
+    const current = new Map((Array.isArray(currentState?.[table]) ? currentState[table] : [])
+      .map((row) => [String(row?.id || ""), row]));
+    const ids = new Set([...requested.keys(), ...current.keys()].filter(Boolean));
+    for (const id of ids) {
+      if (JSON.stringify(requested.get(id) ?? null) === JSON.stringify(current.get(id) ?? null)) continue;
+      conflicts.push({
+        table,
+        id,
+        key: `${table}/${id}`,
+        currentVersion: Number(currentState?.meta?.version) || 1,
+        source: "local_sqlite",
+      });
+    }
+  }
+  return conflicts;
+}
+
 function saveState(nextState, expectedVersion = nextState?.expectedVersion) {
   ensureDataFile();
   const requestedVersion = Number(expectedVersion);
+  const audit = nextState?._saveAudit && typeof nextState._saveAudit === "object"
+    ? { ...nextState._saveAudit }
+    : {};
   const payload = normalizeBusinessState({
     ...nextState,
     expectedVersion: Number.isInteger(requestedVersion) ? requestedVersion : undefined,
@@ -527,6 +558,7 @@ function saveState(nextState, expectedVersion = nextState?.expectedVersion) {
     error.statusCode = 409;
     error.actualVersion = bridgeResult.actualVersion;
     error.current = bridgeResult.current;
+    error.conflicts = localConflictItems(payload, bridgeResult.current);
     throw error;
   }
   if (!bridgeResult) {
@@ -537,6 +569,22 @@ function saveState(nextState, expectedVersion = nextState?.expectedVersion) {
     fs.writeFileSync(stateFile, JSON.stringify(committedState, null, 2), "utf8");
   } catch {
     // The project-side JSON mirror is best effort; SQLite remains the source of truth.
+  }
+  try {
+    fs.appendFileSync(
+      storageAuditFile,
+      `${JSON.stringify({
+        createdAt: new Date().toISOString(),
+        actorId: textValue(audit.actorId),
+        actorName: textValue(audit.actorName),
+        source: textValue(audit.source) || "local",
+        reason: textValue(audit.reason),
+        version: committedState.meta?.version,
+      })}\n`,
+      "utf8",
+    );
+  } catch {
+    // Audit sidecar is best effort; SQLite remains the source of truth.
   }
   return committedState;
 }
@@ -2982,6 +3030,7 @@ function handleApi(req, res, pathname) {
             error: error.message,
             actualVersion: error.actualVersion,
             current: error.current,
+            conflicts: error.conflicts || [],
           }),
         );
       });

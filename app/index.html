@@ -689,6 +689,25 @@
       </article>
     </section>
 
+    <section class="storage-conflict-modal hidden" id="storageConflictModal" aria-hidden="true">
+      <div class="storage-conflict-backdrop" id="storageConflictBackdrop"></div>
+      <article class="storage-conflict-dialog" role="dialog" aria-modal="true" aria-labelledby="storageConflictTitle">
+        <header class="editor-head">
+          <div>
+            <h2 id="storageConflictTitle">保存冲突，需要人工确认</h2>
+            <p class="panel-hint" id="storageConflictHint">服务端已有更新，系统没有覆盖任何数据。请选择如何处理。</p>
+          </div>
+          <button type="button" class="close-editor" id="closeStorageConflictBtn" aria-label="关闭冲突窗口" title="关闭">×</button>
+        </header>
+        <section class="storage-conflict-body" id="storageConflictBody"></section>
+        <div class="form-actions editor-actions">
+          <button type="button" class="ghost" id="storageConflictReloadBtn">重新读取服务端版本</button>
+          <button type="button" class="primary" id="storageConflictMergeBtn">按记录合并并保存</button>
+          <button type="button" class="ghost" id="storageConflictCloseBtn">稍后处理</button>
+        </div>
+      </article>
+    </section>
+
     <script type="module" src="./app.js"></script>
   </body>
 </html>

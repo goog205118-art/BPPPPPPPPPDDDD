@@ -157,6 +157,14 @@ function normalizeOperations(rawOperations) {
       id: text(operation.id),
       baseVersion: Number(operation.baseVersion),
       createdAt: text(operation.createdAt),
+      audit: operation.audit && typeof operation.audit === "object"
+        ? {
+            actorId: text(operation.audit.actorId),
+            actorName: text(operation.audit.actorName),
+            source: text(operation.audit.source),
+            reason: text(operation.audit.reason),
+          }
+        : {},
       changes: operation.changes,
     }))
     .filter((operation) => operation.id && Number.isInteger(operation.baseVersion))
@@ -187,6 +195,31 @@ function conflictError(message, current, conflicts = []) {
   error.current = current;
   error.conflicts = clone(conflicts);
   return error;
+}
+
+function auditSummary(operation) {
+  return {
+    operationId: text(operation?.id),
+    createdAt: text(operation?.createdAt),
+    actorId: text(operation?.audit?.actorId),
+    actorName: text(operation?.audit?.actorName),
+    source: text(operation?.audit?.source),
+    reason: text(operation?.audit?.reason),
+  };
+}
+
+function restoreEntityAtVersion(bundle, table, id, targetVersion, normalizeState) {
+  const key = text(id);
+  if (!COLLECTIONS.includes(table) || !key) return null;
+  const historicalState = stateAtVersion(bundle, targetVersion, normalizeState);
+  if (!historicalState) return null;
+  const rows = indexedRows(bundle.state, table);
+  const historicalRow = indexedRows(historicalState, table).get(key);
+  if (historicalRow) rows.set(key, clone(historicalRow));
+  else rows.delete(key);
+  const restored = clone(bundle.state);
+  restored[table] = [...rows.values()];
+  return normalizeState(restored);
 }
 
 function createOnlineRecordStore({
@@ -222,7 +255,7 @@ function createOnlineRecordStore({
     };
   }
 
-  async function save(nextState, expectedVersion = nextState?.expectedVersion) {
+  async function save(nextState, expectedVersion = nextState?.expectedVersion, audit = nextState?._saveAudit) {
     const bundle = await load();
     const requestedVersion = Number(expectedVersion);
     const actualVersion = Number(bundle.state?.meta?.version) || 1;
@@ -257,6 +290,7 @@ function createOnlineRecordStore({
           competingOperationId: operation.id,
           key: conflict,
           baseVersion: operation.baseVersion,
+          competing: auditSummary(operation),
         }];
         throw conflictError(
           `线上数据已被其他操作更新（冲突记录：${conflict}）。请重新读取后再保存，避免覆盖最新修改。`,
@@ -270,6 +304,12 @@ function createOnlineRecordStore({
       id: createOperationId(),
       baseVersion: requestedVersion,
       createdAt: now(),
+      audit: {
+        actorId: text(audit?.actorId),
+        actorName: text(audit?.actorName),
+        source: text(audit?.source) || "web",
+        reason: text(audit?.reason),
+      },
       changes,
     };
     await appendOperation(operation);
@@ -295,7 +335,7 @@ function createOnlineRecordStore({
     return normalizeState(localState);
   }
 
-  return { load, save, buildPatch, applyPatch };
+  return { load, save, buildPatch, applyPatch, restoreEntityAtVersion };
 }
 
 module.exports = {
@@ -305,4 +345,5 @@ module.exports = {
   applyPatch,
   conflictForPatches,
   detectOperationConflicts,
+  restoreEntityAtVersion,
 };
