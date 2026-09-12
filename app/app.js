@@ -1756,29 +1756,38 @@ async function loadState() {
 }
 
 async function persist() {
+  const expectedVersion = Math.max(1, Number(state.data.meta?.version) || 1);
   state.data.meta = {
     ...state.data.meta,
-    version: 1,
+    version: expectedVersion,
     updatedAt: new Date().toISOString(),
     optionSets: { ...(state.data.meta.optionSets || {}) },
     filterPreferences: normalizeFilterPreferences(state.data.meta.filterPreferences),
     timeZones: normalizeTimeZones(state.data.meta.timeZones),
   };
-  const payload = JSON.stringify(state.data, null, 2);
-  localStorage.setItem(STORAGE_FALLBACK, payload);
+  const payloadState = { ...state.data, expectedVersion };
+  const payload = JSON.stringify(payloadState, null, 2);
   const response = await apiFetch(API_STATE, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: payload,
   });
   if (!response.ok) {
-    const error = await response.json().catch(() => ({}));
-    throw new Error(error.error || "保存失败");
+    const errorPayload = await response.json().catch(() => ({}));
+    const error = new Error(errorPayload.error || "保存失败");
+    error.code = errorPayload.code || "save_failed";
+    error.actualVersion = errorPayload.actualVersion;
+    error.current = errorPayload.current;
+    if (response.status === 409 || error.code === "version_conflict") {
+      error.message = `${error.message} 当前编辑内容未自动覆盖服务端数据，请先重新读取后再合并保存。`;
+    }
+    throw error;
   }
   const result = await response.json().catch(() => ({}));
   if (result.state && typeof result.state === "object") {
     state.data = ensureStateShape(result.state);
   }
+  localStorage.setItem(STORAGE_FALLBACK, JSON.stringify(state.data, null, 2));
 }
 
 async function loadAiSettings() {

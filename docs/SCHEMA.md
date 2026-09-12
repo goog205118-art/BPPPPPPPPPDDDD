@@ -175,7 +175,7 @@
 - `next_action`、`next_action_at`
 - `last_outreach_at`
 - `notes`
-- `version`（记录级乐观锁版本；后续实体写入接口必须校验）
+- `version`（状态提交版本；每次 `/api/state` 成功保存递增，客户端保存必须携带读取时的版本。版本不一致返回 `409 version_conflict`，服务端当前状态保留不覆盖；记录级乐观锁仍由各实体的 `version` 字段承担。）
 - `last_stage_changed_at`（最近一次人工确认阶段变更时间）
 - `last_stage_changed_by`（最近一次变更操作者；当前为人工操作、人工编辑或人工确认 AI 建议）
 - `last_stage_change_reason`（最近一次人工阶段变更原因；不能为空）

@@ -412,7 +412,10 @@ function normalizeBusinessState(rawState) {
   return {
     ...defaultState,
     ...state,
-    meta: { version: 1, ...(state.meta || {}) },
+    meta: {
+      ...(state.meta || {}),
+      version: Math.max(1, Number(state.meta?.version) || 1),
+    },
     brands: [...brandsByKey.values()].sort((a, b) => a.name.localeCompare(b.name, "zh-CN")),
     creators,
     resources,
@@ -505,18 +508,30 @@ function loadState() {
   }
 }
 
-function saveState(nextState) {
+function saveState(nextState, expectedVersion = nextState?.expectedVersion) {
   ensureDataFile();
+  const requestedVersion = Number(expectedVersion);
   const payload = normalizeBusinessState({
     ...nextState,
+    expectedVersion: Number.isInteger(requestedVersion) ? requestedVersion : undefined,
     meta: {
       ...(nextState?.meta || {}),
-      version: 1,
       updatedAt: new Date().toISOString(),
     },
   });
   reconcileCaseTasks(payload);
   const bridgeResult = runSqliteBridge("save_state", payload);
+  if (bridgeResult?.ok === false && bridgeResult.code === "version_conflict") {
+    const error = new Error(`数据已被其他操作更新（当前版本 ${bridgeResult.actualVersion}）。请重新读取后再保存，避免覆盖最新修改。`);
+    error.code = bridgeResult.code;
+    error.statusCode = 409;
+    error.actualVersion = bridgeResult.actualVersion;
+    error.current = bridgeResult.current;
+    throw error;
+  }
+  if (!bridgeResult) {
+    throw new Error("本地数据保存失败：SQLite 未返回提交结果，未覆盖现有数据。");
+  }
   const committedState = bridgeResult ? runSqliteBridge("load_state") || payload : payload;
   try {
     fs.writeFileSync(stateFile, JSON.stringify(committedState, null, 2), "utf8");
@@ -539,14 +554,14 @@ function resumeCaseMigration() {
       },
     };
   }
-  saveState(state);
+  saveState(state, state.meta?.version);
   return loadState();
 }
 
 function rollbackCaseMigration() {
   const state = loadState();
   const result = rollbackLegacyCaseMigration(state);
-  saveState(state);
+  saveState(state, state.meta?.version);
   return { result, state: loadState() };
 }
 
@@ -2757,7 +2772,7 @@ function handleApi(req, res, pathname) {
         const settings = saveMailSettings(JSON.parse(body || "{}"));
         const state = loadState();
         const policyResult = applyMailContentPolicy(state, settings);
-        if (policyResult.cleared || policyResult.expired || policyResult.migrated) saveState(state);
+        if (policyResult.cleared || policyResult.expired || policyResult.migrated) saveState(state, state.meta?.version);
         jsonResponse(res, 200, { ok: true, settings: publicMailSettings(settings), policyResult });
       })
       .catch((error) => jsonResponse(res, 400, { ok: false, error: formatMailError(error) }));
@@ -2782,7 +2797,7 @@ function handleApi(req, res, pathname) {
         const account = (settings.accounts || []).find((item) => String(item.id || "") === String(parsed.accountId || "")) || (settings.accounts || []).find((item) => item.enabled);
         if (!account?.enabled) throw new Error("邮箱同步尚未启用。请先在设置页保存并启用对应 IMAP 邮箱。");
         const summary = await syncMailAccount(settings, state, credentialKeyMaterial(), { accountId: account.id, maxPerFolder: parsed.maxPerFolder });
-        saveState(state);
+        saveState(state, state.meta?.version);
         const nextSettings = saveMailSyncResult(settings, summary, account.id);
         jsonResponse(res, 200, { ok: true, summary, settings: publicMailSettings(nextSettings), state });
       })
@@ -2805,7 +2820,7 @@ function handleApi(req, res, pathname) {
         const parsed = JSON.parse(body || "{}");
         const state = loadState();
         const result = await sendMailAccount(loadMailSettings(), state, credentialKeyMaterial(), parsed);
-        saveState(state);
+        saveState(state, state.meta?.version);
         jsonResponse(res, 200, { ok: true, ...result, state });
       })
       .catch((error) => jsonResponse(res, 400, { ok: false, error: formatMailError(error) }));
@@ -2954,11 +2969,21 @@ function handleApi(req, res, pathname) {
     readBody(req)
       .then((body) => {
         const parsed = JSON.parse(body || "{}");
-        const state = saveState(parsed);
+        const state = saveState(parsed, parsed.expectedVersion);
         send(res, 200, JSON.stringify({ ok: true, state }));
       })
       .catch((error) => {
-        send(res, 400, JSON.stringify({ ok: false, error: error.message }));
+        send(
+          res,
+          Number(error.statusCode) || 400,
+          JSON.stringify({
+            ok: false,
+            code: error.code || "save_failed",
+            error: error.message,
+            actualVersion: error.actualVersion,
+            current: error.current,
+          }),
+        );
       });
     return true;
   }

@@ -521,8 +521,33 @@ def normalize_value(value):
 
 def save_state(conn, state):
     create_schema(conn)
-    payload = state or {}
+    payload = dict(state or {})
     meta = payload.get("meta") or {}
+    expected_raw = payload.get("expectedVersion")
+    expected_version = None
+    if expected_raw is not None and str(expected_raw).strip() != "":
+        try:
+            expected_version = int(expected_raw)
+        except (TypeError, ValueError):
+            raise ValueError("保存请求的版本号无效。")
+
+    current = rows_to_state(conn)
+    actual_version = max(1, int(current.get("meta", {}).get("version", 1) or 1))
+    if expected_version is not None and expected_version != actual_version:
+        return {
+            "ok": False,
+            "code": "version_conflict",
+            "actualVersion": actual_version,
+            "current": current,
+        }
+
+    payload.pop("expectedVersion", None)
+    next_version = actual_version + 1
+    payload["meta"] = {
+        **meta,
+        "version": next_version,
+        "updatedAt": meta.get("updatedAt") or current_time_iso(),
+    }
 
     with conn:
         for table in SCHEMA:
@@ -530,9 +555,9 @@ def save_state(conn, state):
 
         conn.execute("DELETE FROM meta")
         for key, value in {
-            **meta,
-            "version": meta.get("version", 1),
-            "updatedAt": meta.get("updatedAt") or current_time_iso(),
+            **payload["meta"],
+            "version": next_version,
+            "updatedAt": payload["meta"]["updatedAt"],
         }.items():
             if key == "version":
                 stored_value = str(value)
@@ -556,6 +581,7 @@ def save_state(conn, state):
                     for key in keys
                 ]
                 conn.execute(insert_sql, values)
+    return {"ok": True, "version": next_version}
 
 
 def seed_from_json_if_needed(conn, state_json_path):
@@ -633,10 +659,13 @@ def main():
     if command == "save_state":
         body = sys.stdin.read().strip() or "{}"
         payload = json.loads(body)
-        save_state(conn, payload)
+        result = save_state(conn, payload)
+        if result and result.get("ok") is False:
+            print(json.dumps(result, ensure_ascii=False))
+            return
         state = rows_to_state(conn)
         write_json_mirror(state_json_path, state)
-        print(json.dumps({"ok": True}, ensure_ascii=False))
+        print(json.dumps({"ok": True, "version": state["meta"]["version"]}, ensure_ascii=False))
         return
 
     if command == "export_csv":

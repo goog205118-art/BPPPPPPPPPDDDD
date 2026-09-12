@@ -392,7 +392,10 @@ function normalizeBusinessState(rawState) {
   return {
     ...defaultState,
     ...state,
-    meta: { version: 1, ...(state.meta || {}) },
+    meta: {
+      ...(state.meta || {}),
+      version: Math.max(1, Number(state.meta?.version) || 1),
+    },
     brands: [...brandsByKey.values()].sort((a, b) => a.name.localeCompare(b.name, "zh-CN")),
     creators,
     resources,
@@ -502,10 +505,27 @@ async function loadState() {
   return normalizeBusinessState(await readBlobJson(STATE_BLOB, defaultState));
 }
 
-async function saveState(nextState) {
+async function saveState(nextState, expectedVersion = nextState?.expectedVersion) {
+  const requestedVersion = Number(expectedVersion);
+  const current = await loadState();
+  const actualVersion = Math.max(1, Number(current?.meta?.version) || 1);
+  if (Number.isInteger(requestedVersion) && requestedVersion !== actualVersion) {
+    const error = new Error(`线上数据已被其他操作更新（当前版本 ${actualVersion}）。请重新读取后再保存，避免覆盖最新修改。`);
+    error.code = "version_conflict";
+    error.statusCode = 409;
+    error.actualVersion = actualVersion;
+    error.current = current;
+    throw error;
+  }
+  const payload = { ...(nextState || {}) };
+  delete payload.expectedVersion;
   const state = normalizeBusinessState({
-    ...nextState,
-    meta: { ...(nextState?.meta || {}), version: 1, updatedAt: new Date().toISOString() },
+    ...payload,
+    meta: {
+      ...(payload.meta || {}),
+      version: actualVersion + 1,
+      updatedAt: new Date().toISOString(),
+    },
   });
   reconcileCaseTasks(state);
   await writeBlobJson(STATE_BLOB, state);
@@ -525,13 +545,13 @@ async function resumeCaseMigration() {
       },
     };
   }
-  return saveState(state);
+  return saveState(state, state.meta?.version);
 }
 
 async function rollbackCaseMigration() {
   const state = await loadState();
   const result = rollbackLegacyCaseMigration(state);
-  const savedState = await saveState(state);
+  const savedState = await saveState(state, state.meta?.version);
   return { result, state: savedState };
 }
 
@@ -2330,9 +2350,19 @@ export default async function handler(req, res) {
     }
 
     if (req.method === "POST" && pathname === "/api/state") {
-      const body = JSON.parse((await readBody(req)) || "{}");
-      const state = await saveState(body);
-      json(res, 200, { ok: true, state });
+      try {
+        const body = JSON.parse((await readBody(req)) || "{}");
+      const state = await saveState(body, body.expectedVersion);
+        json(res, 200, { ok: true, state });
+      } catch (error) {
+        json(res, Number(error.statusCode) || 400, {
+          ok: false,
+          code: error.code || "save_failed",
+          error: error.message,
+          actualVersion: error.actualVersion,
+          current: error.current,
+        });
+      }
       return;
     }
 
@@ -2376,7 +2406,7 @@ export default async function handler(req, res) {
         const settings = await saveMailSettings(body);
         const state = await loadState();
         const policyResult = applyMailContentPolicy(state, settings);
-        if (policyResult.cleared || policyResult.expired || policyResult.migrated) await saveState(state);
+        if (policyResult.cleared || policyResult.expired || policyResult.migrated) await saveState(state, state.meta?.version);
         json(res, 200, { ok: true, settings: publicMailSettings(settings), policyResult });
       } catch (error) {
         json(res, 400, { ok: false, error: formatMailError(error) });
@@ -2403,7 +2433,7 @@ export default async function handler(req, res) {
         const account = (settings.accounts || []).find((item) => textValue(item.id) === textValue(body.accountId)) || (settings.accounts || []).find((item) => item.enabled);
         if (!account?.enabled) throw new Error("邮箱同步尚未启用。请先在设置页保存并启用对应 IMAP 邮箱。");
         const summary = await syncMailAccount(settings, state, credentialKeyMaterial(), { accountId: account.id, maxPerFolder: body.maxPerFolder });
-        await saveState(state);
+        await saveState(state, state.meta?.version);
         const nextSettings = await saveMailSyncResult(settings, summary, account.id);
         json(res, 200, { ok: true, summary, settings: publicMailSettings(nextSettings), state });
       } catch (error) {
@@ -2428,7 +2458,7 @@ export default async function handler(req, res) {
         const body = JSON.parse((await readBody(req)) || "{}");
         const state = await loadState();
         const result = await sendMailAccount(await loadMailSettings(), state, credentialKeyMaterial(), body);
-        await saveState(state);
+        await saveState(state, state.meta?.version);
         json(res, 200, { ok: true, ...result, state });
       } catch (error) {
         json(res, 400, { ok: false, error: formatMailError(error) });
