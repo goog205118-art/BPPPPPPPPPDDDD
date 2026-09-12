@@ -37,8 +37,8 @@
 
 | 项目 | 当前值 |
 | --- | --- |
-| 当前任务 | `CRM-50-01` |
-| 当前状态 | `active` |
+| 当前任务 | `CRM-50-02` |
+| 当前状态 | `planned` |
 | 当前目标 | 为本地 SQLite 和线上存储制定记录级写入、版本校验、冲突响应与恢复策略，避免同步邮件与手工编辑互相覆盖。 |
 | 已完成前序 | `CRM-00` 基线与执行治理；`CRM-10` Case 模型、兼容迁移、Case 中心展示与阶段审计；`CRM-20` 今日推进与任务生命周期；`CRM-30` 邮件分诊与可靠归档；`CRM-40-01` 至 `CRM-40-04` 人工主导的 AI 跟进工作台。 |
 | 禁止提前启动 | `CRM-60` 定时同步、自动发送、AI 自动推进高风险阶段。 |
@@ -102,7 +102,7 @@
 
 | ID | 优先级 | 状态 | 工作项 | 前置 | 验收标准 |
 | --- | --- | --- | --- | --- | --- |
-| `CRM-50-01` | P1 | `planned` | 为本地 SQLite 和线上存储制定并发策略：记录级写入、版本号/乐观锁、冲突响应与恢复提示。 | `CRM-00-03` | 两个用户或“同步 + 手工编辑”同时操作时，后写不会静默覆盖前写。 |
+| `CRM-50-01` | P1 | `done` | 为本地 SQLite 和线上存储制定并发策略：记录级写入、版本号/乐观锁、冲突响应与恢复提示。 | `CRM-00-03` | 两个用户或“同步 + 手工编辑”同时操作时，后写不会静默覆盖前写。 |
 | `CRM-50-02` | P1 | `planned` | 将本地全表删除重写替换为针对实体的事务性增删改；保留可恢复备份。 | `CRM-50-01` | 多次保存只写入受影响记录；失败可回滚，不损坏其他实体。 |
 | `CRM-50-03` | P1 | `planned` | 将线上 Blob 全量状态覆盖迁移到具备记录级并发控制的数据后端或服务层。 | `CRM-50-01` | 跨浏览器并发可检测和解决冲突；邮件同步不覆盖人工编辑。 |
 | `CRM-50-04` | P2 | `planned` | 增加变更审计、冲突处理界面及按实体恢复。 | `CRM-50-02`, `CRM-50-03` | 可查看谁何时更改，冲突可选择保留版本或合并字段。 |
@@ -180,6 +180,7 @@
 | 2026-09-11（America/New_York） | `CRM-40-04` | `planned -> active` | `docs/CRM_EXECUTION_TASKS.md` | 已核对当前指针、最近三条日志与既有阶段审计。确认 AI 分析本身保持只读，但“人工应用建议”仍会自动拼接理由，且高风险阶段没有独立事实确认门槛。 | 待提交 | 本阶段只补显式人工理由、确认和高风险确认；计划新增隔离回归证明未确认/无理由/高风险未确认时不会修改 Case、FollowUp 或审计事件。不得启动 `CRM-50+`、`CRM-60` 或 `CRM-70+`。 |
 | 2026-09-12（America/New_York） | `CRM-40-04` | `active -> done` | `app/app.js`、`app/styles.css`、`tools/crm-domain.cjs`、`tools/followup-ai-stage-application-regression-test.cjs`、`package.json`、`docs/SCHEMA.md`、`docs/CRM_EXECUTION_TASKS.md` | `npm.cmd run check`、`npm.cmd run test:followup-ai-stage-application`、`npm.cmd run test:followup-ai-draft-send`、`npm.cmd run test:followup-ai-analysis`、`npm.cmd run test:followup-ai-context`、`npm.cmd run test:followup-isolation`、`npm.cmd run test:crm-regression`、`npm.cmd run test:case-display`、`npm.cmd run test:action-task-storage`、`npm.cmd run test:today-action-center`、`npm.cmd run test:task-collaboration`、`npm.cmd run test:mail-routing-score`、`npm.cmd run test:mail-triage-console`、`npm.cmd run test:mail-triage-case-actions`、`npm.cmd run test:mail-triage-lead`、Python AST 解析与 `git diff --check` 全部通过。专项回归证明缺理由、未确认、高风险未二次确认和重复阶段均零写入；完整确认后 Case/FollowUp 同步更新，版本、操作者、来源、前后阶段、理由和证据完整留痕；批量入口改为进入同一人工确认流程。 | `4fb015b`（功能提交） | 数据影响：无数据库迁移、无正式业务资料读写、无真实 IMAP/SMTP/AI 调用；仅新增领域校验、前端确认控件、样式、契约测试和文档。回滚：`git revert 4fb015b`。核对：已对照前序 `CRM-40-01/02/03`，未重复上下文隔离、AI 分析或草稿发信；未启动 `CRM-50` 并发重构、`CRM-60` 定时同步或 `CRM-70` 联系人/投递治理。下一执行门槛：仅激活 `CRM-50-01`，恢复时先读取当前指针与最后三条日志。 |
 | 2026-09-12（America/New_York） | `CRM-50-01` | `planned -> active` | `docs/CRM_EXECUTION_TASKS.md` | 已复读当前执行指针和最后三条阶段记录；确认本地 SQLite、线上 Blob `/api/state` 仍是整体状态覆盖，领域层虽有乐观锁但未接入实际保存入口。 | 待提交 | 本阶段只实现本地/线上保存入口的基线版本校验、冲突响应、恢复提示和隔离回归；不启动 `CRM-50-02/03/04`、`CRM-60`、自动发信或 AI 自动推进高风险阶段。 |
+| 2026-09-12（America/New_York） | `CRM-50-01` | `active -> done` | `tools/sqlite_store.py`、`tools/local-server.cjs`、`api/[...route].mjs`、`app/app.js`、`tools/storage-concurrency-regression-test.cjs`、`package.json`、`docs/SCHEMA.md` | `npm.cmd run check`、`npm.cmd run test:storage-concurrency`、`npm.cmd run test:crm-regression`、`npm.cmd run test:followup-isolation`、`npm.cmd run test:followup-ai-context`、`npm.cmd run test:followup-ai-draft-send`、`npm.cmd run test:mail-triage-case-actions`、Python AST 解析与 `git diff --check` 全部通过。隔离回归证明 SQLite 连续版本递增、旧版本保存返回 `version_conflict`、本地 `/api/state` 返回 HTTP 409 且新状态不被覆盖；浏览器在成功响应前不写入本地回退缓存。 | `e3b8e63`（功能提交） | 数据影响：未读取或写入正式业务资料，未连接真实 IMAP/SMTP/AI；现有整体重写保存仍保留，但已由显式状态版本挡住旧页面覆盖。线上读后写窗口的最终 CAS/记录级后端迁移留给 `CRM-50-03`。回滚：`git revert e3b8e63`。核对：已复查 `CRM-00` 至 `CRM-40-04` 的完成证据，未重复已完成任务；未启动 `CRM-50-02/03/04`、`CRM-60` 定时同步、自动发信或 AI 自动推进高风险阶段。下一门槛：仅激活 `CRM-50-02`。 |
 
 ## 阶段完成记录模板
 
