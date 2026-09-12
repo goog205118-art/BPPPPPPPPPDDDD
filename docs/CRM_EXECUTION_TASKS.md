@@ -5,7 +5,7 @@
 这是合作跟进 CRM 的唯一执行台账，用于替代分散的口头规划、聊天记录和临时待办。后续所有涉及合作跟进、官邮、AI 跟进、达人联系人、任务队列和存储并发的改动，必须先核对本文件，再开始实现。
 
 - 建立日期：2026-09-11
-- 当前里程碑：`CRM-70` 联系人身份与投递治理
+- 当前里程碑：`CRM-60` 定时同步与受控自动建议（暂缓）
 - 总体状态：`active`
 - 本轮范围：先跑稳人工确认的合作跟进闭环；定时同步暂缓。
 - 数据原则：不改动正式业务资料、不暴露邮箱授权码或 AI Key。
@@ -37,9 +37,9 @@
 
 | 项目 | 当前值 |
 | --- | --- |
-| 当前任务 | `CRM-70-03` |
-| 当前状态 | `done` |
-| 当前目标 | 建立合规审计与联系人数据保留/删除策略；定时 IMAP 同步继续暂缓。 |
+| 当前任务 | `CRM-60-01` |
+| 当前状态 | `deferred` |
+| 当前目标 | 完成人工确认合作跟进闭环后的定时 IMAP 同步；当前按用户要求暂缓，不执行实现。 |
 | 已完成前序 | `CRM-00` 基线与执行治理；`CRM-10` Case 模型、兼容迁移、Case 中心展示与阶段审计；`CRM-20` 今日推进与任务生命周期；`CRM-30` 邮件分诊与可靠归档；`CRM-40-01` 至 `CRM-40-04` 人工主导的 AI 跟进工作台。 |
 | 禁止提前启动 | `CRM-60` 定时同步、自动发送、AI 自动推进高风险阶段。 |
 | 最近已验证基线 | `npm.cmd run check`、`npm.cmd run test:compliance-retention`、`npm.cmd run test:followup-ai-stage-application`、`npm.cmd run test:followup-ai-draft-send`、`npm.cmd run test:followup-ai-analysis`、`npm.cmd run test:followup-ai-context`、`npm.cmd run test:followup-isolation`、`npm.cmd run test:crm-regression`、`npm.cmd run test:case-display`、`npm.cmd run test:action-task-storage`、`npm.cmd run test:today-action-center`、`npm.cmd run test:task-collaboration`、`npm.cmd run test:mail-routing-score`、`npm.cmd run test:mail-triage-console`、`npm.cmd run test:mail-triage-case-actions`、`npm.cmd run test:mail-triage-lead`、`npm.cmd run test:storage-concurrency`、`npm.cmd run test:storage-record-transaction`、`npm.cmd run test:online-record-store`、`npm.cmd run test:storage-audit-conflict`、`npm.cmd run test:contact-identity`、`npm.cmd run test:delivery-governance`、Python AST 解析、`git diff --check`（最近功能提交 `89c9ef5`；验证证据与完成记录已在本台账检查点归档）。 |
@@ -194,6 +194,7 @@
 | 2026-09-12（America/New_York） | `CRM-70-02` | `active -> done` | `tools/delivery-governance-domain.cjs`、`tools/delivery-governance-regression-test.cjs`、`tools/contact-domain.cjs`、`tools/mail-sync.cjs`、`tools/sqlite_store.py`、`docs/SCHEMA.md`、`package.json` | `npm.cmd run test:delivery-governance`、`npm.cmd run check`、`npm.cmd run test:contact-identity`、`npm.cmd run test:mail-routing-score`、`npm.cmd run test:followup-isolation`、`npm.cmd run test:crm-regression`、`npm.cmd run test:followup-ai-context`、`npm.cmd run test:followup-ai-analysis`、`npm.cmd run test:followup-ai-draft-send`、`npm.cmd run test:followup-ai-stage-application`、`npm.cmd run test:mail-triage-console`、`npm.cmd run test:mail-triage-case-actions`、`npm.cmd run test:mail-triage-lead`、`npm.cmd run test:storage-concurrency`、`npm.cmd run test:storage-record-transaction`、`npm.cmd run test:online-record-store`、`npm.cmd run test:storage-audit-conflict`、Python AST 解析与 `git diff --check` 全部通过。专项回归覆盖正常发送允许、退订/黑名单/无效/已退信拦截、7 天 3 次频控、不同品牌隔离、Message-ID 线程匹配、尖括号兼容、跨品牌共享邮箱歧义保留分诊、SQLite 字段往返与旧字段兼容。 | `cb7b381`（功能提交） | 数据影响：新增投递状态、来源、失败证据、联系人黑名单和发送频控策略字段；SMTP 成功记为 `accepted`，退信/失败仅在现有人工 IMAP 同步时识别并更新出站事件/联系人，无法唯一匹配的通知保留在 `mailInbox`，不自动猜测品牌或 Case。未读取或写入正式业务资料，未连接真实 IMAP、SMTP、AI 或 Vercel Blob，未启动 `CRM-60`。回滚：`git revert cb7b381`；新增 SQLite 列可安全闲置，已追加的本地/线上审计或业务记录不做破坏性删除，正式降级前先导出。核对：已复读 `CRM-00` 至 `CRM-70-01` 完成证据，本阶段未重复联系人身份建模、邮件路由、AI 发信或存储并发改造；未启动自动发送、AI 自动推进或 `CRM-60`。下一门槛：仅激活 `CRM-70-03`，先定义最小保留范围、按品牌/联系人删除与审计留痕，再评估界面和存储执行。 |
 | 2026-09-12（America/New_York） | `CRM-70-03` | `planned -> active` | `docs/CRM_EXECUTION_TASKS.md` | 已复读当前执行指针与最近三条日志；确认 `CRM-70-01/02` 已完成，现有正文按保留期清理，但尚无按品牌/联系人执行的删除边界、删除审计和受保护证据规则。 | 待提交 | 本阶段只建立最小化留存与删除领域契约：可按品牌、联系人、邮件正文/摘要范围预览并执行；正文优先清除、联系人身份可软删除、Case/合作/退订/黑名单证据默认受保护；删除请求必须带原因并产生追加式审计记录。不得启动 `CRM-60` 定时同步、自动发送、AI 自动推进或全量历史邮箱/附件抓取。 |
 | 2026-09-12（America/New_York） | `CRM-70-03` | `active -> done` | `tools/compliance-retention-domain.cjs`、`tools/compliance-retention-regression-test.cjs`、`api/[...route].mjs`、`tools/local-server.cjs`、`tools/contact-domain.cjs`、`tools/online-record-store.cjs`、`tools/sqlite_store.py`、`docs/SCHEMA.md`、`package.json` | `npm.cmd run test:compliance-retention`、`npm.cmd run check`、Python AST 解析、`git diff --check`，以及 AI 跟进上下文/分析/草稿发信/阶段应用、Case 展示、今日推进、任务协作、邮件分诊、存储并发/事务/线上记录/审计冲突、联系人身份、投递治理等既有回归全部通过。专项回归确认：跨品牌联系人删除拒绝；正文清除后摘要、Message-ID、线程、路由、退订、黑名单和投递失败证据保留；Case、合作记录、达人、待开发达人不删除；联系人只软删除；原因/操作者/品牌/联系人/影响数量写入 `complianceAudit`；`requestId` 幂等；`dryRun` 不写入；SQLite 字段与审计可往返。 | `89c9ef5`（功能提交） | 数据影响：未读取或写入正式业务资料，未连接真实 IMAP、SMTP、AI 或 Vercel Blob。新增 `email_bodies`、`contact_identity` 最小范围预览/执行 API，执行必须带 `expectedVersion`；回滚：`git revert 89c9ef5`，新增 SQLite 列可安全闲置，线上/本地新增审计记录不做破坏性删除。核对：已复读 `CRM-00` 至 `CRM-70-02` 完成证据，未重复联系人身份或投递治理；`CRM-60` 仍为 `deferred`，未启动定时同步、自动发送、AI 自动推进高风险阶段或全量历史邮箱抓取。下一门槛：重新评审后再决定是否激活 `CRM-60`，否则进入下一项已批准任务。 |
+| 2026-09-12（America/New_York） | `CRM-60-01/02` | 保持 `deferred` | `docs/CRM_EXECUTION_TASKS.md` | 全表复核确认 `CRM-00` 至 `CRM-50`、`CRM-70` 的任务均有完成记录、提交号和回归证据；`CRM-60-01/02` 仍是用户明确暂缓的定时 IMAP/定时 AI 建议，未发现可在不解除范围约束的情况下继续实现的未完成代码。功能工作区保持干净；本条台账指针更新待独立提交。 | `89c9ef5`、`e9f864a` | 不启动定时同步、自动重试、定时 AI、自动发信或 AI 自动推进；下一门槛是用户明确解除 `CRM-60` 暂缓，并先重新评审邮箱范围、失败重试、幂等、日志和人工审核开关后再激活。 |
 
 ## 阶段完成记录模板
 
