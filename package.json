@@ -32,7 +32,8 @@
     "test:delivery-governance": "node tools/delivery-governance-regression-test.cjs",
     "test:compliance-retention": "node tools/compliance-retention-regression-test.cjs",
     "test:mail-scheduler": "node tools/mail-scheduler-regression-test.cjs",
-    "test:mail-scheduler-executor": "node tools/mail-scheduler-executor-regression-test.cjs"
+    "test:mail-scheduler-executor": "node tools/mail-scheduler-executor-regression-test.cjs",
+    "test:mail-ai-suggestions": "node tools/mail-ai-suggestion-regression-test.cjs"
   },
   "dependencies": {
     "@vercel/blob": "^2.8.0",

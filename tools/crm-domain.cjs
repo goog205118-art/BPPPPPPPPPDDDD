@@ -1182,4 +1182,5 @@ module.exports = {
   taskKey,
   triageLeadDuplicateSuggestions,
   triageCandidateCases,
+  unreadReplyEventForCase,
 };
