@@ -32,6 +32,18 @@ const ACTION_TASK_TYPE_LABELS = {
 };
 const FOLLOW_UP_STAGES = ["已联系待回复", "初步沟通", "已回复", "谈合作方式 / 报价", "条款确认", "待寄样", "运输中", "已签收", "待发布", "已发布", "数据回收", "已结案", "暂停跟进", "未谈妥"];
 const FOLLOW_UP_TERMINAL_STAGES = new Set(["已结案", "暂停跟进", "未谈妥"]);
+const AI_HIGH_RISK_STAGE_APPLICATIONS = new Set([
+  "谈合作方式 / 报价",
+  "条款确认",
+  "待寄样",
+  "运输中",
+  "已签收",
+  "待发布",
+  "已发布",
+  "数据回收",
+  "已结案",
+  "未谈妥",
+]);
 const FOLLOW_UP_BOARD_COLUMNS = [
   { title: "待回复", stages: ["已联系待回复", "待回复"] },
   { title: "初步沟通", stages: ["初步沟通", "已回复"] },
@@ -585,7 +597,18 @@ const state = {
   creatorDrawer: { open: false, creatorId: null },
   mailImport: { open: false, followUpId: null, messages: [], status: "" },
   followUpBoardFilter: { query: "", stage: "", priority: "", overdueOnly: false },
-  followUpDetail: { open: false, followUpId: null, analysis: null, draft: null, sendAccountId: "", sendConfirmed: false },
+  followUpDetail: {
+    open: false,
+    followUpId: null,
+    analysis: null,
+    draft: null,
+    sendAccountId: "",
+    sendConfirmed: false,
+    stageApplyOpen: false,
+    stageApplyReason: "",
+    stageApplyConfirmed: false,
+    stageApplyHighRiskConfirmed: false,
+  },
   todayActionFilter: { brand: "", owner: "", priority: "", due: "", type: "", status: "待处理" },
   todayActionNotice: "",
 };
@@ -5952,10 +5975,14 @@ function followUpTimelineMarkup(events) {
   `;
 }
 
-function followUpAnalysisMarkup(analysis, selectedStrategy) {
+function followUpAnalysisMarkup(analysis, selectedStrategy, detail = {}, currentStage = "") {
   if (!analysis) {
     return `<p class="followup-detail-empty">先写下本次关注点后进行 AI 分析。AI 只给出建议，不会改动当前阶段或发送邮件。</p>`;
   }
+  const suggestedStage = text(analysis.suggested_stage);
+  const canApplyStage = FOLLOW_UP_STAGES.includes(suggestedStage);
+  const stageUnchanged = canApplyStage && suggestedStage === text(currentStage);
+  const highRiskStage = AI_HIGH_RISK_STAGE_APPLICATIONS.has(suggestedStage);
   const confidence = { low: "低", medium: "中", high: "高" }[analysis.confidence] || "低";
   const list = (items = [], className = "") => (items.length ? `<ul class="${className}">${items.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>` : `<p class="followup-detail-empty">暂无</p>`);
   const scope = analysis.context_scope || {};
@@ -6015,7 +6042,31 @@ function followUpAnalysisMarkup(analysis, selectedStrategy) {
         <span>建议间隔：<b>${escapeHtml(`${Number(analysis.recommended_follow_up_days || 0)} 天`)}</b></span>
       </div>
       <p class="followup-ai-notice">仅建议，不会自动修改当前阶段。${escapeHtml(analysis.context_notice || "")}</p>
-      <button type="button" class="ghost followup-apply-analysis" data-followup-apply-analysis>人工应用建议阶段</button>
+      ${canApplyStage && !stageUnchanged
+        ? `
+          <button type="button" class="ghost followup-apply-analysis" data-followup-open-stage-apply>${detail.stageApplyOpen ? "收起阶段确认" : "审核并应用建议阶段"}</button>
+          ${detail.stageApplyOpen
+            ? `
+              <section class="followup-stage-apply">
+                <header>
+                  <h4>人工阶段确认</h4>
+                  <span class="${highRiskStage ? "is-high-risk" : ""}">${highRiskStage ? "高风险阶段" : "需人工确认"}</span>
+                </header>
+                <p><b>${escapeHtml(currentStage || "未设置")}</b><i>→</i><b>${escapeHtml(suggestedStage)}</b></p>
+                <label>人工应用理由<textarea data-followup-stage-apply-reason rows="3" maxlength="800" placeholder="请说明你核对到的事实、沟通结论或执行依据。">${escapeHtml(detail.stageApplyReason || "")}</textarea></label>
+                <label class="followup-stage-apply-check"><input type="checkbox" data-followup-stage-apply-confirmed ${detail.stageApplyConfirmed ? "checked" : ""} />我已人工核对当前邮件、合作资料和阶段影响，确认应用此建议。</label>
+                ${highRiskStage
+                  ? `<label class="followup-stage-apply-check is-high-risk"><input type="checkbox" data-followup-stage-apply-high-risk-confirmed ${detail.stageApplyHighRiskConfirmed ? "checked" : ""} />我确认该变更涉及报价、条款、寄样/物流、发布、数据或结案，已取得并记录必要的人工事实依据。</label>`
+                  : ""}
+                <div class="followup-stage-apply-actions">
+                  <button type="button" class="ghost" data-followup-cancel-stage-apply>取消</button>
+                  <button type="button" class="primary" data-followup-confirm-stage-apply ${text(detail.stageApplyReason) && detail.stageApplyConfirmed && (!highRiskStage || detail.stageApplyHighRiskConfirmed) ? "" : "disabled"}>确认应用阶段</button>
+                </div>
+              </section>
+            `
+            : ""}
+        `
+        : `<p class="followup-ai-notice">${stageUnchanged ? "AI 建议与当前阶段相同，无需写入阶段事件。" : "AI 未返回可应用的有效阶段；请使用人工阶段操作。"}</p>`}
       <div class="followup-ai-grid">
         <section><h4>对方当前意图</h4><p>${escapeHtml(analysis.counterparty_intent_cn || "当前证据不足，无法可靠判断对方意图。")}</p></section>
         <section><h4>关键事实</h4>${list(analysis.key_facts || [])}</section>
@@ -6055,19 +6106,23 @@ function followUpDraftMarkup(draft) {
   `;
 }
 
-function openFollowUpDetail(followUpId) {
+function openFollowUpDetail(followUpId, options = {}) {
   const followUp = rows("followups").find((row) => text(row.id) === text(followUpId));
   if (!followUp) return;
   state.followUpDetail = {
     open: true,
     followUpId: followUp.id,
-    analysis: null,
+    analysis: options.analysis || null,
     draft: null,
-    userNote: "",
+    userNote: text(options.userNote),
     customIntent: "",
     strategyId: "",
     sendAccountId: "",
     sendConfirmed: false,
+    stageApplyOpen: false,
+    stageApplyReason: "",
+    stageApplyConfirmed: false,
+    stageApplyHighRiskConfirmed: false,
     status: "",
   };
   elements.followUpDetailModal.classList.remove("hidden");
@@ -6097,7 +6152,22 @@ async function markFollowUpReplyRead(followUpId) {
 }
 
 function closeFollowUpDetail() {
-  state.followUpDetail = { open: false, followUpId: null, analysis: null, draft: null, userNote: "", customIntent: "", strategyId: "", sendAccountId: "", sendConfirmed: false, status: "" };
+  state.followUpDetail = {
+    open: false,
+    followUpId: null,
+    analysis: null,
+    draft: null,
+    userNote: "",
+    customIntent: "",
+    strategyId: "",
+    sendAccountId: "",
+    sendConfirmed: false,
+    stageApplyOpen: false,
+    stageApplyReason: "",
+    stageApplyConfirmed: false,
+    stageApplyHighRiskConfirmed: false,
+    status: "",
+  };
   elements.followUpDetailModal.classList.add("hidden");
   elements.followUpDetailModal.setAttribute("aria-hidden", "true");
   elements.followUpDetailBody.innerHTML = "";
@@ -6209,7 +6279,7 @@ function renderFollowUpDetail() {
           <p class="followup-context-scope">${followUpBodyContextSummary(followUp).map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</p>
           <label class="followup-ai-note-label">本次关注点 / 人工备注<textarea data-followup-ai-note rows="4" maxlength="1600" placeholder="例如：确认对方是否接受置换，或说明我希望先确认报价。">${escapeHtml(state.followUpDetail.userNote || "")}</textarea></label>
           <button type="button" class="primary" data-followup-ai-analyze>AI 分析沟通状态</button>
-          ${followUpAnalysisMarkup(state.followUpDetail.analysis, selectedStrategy)}
+          ${followUpAnalysisMarkup(state.followUpDetail.analysis, selectedStrategy, state.followUpDetail, model.stage)}
         </section>
 
         <section class="followup-detail-section followup-draft-panel">
@@ -6243,7 +6313,43 @@ function renderFollowUpDetail() {
   });
   elements.followUpDetailBody.querySelector("[data-followup-detail-import]")?.addEventListener("click", () => openFollowUpMailImport(followUp.id));
   elements.followUpDetailBody.querySelector("[data-followup-ai-analyze]")?.addEventListener("click", () => void analyzeFollowUpDetail());
-  elements.followUpDetailBody.querySelector("[data-followup-apply-analysis]")?.addEventListener("click", () => void applyFollowUpAnalysisSuggestion(followUp.id, state.followUpDetail.analysis));
+  elements.followUpDetailBody.querySelector("[data-followup-open-stage-apply]")?.addEventListener("click", () => {
+    state.followUpDetail.stageApplyOpen = !state.followUpDetail.stageApplyOpen;
+    renderFollowUpDetail();
+  });
+  elements.followUpDetailBody.querySelector("[data-followup-cancel-stage-apply]")?.addEventListener("click", () => {
+    state.followUpDetail.stageApplyOpen = false;
+    state.followUpDetail.stageApplyReason = "";
+    state.followUpDetail.stageApplyConfirmed = false;
+    state.followUpDetail.stageApplyHighRiskConfirmed = false;
+    renderFollowUpDetail();
+  });
+  const updateStageApplyControls = () => {
+    const reason = elements.followUpDetailBody.querySelector("[data-followup-stage-apply-reason]");
+    const confirmed = elements.followUpDetailBody.querySelector("[data-followup-stage-apply-confirmed]");
+    const highRiskConfirmed = elements.followUpDetailBody.querySelector("[data-followup-stage-apply-high-risk-confirmed]");
+    const action = elements.followUpDetailBody.querySelector("[data-followup-confirm-stage-apply]");
+    state.followUpDetail.stageApplyReason = text(reason?.value);
+    state.followUpDetail.stageApplyConfirmed = Boolean(confirmed?.checked);
+    state.followUpDetail.stageApplyHighRiskConfirmed = Boolean(highRiskConfirmed?.checked);
+    if (action) {
+      const highRisk = AI_HIGH_RISK_STAGE_APPLICATIONS.has(text(state.followUpDetail.analysis?.suggested_stage));
+      action.disabled = !state.followUpDetail.stageApplyReason
+        || !state.followUpDetail.stageApplyConfirmed
+        || (highRisk && !state.followUpDetail.stageApplyHighRiskConfirmed);
+    }
+  };
+  elements.followUpDetailBody.querySelector("[data-followup-stage-apply-reason]")?.addEventListener("input", updateStageApplyControls);
+  elements.followUpDetailBody.querySelector("[data-followup-stage-apply-confirmed]")?.addEventListener("change", updateStageApplyControls);
+  elements.followUpDetailBody.querySelector("[data-followup-stage-apply-high-risk-confirmed]")?.addEventListener("change", updateStageApplyControls);
+  elements.followUpDetailBody.querySelector("[data-followup-confirm-stage-apply]")?.addEventListener("click", () => {
+    updateStageApplyControls();
+    void applyFollowUpAnalysisSuggestion(followUp.id, state.followUpDetail.analysis, {
+      reason: state.followUpDetail.stageApplyReason,
+      confirmed: state.followUpDetail.stageApplyConfirmed,
+      highRiskConfirmed: state.followUpDetail.stageApplyHighRiskConfirmed,
+    });
+  });
   elements.followUpDetailBody.querySelector("[data-followup-ai-draft]")?.addEventListener("click", () => void draftFollowUpReply());
   elements.followUpDetailBody.querySelector("[data-followup-send]")?.addEventListener("click", () => void sendFollowUpReply(inbound?.id || ""));
   const invalidateSendConfirmation = () => {
@@ -6297,12 +6403,36 @@ function nextFollowUpAtFromAnalysis(analysis) {
   return result.toISOString();
 }
 
-async function applyFollowUpAnalysisSuggestion(followUpId, analysis) {
+async function applyFollowUpAnalysisSuggestion(followUpId, analysis, application = {}) {
   const followUp = allRows("followups").find((row) => text(row.id) === text(followUpId));
   const suggestedStage = text(analysis?.suggested_stage);
+  const reason = text(application.reason);
+  const confirmed = Boolean(application.confirmed);
+  const highRiskStage = AI_HIGH_RISK_STAGE_APPLICATIONS.has(suggestedStage);
+  const highRiskConfirmed = Boolean(application.highRiskConfirmed);
   if (!followUp || !analysis) return;
   if (!FOLLOW_UP_STAGES.includes(suggestedStage)) {
     state.followUpDetail.status = "AI 未返回可应用的有效阶段；请使用卡片上的手动推进。";
+    renderFollowUpDetail();
+    return;
+  }
+  if (text(followUp.stage) === suggestedStage) {
+    state.followUpDetail.status = "AI 建议与当前阶段相同，未写入重复阶段事件。";
+    renderFollowUpDetail();
+    return;
+  }
+  if (!reason) {
+    state.followUpDetail.status = "请填写人工应用理由；未填写时不会修改阶段。";
+    renderFollowUpDetail();
+    return;
+  }
+  if (!confirmed) {
+    state.followUpDetail.status = "请勾选人工核对确认；未确认时不会修改阶段。";
+    renderFollowUpDetail();
+    return;
+  }
+  if (highRiskStage && !highRiskConfirmed) {
+    state.followUpDetail.status = "该建议属于高风险阶段，请完成第二次事实确认；未确认时不会修改阶段。";
     renderFollowUpDetail();
     return;
   }
@@ -6318,7 +6448,6 @@ async function applyFollowUpAnalysisSuggestion(followUpId, analysis) {
         .filter(Boolean)
         .slice(0, 3)
         .join("；");
-      const reason = `人工确认 AI 阶段建议${text(analysis.recommended_next_action) ? `：${text(analysis.recommended_next_action)}` : ""}`;
       recordCaseStageChange({
         followUp,
         previousStage,
@@ -6345,6 +6474,10 @@ async function applyFollowUpAnalysisSuggestion(followUpId, analysis) {
       syncCompletedCooperation(followUp);
       await persist();
     });
+    state.followUpDetail.stageApplyOpen = false;
+    state.followUpDetail.stageApplyReason = "";
+    state.followUpDetail.stageApplyConfirmed = false;
+    state.followUpDetail.stageApplyHighRiskConfirmed = false;
     state.followUpDetail.status = `已由人工应用建议：${suggestedStage}。邮件不会自动发送。`;
     renderFollowUpPage();
     renderCreatorDrawer();
@@ -6372,6 +6505,10 @@ async function analyzeFollowUpDetail() {
       : text(payload.recommended_options?.[0]?.id);
     state.followUpDetail.draft = null;
     state.followUpDetail.sendConfirmed = false;
+    state.followUpDetail.stageApplyOpen = false;
+    state.followUpDetail.stageApplyReason = "";
+    state.followUpDetail.stageApplyConfirmed = false;
+    state.followUpDetail.stageApplyHighRiskConfirmed = false;
     state.followUpDetail.status = "AI 已完成研判。建议仅供人工决策，不会修改合作阶段。";
   } catch (error) {
     state.followUpDetail.status = error.message || "AI 沟通分析失败";
@@ -6559,11 +6696,14 @@ function renderFollowUpBatch() {
     });
   });
   elements.followUpBatchBody.querySelectorAll("[data-followup-batch-apply]").forEach((button) => {
-    button.addEventListener("click", async () => {
+    button.addEventListener("click", () => {
       const item = state.followUpBatch.items.find((entry) => text(entry.followUpId) === text(button.dataset.followupBatchApply));
       if (!item?.analysis) return;
-      await applyFollowUpAnalysisSuggestion(item.followUpId, item.analysis);
-      renderFollowUpBatch();
+      const batchNote = state.followUpBatch.userNote;
+      closeFollowUpBatch();
+      openFollowUpDetail(item.followUpId, { analysis: item.analysis, userNote: batchNote });
+      state.followUpDetail.status = "请在详情中填写人工理由并确认后，再应用 AI 的阶段建议。";
+      renderFollowUpDetail();
     });
   });
 }

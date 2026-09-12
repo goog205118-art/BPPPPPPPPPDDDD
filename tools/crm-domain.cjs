@@ -48,6 +48,21 @@ const CASE_STAGE_TRANSITIONS = new Map([
 
 const TASK_STATUSES = new Set(["待处理", "已完成", "已失效", "已跳过", "待修复"]);
 const TASK_PRIORITIES = new Set(["高", "中", "低", "普通"]);
+const AI_HIGH_RISK_CASE_STAGES = new Set([
+  "谈合作方式 / 报价",
+  "条款确认",
+  "待寄样",
+  "已寄样",
+  "运输中",
+  "已签收",
+  "待发布",
+  "已发布",
+  "待数据回收",
+  "数据回收",
+  "合作完成",
+  "已结案",
+  "未谈妥",
+]);
 
 function text(value) {
   return String(value ?? "").trim();
@@ -172,6 +187,38 @@ function recordCaseStageChange(state, input = {}, now = new Date().toISOString()
   const events = Array.isArray(state?.followUpEvents) ? state.followUpEvents : (state.followUpEvents = []);
   events.push(event);
   return { case: caseRow, followUp, event };
+}
+
+function applyAiSuggestedCaseStage(state, input = {}, now = new Date().toISOString()) {
+  const caseId = text(input.case_id);
+  const caseRow = caseById(state, caseId);
+  if (!caseRow) throw new Error("未找到目标 Case。");
+  const followUpId = text(input.follow_up_id);
+  const followUp = (Array.isArray(state?.followUps) ? state.followUps : [])
+    .find((item) => text(item.id) === followUpId) || null;
+  const nextStage = text(input.next_stage);
+  const reason = text(input.change_reason);
+  if (!CASE_STAGES.has(nextStage)) throw new Error("AI 未返回可应用的有效阶段。");
+  if (text(caseRow.stage) === nextStage || text(followUp?.stage) === nextStage) {
+    throw new Error("AI 建议与当前阶段相同，无需写入重复阶段事件。");
+  }
+  if (!reason) throw new Error("人工应用 AI 建议必须填写理由。");
+  if (!flag(input.confirmed)) throw new Error("人工应用 AI 建议必须完成确认。");
+  if (AI_HIGH_RISK_CASE_STAGES.has(nextStage) && !flag(input.high_risk_confirmed)) {
+    throw new Error("高风险 AI 阶段建议必须完成额外事实确认。");
+  }
+  return recordCaseStageChange(state, {
+    case_id: caseId,
+    follow_up_id: followUpId,
+    next_stage: nextStage,
+    previous_stage: text(input.previous_stage) || text(followUp?.stage) || text(caseRow.stage),
+    change_reason: reason,
+    actor: "人工确认",
+    source: "ai_suggestion_confirmed",
+    subject: "已人工应用 AI 阶段建议",
+    excerpt: text(input.excerpt) || `阶段：${nextStage}`,
+    evidence: text(input.evidence),
+  }, now);
 }
 
 function assertSameBrand(caseRow, mailRow) {
@@ -1102,6 +1149,7 @@ function patchVersionedRecord(collection, id, expectedVersion, patch = {}, now =
 }
 
 module.exports = {
+  AI_HIGH_RISK_CASE_STAGES,
   CASE_STAGES,
   CASE_STAGE_TRANSITIONS,
   TASK_PRIORITIES,
@@ -1109,6 +1157,7 @@ module.exports = {
   TASK_EVENT_TYPES,
   addTaskNote,
   archiveTriageMail,
+  applyAiSuggestedCaseStage,
   assignTask,
   appendTaskEvent,
   canTransitionCaseStage,
