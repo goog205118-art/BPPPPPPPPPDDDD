@@ -8,6 +8,12 @@ const {
   personEmailAddresses,
   contactIdentityForEmail,
 } = require("./contact-domain.cjs");
+const {
+  DEFAULT_DELIVERY_POLICY,
+  deliveryPolicy,
+  evaluateSendPolicy,
+  applyDeliveryNotification,
+} = require("./delivery-governance-domain.cjs");
 
 const DEFAULT_MAIL_ACCOUNT = {
   id: "",
@@ -54,6 +60,7 @@ const DEFAULT_MAIL_SETTINGS = {
     allowAiContext: false,
     retentionDays: 90,
   },
+  deliveryPolicy: { ...DEFAULT_DELIVERY_POLICY },
 };
 const REPLY_WINDOW_DAYS = 30;
 const REPLY_WINDOW_MS = REPLY_WINDOW_DAYS * 24 * 60 * 60 * 1000;
@@ -298,6 +305,9 @@ function normalizeMailSettings(raw = {}, existing = {}, keyMaterial) {
     ...DEFAULT_MAIL_SETTINGS,
     accounts,
     contentPolicy: normalizeContentPolicy(source.contentPolicy, existing?.contentPolicy),
+    deliveryPolicy: deliveryPolicy({
+      deliveryPolicy: source.deliveryPolicy ?? existing?.deliveryPolicy,
+    }),
   };
 }
 
@@ -345,6 +355,7 @@ function publicMailSettings(settings = {}) {
   return {
     accounts,
     contentPolicy: mailContentPolicy(settings),
+    deliveryPolicy: deliveryPolicy(settings),
   };
 }
 
@@ -1336,6 +1347,8 @@ async function syncMailAccount(settings, state, keyMaterial, options = {}) {
     refreshedBodies: 0,
     clearedBodies: 0,
     expiredBodies: 0,
+    deliveryNotifications: 0,
+    deliveryFailuresMatched: 0,
     warnings: [],
     folders: {},
   };
@@ -1371,6 +1384,21 @@ async function syncMailAccount(settings, state, keyMaterial, options = {}) {
             continue;
           }
           keys.forEach((key) => knownKeys.add(key));
+          const deliveryResult = applyDeliveryNotification(state, record, now.toISOString());
+          if (deliveryResult.handled) {
+            state.mailInbox.unshift({
+              ...(deliveryResult.record || record),
+              status: "delivery_notification",
+              delivery_notification: true,
+              delivery_match_status: deliveryResult.matched ? "matched" : "unmatched",
+            });
+            summary.added += 1;
+            summary.deliveryNotifications += 1;
+            if (deliveryResult.matched) summary.deliveryFailuresMatched += 1;
+            if (record.body) summary.cachedBodies += 1;
+            summary.folders[folder].added += 1;
+            continue;
+          }
           const routed = routeMailRecord(state, record, account, now.toISOString());
           if (routed.kind === "followup") {
             const followUp = routed.followUp;
@@ -1785,6 +1813,16 @@ async function sendMailAccount(settings, state, keyMaterial, input = {}) {
     : lead ? recipientList(lead.email) : recipientList(input.to);
   if (!to.length) throw new Error("当前达人没有可用邮箱，请先选择或补充联系人。");
   const resolvedContact = contact || contactIdentityForEmail(state, personType, personId, to[0], targetBrandId);
+  evaluateSendPolicy({
+    state,
+    settings,
+    brandId: targetBrandId,
+    personType,
+    personId,
+    contact: resolvedContact || contact,
+    recipientEmails: to,
+    now: nowDate,
+  });
   if (lead && text(lead.status) === "已转达人库") {
     throw new Error("该待开发达人已转入达人库，请从合作跟进中继续发信。");
   }
@@ -1853,10 +1891,25 @@ async function sendMailAccount(settings, state, keyMaterial, input = {}) {
     brand_id: targetBrandId,
     mailbox_account_id: account.id,
     send_confirmed: true,
+    delivery_status: "accepted",
+    delivery_source: "smtp",
+    delivery_event_at: now,
+    delivery_error: "",
+    delivery_code: "",
+    delivery_message_id: "",
     ...signatureAudit,
     createdAt: now,
     updatedAt: now,
   };
+  const storedContact = resolvedContact?.id
+    ? (Array.isArray(state.contacts) ? state.contacts : []).find((item) => text(item.id) === text(resolvedContact.id))
+    : null;
+  if (storedContact) {
+    storedContact.delivery_status = "accepted";
+    storedContact.last_delivery_event_at = now;
+    storedContact.last_delivery_error = "";
+    storedContact.updatedAt = now;
+  }
   state.followUpEvents = [event, ...(Array.isArray(state.followUpEvents) ? state.followUpEvents : [])];
   if (lead) {
     lead.status = "已联系";

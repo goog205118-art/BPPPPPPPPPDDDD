@@ -309,6 +309,12 @@ SCHEMA = {
         "signature_applied": "REAL",
         "signature_mode": "TEXT",
         "signature_has_image": "REAL",
+        "delivery_status": "TEXT",
+        "delivery_source": "TEXT",
+        "delivery_event_at": "TEXT",
+        "delivery_error": "TEXT",
+        "delivery_code": "TEXT",
+        "delivery_message_id": "TEXT",
         "createdAt": "TEXT",
         "updatedAt": "TEXT",
     },
@@ -345,6 +351,12 @@ SCHEMA = {
         "validity": "TEXT",
         "unsubscribed": "REAL",
         "unsubscribed_at": "TEXT",
+        "blacklisted": "REAL",
+        "blacklist_reason": "TEXT",
+        "blacklisted_at": "TEXT",
+        "delivery_status": "TEXT",
+        "last_delivery_event_at": "TEXT",
+        "last_delivery_error": "TEXT",
         "notes": "TEXT",
         "createdAt": "TEXT",
         "updatedAt": "TEXT",
@@ -392,6 +404,15 @@ SCHEMA = {
         "triage_reason": "TEXT",
         "triage_resolved_at": "TEXT",
         "triage_resolved_by": "TEXT",
+        "delivery_notification": "REAL",
+        "delivery_match_status": "TEXT",
+        "delivery_status": "TEXT",
+        "delivery_source": "TEXT",
+        "delivery_event_at": "TEXT",
+        "delivery_error": "TEXT",
+        "delivery_code": "TEXT",
+        "delivery_message_id": "TEXT",
+        "delivery_target_event_id": "TEXT",
         "createdAt": "TEXT",
         "updatedAt": "TEXT",
     },
@@ -512,7 +533,9 @@ def row_to_dict(row):
         payload["has_unread_reply"] = parse_flag(payload["has_unread_reply"])
     if "generated" in payload:
         payload["generated"] = parse_flag(payload["generated"])
-    for key in ("is_primary", "unsubscribed"):
+    if "delivery_notification" in payload:
+        payload["delivery_notification"] = parse_flag(payload["delivery_notification"])
+    for key in ("is_primary", "unsubscribed", "blacklisted"):
         if key in payload:
             payload[key] = parse_flag(payload[key])
     for key in ("beforeCounts", "snapshot", "selected_resource_ids", "product_ids", "candidate_creator_ids", "candidate_lead_ids", "candidate_brand_ids", "candidate_follow_up_ids", "candidate_case_ids", "match_reasons", "match_candidates", "references", "metadata"):

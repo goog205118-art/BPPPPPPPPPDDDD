@@ -108,12 +108,15 @@
 - `is_primary`
 - `validity`（`unknown`、`valid`、`invalid`）
 - `unsubscribed`、`unsubscribed_at`
+- `blacklisted`、`blacklist_reason`、`blacklisted_at`
+- `delivery_status`（`unknown`、`accepted`、`delivered`、`bounced`、`failed`、`unsubscribed`、`blacklisted`）
+- `last_delivery_event_at`、`last_delivery_error`
 - `notes`
 - `createdAt`、`updatedAt`
 
 `creators.email` 和 `leads.email` 是旧数据兼容字段。读取时，旧邮箱会按“人员类型 + 人员 ID + 邮箱”生成稳定的隐式主联系人 ID，不会因为重复读取产生新身份；新数据应优先写入 `contacts`。联系人查询、邮件匹配、跟进轨迹和发信记录均可通过 `contact_id` / `matched_contact_id` 追溯到实际邮箱身份，并始终限制在当前品牌工作区内。
 
-本阶段只建立身份和发送前的基础状态校验，不实现退信解析、黑名单、触达频控或定时 IMAP 同步；这些能力分别留给 `CRM-70-02` 和已延期的 `CRM-60`。
+发送前会在当前品牌、联系人和收件邮箱范围内执行投递治理：退订、黑名单、明确无效或已退信联系人会被拦截；默认近 7 天最多触达 3 次，策略可在邮件设置中调整。退信/投递失败通知仅在已有 IMAP 人工同步时识别，优先按 `In-Reply-To`、`References` 或唯一收件人匹配原始出站事件；无法唯一匹配时只进入人工分诊，不猜测归属。SMTP `accepted` 仅表示发信服务器已接受，不代表最终送达。定时 IMAP 同步仍由 `CRM-60` 延后。
 
 ## products
 
@@ -296,6 +299,9 @@
 - `source`（例如 `Foxmail .eml` 或 `IMAP · 官邮 IMAP`）
 - `send_confirmed`（本系统 SMTP 发信时，操作者已明确核对收件人、主题、正文和官方邮箱）
 - `signature_applied`、`signature_mode`、`signature_has_image`（发信时由所选官方邮箱追加的签名审计；模式为 `html`、`text` 或 `none`）
+- `delivery_status`（`unknown`、`accepted`、`delivered`、`bounced`、`failed`、`unsubscribed`、`blacklisted`）
+- `delivery_source`（`smtp`、`imap_dsn`、`manual`、`provider`）
+- `delivery_event_at`、`delivery_error`、`delivery_code`、`delivery_message_id`
 - `previous_stage`、`next_stage`（仅阶段变更事件记录变更前后状态）
 - `actor`（阶段变更执行者；AI 建议只能记录为人工确认）
 - `change_reason`（人工阶段变更原因；不能为空）
@@ -382,7 +388,12 @@
 - `match_score`
 - `match_reasons`（匹配结论的简短说明）
 - `match_candidates`（候选品牌、联系人、Case、分数与逐条规则证据；用于后续邮件分诊台解释推荐）
-- `triage_status`（空值为待处理；`archived` 为人工确认已归档；`ignored` 为人工忽略；`lead_created` 为已从陌生合作来信创建待开发达人）
+- `triage_status`（空值为待处理；`archived` 为人工确认已归档；`ignored` 为人工忽略；`lead_created` 为已从陌生合作来信创建待开发达人；`delivery_notification` 为退信/投递失败通知）
+- `delivery_notification`（布尔值；是否为退信/投递失败通知）
+- `delivery_match_status`（`matched`、`unmatched`）
+- `delivery_status`、`delivery_source`、`delivery_event_at`
+- `delivery_error`、`delivery_code`、`delivery_message_id`
+- `delivery_target_event_id`（匹配到的出站 `followUpEvents.id`）
 - `triage_reason`（人工归档或忽略的理由；忽略时必填）
 - `triage_resolved_at`
 - `triage_resolved_by`
