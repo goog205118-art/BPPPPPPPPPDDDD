@@ -36,6 +36,8 @@
 
 本地 SQLite 是业务状态的主存储。每次状态保存会先校验客户端携带的全局 `meta.version`，再在同一事务中按表内 `id` 执行新增、修改和删除；未出现在请求中的表不会被清空，提交失败会整体回滚。保存前会生成自包含的 `resource-workbench.sqlite3.bak` 恢复点，CLI 可通过 `restore_backup` 恢复到最近一次成功保存之前的版本；项目侧 `state.json` 仅作为镜像，不作为并发写入依据。
 
+线上 Vercel Blob 兼容层保留旧 `state.json` 作为基线快照，新的保存不再覆盖该快照，而是写入 `state-operations/<operation-id>.json` 唯一操作日志。服务层按 `表名 + 记录 id` 合并不同实体的陈旧修改；同一实体基于同一历史版本产生不同内容时返回 `409 version_conflict`，要求重新读取并人工处理。操作日志可重放生成当前状态，后续可在独立维护窗口增加快照压缩，不影响在线写入。
+
 ## resources
 
 资源库主表，用于记录 Deal 站、社群、联盟、媒体等资源。

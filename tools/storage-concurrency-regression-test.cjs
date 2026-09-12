@@ -8,6 +8,7 @@ const rootDir = path.resolve(__dirname, "..");
 const sqliteBridge = path.join(rootDir, "tools", "sqlite_store.py");
 const localServerSource = fs.readFileSync(path.join(rootDir, "tools", "local-server.cjs"), "utf8");
 const onlineApiSource = fs.readFileSync(path.join(rootDir, "api", "[...route].mjs"), "utf8");
+const onlineStoreSource = fs.readFileSync(path.join(rootDir, "tools", "online-record-store.cjs"), "utf8");
 const browserSource = fs.readFileSync(path.join(rootDir, "app", "app.js"), "utf8");
 
 function resolvePython() {
@@ -135,8 +136,11 @@ async function testLocalApiVersionGuard() {
 function testSourceContracts() {
   assert.match(localServerSource, /expectedVersion/);
   assert.match(localServerSource, /statusCode = 409/);
-  assert.match(onlineApiSource, /version_conflict/);
-  assert.match(onlineApiSource, /actualVersion/);
+  assert.match(onlineApiSource, /createOnlineRecordStore/);
+  assert.match(onlineApiSource, /state-operations/);
+  assert.match(onlineStoreSource, /version_conflict/);
+  assert.match(onlineStoreSource, /actualVersion/);
+  assert.match(onlineStoreSource, /conflictForPatches/);
   assert.match(browserSource, /const expectedVersion = Math\.max\(1, Number\(state\.data\.meta\?\.version\) \|\| 1\)/);
   assert.match(browserSource, /error\.current = errorPayload\.current/);
   assert.doesNotMatch(browserSource, /localStorage\.setItem\(STORAGE_FALLBACK, payload\)/);

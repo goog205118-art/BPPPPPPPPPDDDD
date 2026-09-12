@@ -2,6 +2,7 @@ import { createHash, timingSafeEqual } from "node:crypto";
 import { createRequire } from "node:module";
 
 const STATE_BLOB = "resource-workbench/state.json";
+const STATE_OPERATION_PREFIX = "resource-workbench/state-operations/";
 const SETTINGS_BLOB = "resource-workbench/private-ai-settings.json";
 const MAIL_SETTINGS_BLOB = "resource-workbench/private-mail-settings.json";
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
@@ -25,6 +26,7 @@ const {
   rollbackLegacyCaseMigration,
 } = require("../tools/case-migration.cjs");
 const { reconcileCaseTasks } = require("../tools/crm-domain.cjs");
+const { createOnlineRecordStore } = require("../tools/online-record-store.cjs");
 
 const defaultState = {
   meta: { version: 1, updatedAt: new Date().toISOString() },
@@ -476,6 +478,19 @@ async function findBlob(pathname) {
   return result.blobs.find((item) => item.pathname === pathname) || null;
 }
 
+async function listAllBlobs(prefix) {
+  const token = requireBlobToken();
+  const { list } = await getBlobClient();
+  const blobs = [];
+  let cursor;
+  do {
+    const result = await list({ prefix, limit: 100, ...(cursor ? { cursor } : {}), token });
+    blobs.push(...(result.blobs || []));
+    cursor = result.cursor || "";
+  } while (cursor);
+  return blobs;
+}
+
 async function readBlobJson(pathname, fallback) {
   const token = requireBlobToken();
   const blob = await findBlob(pathname);
@@ -501,35 +516,44 @@ async function writeBlobJson(pathname, data) {
   });
 }
 
+let onlineStateStore;
+
+function getOnlineStateStore() {
+  if (onlineStateStore) return onlineStateStore;
+  onlineStateStore = createOnlineRecordStore({
+    defaultState,
+    normalizeState: normalizeBusinessState,
+    readLegacy: (fallback) => readBlobJson(STATE_BLOB, fallback),
+    listOperations: async () => {
+      const blobs = await listAllBlobs(STATE_OPERATION_PREFIX);
+      const operations = [];
+      for (const blob of blobs) {
+        try {
+          operations.push(await readBlobJson(blob.pathname, null));
+        } catch {
+          // Ignore a partially uploaded or deleted operation; other records remain readable.
+        }
+      }
+      return operations;
+    },
+    appendOperation: (operation) => writeBlobJson(
+      `${STATE_OPERATION_PREFIX}${operation.id}.json`,
+      operation,
+    ),
+  });
+  return onlineStateStore;
+}
+
 async function loadState() {
-  return normalizeBusinessState(await readBlobJson(STATE_BLOB, defaultState));
+  return (await getOnlineStateStore().load()).state;
 }
 
 async function saveState(nextState, expectedVersion = nextState?.expectedVersion) {
-  const requestedVersion = Number(expectedVersion);
-  const current = await loadState();
-  const actualVersion = Math.max(1, Number(current?.meta?.version) || 1);
-  if (Number.isInteger(requestedVersion) && requestedVersion !== actualVersion) {
-    const error = new Error(`线上数据已被其他操作更新（当前版本 ${actualVersion}）。请重新读取后再保存，避免覆盖最新修改。`);
-    error.code = "version_conflict";
-    error.statusCode = 409;
-    error.actualVersion = actualVersion;
-    error.current = current;
-    throw error;
-  }
   const payload = { ...(nextState || {}) };
   delete payload.expectedVersion;
-  const state = normalizeBusinessState({
-    ...payload,
-    meta: {
-      ...(payload.meta || {}),
-      version: actualVersion + 1,
-      updatedAt: new Date().toISOString(),
-    },
-  });
-  reconcileCaseTasks(state);
-  await writeBlobJson(STATE_BLOB, state);
-  return state;
+  const normalized = normalizeBusinessState(payload);
+  reconcileCaseTasks(normalized);
+  return getOnlineStateStore().save(normalized, expectedVersion);
 }
 
 async function resumeCaseMigration() {
