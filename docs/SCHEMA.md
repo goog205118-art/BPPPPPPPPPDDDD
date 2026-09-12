@@ -129,9 +129,36 @@
 - `retryLimit`、`retryBackoffMinutes`（失败后指数退避）
 - `accountState`（账户租约、最近运行、下一到期时间、连续失败次数）
 - `runHistory`（最多 60 条脱敏摘要：账户、品牌 ID、来源、时间、状态、数量和截断错误）
-- `aiSuggestionsEnabled`（仅兼容预留标识；`CRM-60-02` 未启动，不能触发 AI）
+- `aiSuggestionsEnabled`（默认 `false`；仅允许成功的自动同步后生成待审核建议）
+- `aiSuggestionAccountIds`（可选建议生成账户范围；空数组不代表手动同步可调用 AI）
+- `aiSuggestionMinIntervalMinutes`（同一 Case 的建议生成最短间隔，15 至 1440 分钟）
+- `aiSuggestionMaxPerRun`（单次自动同步最多生成的建议数，1 至 20）
+- `aiSuggestionState`（按 Case 记录最近建议、触发回信与去重状态）
+- `aiSuggestionRunHistory`（最多 60 条脱敏建议运行摘要，记录来源、数量、状态和截断错误）
 
-定时同步只复用现有的只读 IMAP、去重、唯一归档与人工分诊规则。手动同步可以只绕过本次 `enabled` 判定，不能把持久化策略改为开启。每次执行先取得整次调度运行锁，再为账户写入短期租约；本地运行还要求进程环境变量 `MAIL_AUTOMATION_LOCAL_ENABLED=true`，线上运行还要求 Cron Bearer 密钥。它不自动发送、不会自动推进 Case/FollowUp 阶段、不抓取附件、HTML 或原始 MIME，也不调用 AI。
+定时同步只复用现有的只读 IMAP、去重、唯一归档与人工分诊规则。手动同步可以只绕过本次 `enabled` 判定，不能把持久化策略改为开启；手动同步和手动强制执行均不会调用定时 AI。每次执行先取得整次调度运行锁，再为账户写入短期租约；本地运行还要求进程环境变量 `MAIL_AUTOMATION_LOCAL_ENABLED=true`，线上运行还要求 Cron Bearer 密钥。
+
+只有 `local_timer` 或 `vercel_cron` 成功同步后，且 `aiSuggestionsEnabled` 已启用、账户处于允许范围、候选属于同品牌且唯一归属的 Case、存在未读达人回信时，才可生成定时 AI 建议。建议只写入“待审核”结果和行动任务，不自动发送、不清除未读状态、不自动推进 Case/FollowUp 阶段、不抓取附件、HTML 或原始 MIME；用户必须进入既有人工 AI 研判和确认流程后才能应用任何建议。
+
+## followUpAiSuggestions
+
+受控定时 AI 生成的只读待审核建议表。它不是邮件草稿、发信队列或阶段推进命令；即使建议生成失败，也不会改变合作阶段或清除新回信状态。
+
+- `id`
+- `brand_id`、`brand`
+- `case_id`、`follow_up_id`
+- `trigger_event_id`（触发本次建议的已归档达人回信事件；与 `case_id` 一起用于幂等去重）
+- `status`（`pending_review`、`failed`、`dismissed`、`superseded`）
+- `created_at`
+- `model_profile`、`model_name`
+- `source`（仅自动来源 `local_timer` 或 `vercel_cron`）
+- `analysis`（可审核的结构化中文摘要、风险、缺失信息、可选下一步和建议阶段）
+- `context_scope`（本次已纳入与排除的已授权邮件上下文范围；不包含邮件正文）
+- `error`（脱敏的失败摘要）
+- `reviewed_at`、`reviewed_by`
+- `createdAt`、`updatedAt`
+
+每个 `pending_review` 或 `failed` 建议会对应一条 `actionTasks.type = ai_suggestion_review` 的“AI 建议待审核”任务。Case 详情只读展示最新建议，并只引导用户进入既有人工研判界面；处理建议、发信和阶段推进仍分别要求人工确认。
 
 ## complianceAudit
 
