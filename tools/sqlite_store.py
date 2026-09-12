@@ -357,6 +357,11 @@ SCHEMA = {
         "delivery_status": "TEXT",
         "last_delivery_event_at": "TEXT",
         "last_delivery_error": "TEXT",
+        "is_deleted": "REAL",
+        "deleted_at": "TEXT",
+        "deleted_by": "TEXT",
+        "deletion_reason": "TEXT",
+        "deletion_source": "TEXT",
         "notes": "TEXT",
         "createdAt": "TEXT",
         "updatedAt": "TEXT",
@@ -426,6 +431,24 @@ SCHEMA = {
         "skippedCount": "REAL",
         "beforeCounts": "TEXT",
         "snapshot": "TEXT",
+        "createdAt": "TEXT",
+        "updatedAt": "TEXT",
+    },
+    "complianceAudit": {
+        "id": "TEXT PRIMARY KEY",
+        "action": "TEXT",
+        "brand_id": "TEXT",
+        "contact_id": "TEXT",
+        "scopes": "TEXT",
+        "request_id": "TEXT",
+        "actor_id": "TEXT",
+        "actor_name": "TEXT",
+        "source": "TEXT",
+        "reason": "TEXT",
+        "affected_email_bodies": "REAL",
+        "affected_follow_up_events": "REAL",
+        "affected_mail_inbox": "REAL",
+        "affected_contacts": "REAL",
         "createdAt": "TEXT",
         "updatedAt": "TEXT",
     },
@@ -502,6 +525,7 @@ def rows_to_state(conn):
         "mailInbox": [],
         "contactTracks": [],
         "importHistory": [],
+        "complianceAudit": [],
     }
 
     meta_rows = conn.execute("SELECT key, value FROM meta").fetchall()
@@ -535,10 +559,10 @@ def row_to_dict(row):
         payload["generated"] = parse_flag(payload["generated"])
     if "delivery_notification" in payload:
         payload["delivery_notification"] = parse_flag(payload["delivery_notification"])
-    for key in ("is_primary", "unsubscribed", "blacklisted"):
+    for key in ("is_primary", "unsubscribed", "blacklisted", "is_deleted"):
         if key in payload:
             payload[key] = parse_flag(payload[key])
-    for key in ("beforeCounts", "snapshot", "selected_resource_ids", "product_ids", "candidate_creator_ids", "candidate_lead_ids", "candidate_brand_ids", "candidate_follow_up_ids", "candidate_case_ids", "match_reasons", "match_candidates", "references", "metadata"):
+    for key in ("beforeCounts", "snapshot", "selected_resource_ids", "product_ids", "candidate_creator_ids", "candidate_lead_ids", "candidate_brand_ids", "candidate_follow_up_ids", "candidate_case_ids", "match_reasons", "match_candidates", "references", "metadata", "scopes"):
         if payload.get(key):
             try:
                 payload[key] = json.loads(payload[key])

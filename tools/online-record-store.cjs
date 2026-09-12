@@ -15,6 +15,7 @@ const COLLECTIONS = [
   "contactTracks",
   "mailInbox",
   "importHistory",
+  "complianceAudit",
 ];
 
 function clone(value) {

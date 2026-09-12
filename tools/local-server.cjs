@@ -26,6 +26,10 @@ const {
 } = require("./case-migration.cjs");
 const { reconcileCaseTasks } = require("./crm-domain.cjs");
 const { normalizeContact } = require("./contact-domain.cjs");
+const {
+  previewRetention,
+  applyRetention,
+} = require("./compliance-retention-domain.cjs");
 
 const rootDir = path.resolve(__dirname, "..");
 const appDir = path.join(rootDir, "app");
@@ -92,6 +96,7 @@ const defaultState = {
   contactTracks: [],
   mailInbox: [],
   importHistory: [],
+  complianceAudit: [],
 };
 
 const countryAliases = new Map([
@@ -447,6 +452,7 @@ function normalizeBusinessState(rawState) {
     contactTracks,
     mailInbox,
     importHistory: Array.isArray(state.importHistory) ? state.importHistory : [],
+    complianceAudit: Array.isArray(state.complianceAudit) ? state.complianceAudit : [],
   };
 }
 
@@ -528,7 +534,7 @@ function localConflictItems(requestedState, currentState) {
   const collections = [
     "brands", "creators", "resources", "leads", "products", "cooperations",
     "matches", "followUps", "cases", "actionTasks", "actionTaskEvents",
-    "followUpEvents", "contactTracks", "mailInbox", "importHistory",
+    "followUpEvents", "contactTracks", "mailInbox", "importHistory", "complianceAudit",
   ];
   const conflicts = [];
   for (const table of collections) {
@@ -2839,6 +2845,59 @@ function handleApi(req, res, pathname) {
         jsonResponse(res, 200, { ok: true, settings: publicMailSettings(settings), policyResult });
       })
       .catch((error) => jsonResponse(res, 400, { ok: false, error: formatMailError(error) }));
+    return true;
+  }
+
+  if (req.method === "POST" && pathname === "/api/compliance/retention/preview") {
+    readBody(req)
+      .then((body) => {
+        const parsed = JSON.parse(body || "{}");
+        jsonResponse(res, 200, { ok: true, preview: previewRetention(loadState(), parsed) });
+      })
+      .catch((error) => jsonResponse(res, Number(error.statusCode) || 400, {
+        ok: false,
+        code: error.code || "retention_preview_failed",
+        error: error.message || "留存范围预览失败",
+      }));
+    return true;
+  }
+
+  if (req.method === "POST" && pathname === "/api/compliance/retention/apply") {
+    readBody(req)
+      .then((body) => {
+        const parsed = JSON.parse(body || "{}");
+        const expectedVersion = Number(parsed.expectedVersion);
+        if (!Number.isInteger(expectedVersion)) {
+          const error = new Error("执行合规删除必须携带有效的 expectedVersion，请先重新读取状态。");
+          error.statusCode = 409;
+          error.code = "version_conflict";
+          throw error;
+        }
+        const current = loadState();
+        const result = applyRetention(current, parsed);
+        if (result.idempotent || result.preview?.policy?.dryRun) {
+          jsonResponse(res, 200, { ok: true, ...result, state: current });
+          return;
+        }
+        const state = saveState({
+          ...result.state,
+          _saveAudit: {
+            actorId: parsed.actorId || parsed.actor_id,
+            actorName: parsed.actorName || parsed.actor_name,
+            source: parsed.source || "manual_compliance",
+            reason: parsed.reason,
+          },
+        }, expectedVersion);
+        jsonResponse(res, 200, { ok: true, ...result, state });
+      })
+      .catch((error) => jsonResponse(res, Number(error.statusCode) || 400, {
+        ok: false,
+        code: error.code || "retention_apply_failed",
+        error: error.message || "合规删除执行失败",
+        actualVersion: error.actualVersion,
+        current: error.current,
+        conflicts: error.conflicts || [],
+      }));
     return true;
   }
 

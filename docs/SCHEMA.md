@@ -118,6 +118,27 @@
 
 发送前会在当前品牌、联系人和收件邮箱范围内执行投递治理：退订、黑名单、明确无效或已退信联系人会被拦截；默认近 7 天最多触达 3 次，策略可在邮件设置中调整。退信/投递失败通知仅在已有 IMAP 人工同步时识别，优先按 `In-Reply-To`、`References` 或唯一收件人匹配原始出站事件；无法唯一匹配时只进入人工分诊，不猜测归属。SMTP `accepted` 仅表示发信服务器已接受，不代表最终送达。定时 IMAP 同步仍由 `CRM-60` 延后。
 
+## complianceAudit
+
+合规留存/删除审计表。正文清除只移除缓存正文及其留存元数据，不删除邮件记录、摘要、Message-ID、线程、路由、退订、黑名单或投递失败证据；联系人身份只允许软删除。每次执行必须绑定品牌、操作者、原因和请求号，按 `request_id` 幂等。
+
+- `id`
+- `action`
+- `brand_id`
+- `contact_id`
+- `scopes`（`email_bodies`、`contact_identity`）
+- `request_id`
+- `actor_id`、`actor_name`
+- `source`
+- `reason`
+- `affected_email_bodies`
+- `affected_follow_up_events`
+- `affected_mail_inbox`
+- `affected_contacts`
+- `createdAt`、`updatedAt`
+
+`POST /api/compliance/retention/preview` 只读取并返回影响范围；`POST /api/compliance/retention/apply` 必须携带读取时的 `expectedVersion`，服务端重新读取后执行并在版本冲突时返回 `409`。`Case`、合作记录、达人、待开发达人和联系人历史证据不在删除范围内。
+
 ## products
 
 产品库主表，用于维护可供达人开发邮件选择的产品。产品可按品牌、国家/地区、类目和店铺归档；填写产品链接后可尝试读取公开页面的标题、主图和简介，人工填写内容不会被自动覆盖。

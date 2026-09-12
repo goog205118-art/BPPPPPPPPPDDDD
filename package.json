@@ -29,7 +29,8 @@
     "test:online-record-store": "node tools/online-record-store-regression-test.cjs",
     "test:storage-audit-conflict": "node tools/storage-audit-conflict-regression-test.cjs",
     "test:contact-identity": "node tools/contact-identity-regression-test.cjs",
-    "test:delivery-governance": "node tools/delivery-governance-regression-test.cjs"
+    "test:delivery-governance": "node tools/delivery-governance-regression-test.cjs",
+    "test:compliance-retention": "node tools/compliance-retention-regression-test.cjs"
   },
   "dependencies": {
     "@vercel/blob": "^2.8.0",

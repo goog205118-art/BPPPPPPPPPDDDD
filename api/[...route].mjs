@@ -28,6 +28,10 @@ const {
 const { reconcileCaseTasks } = require("../tools/crm-domain.cjs");
 const { normalizeContact } = require("../tools/contact-domain.cjs");
 const {
+  previewRetention,
+  applyRetention,
+} = require("../tools/compliance-retention-domain.cjs");
+const {
   createOnlineRecordStore,
   restoreEntityAtVersion,
 } = require("../tools/online-record-store.cjs");
@@ -50,6 +54,7 @@ const defaultState = {
   contactTracks: [],
   mailInbox: [],
   importHistory: [],
+  complianceAudit: [],
 };
 
 const defaultAiProfile = {
@@ -431,6 +436,7 @@ function normalizeBusinessState(rawState) {
     contactTracks,
     mailInbox,
     importHistory: Array.isArray(state.importHistory) ? state.importHistory : [],
+    complianceAudit: Array.isArray(state.complianceAudit) ? state.complianceAudit : [],
   };
 }
 
@@ -2457,6 +2463,59 @@ export default async function handler(req, res) {
           ok: false,
           code: error.code || "restore_failed",
           error: error.message,
+          actualVersion: error.actualVersion,
+          current: error.current,
+          conflicts: error.conflicts || [],
+        });
+      }
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/compliance/retention/preview") {
+      try {
+        const body = JSON.parse((await readBody(req)) || "{}");
+        json(res, 200, { ok: true, preview: previewRetention(await loadState(), body) });
+      } catch (error) {
+        json(res, Number(error.statusCode) || 400, {
+          ok: false,
+          code: error.code || "retention_preview_failed",
+          error: error.message || "留存范围预览失败",
+        });
+      }
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/compliance/retention/apply") {
+      try {
+        const body = JSON.parse((await readBody(req)) || "{}");
+        const expectedVersion = Number(body.expectedVersion);
+        if (!Number.isInteger(expectedVersion)) {
+          const error = new Error("执行合规删除必须携带有效的 expectedVersion，请先重新读取状态。");
+          error.statusCode = 409;
+          error.code = "version_conflict";
+          throw error;
+        }
+        const current = await loadState();
+        const result = applyRetention(current, body);
+        if (result.idempotent || result.preview?.policy?.dryRun) {
+          json(res, 200, { ok: true, ...result, state: current });
+          return;
+        }
+        const state = await saveState({
+          ...result.state,
+          _saveAudit: {
+            actorId: body.actorId || body.actor_id,
+            actorName: body.actorName || body.actor_name,
+            source: body.source || "manual_compliance",
+            reason: body.reason,
+          },
+        }, expectedVersion);
+        json(res, 200, { ok: true, ...result, state });
+      } catch (error) {
+        json(res, Number(error.statusCode) || 400, {
+          ok: false,
+          code: error.code || "retention_apply_failed",
+          error: error.message || "合规删除执行失败",
           actualVersion: error.actualVersion,
           current: error.current,
           conflicts: error.conflicts || [],
