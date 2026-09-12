@@ -1,4 +1,5 @@
 import json
+import os
 import sqlite3
 import sys
 from pathlib import Path
@@ -519,7 +520,86 @@ def normalize_value(value):
     return value
 
 
-def save_state(conn, state):
+def recovery_backup_path(db_path):
+    return Path(f"{db_path}.bak")
+
+
+def create_recovery_backup(conn, db_path):
+    """Create a self-contained backup before a state transaction starts."""
+    backup_path = recovery_backup_path(db_path)
+    temp_path = backup_path.with_name(f".{backup_path.name}.{os.getpid()}.tmp")
+    if temp_path.exists():
+        temp_path.unlink()
+
+    conn.commit()
+    backup_conn = sqlite3.connect(temp_path)
+    try:
+        conn.backup(backup_conn)
+        backup_conn.commit()
+    finally:
+        backup_conn.close()
+    os.replace(temp_path, backup_path)
+
+
+def restore_recovery_backup(conn, db_path):
+    backup_path = recovery_backup_path(db_path)
+    if not backup_path.exists():
+        raise FileNotFoundError("当前 SQLite 没有可恢复备份。")
+
+    conn.commit()
+    backup_conn = sqlite3.connect(backup_path)
+    try:
+        backup_conn.backup(conn)
+        conn.commit()
+    finally:
+        backup_conn.close()
+
+
+def row_values(table, row, keys):
+    if not isinstance(row, dict):
+        raise ValueError(f"{table} 中存在无效记录。")
+    if row.get("id") is None or str(row.get("id")).strip() == "":
+        raise ValueError(f"{table} 中存在缺少 id 的记录，已拒绝保存。")
+    return [
+        int(parse_flag(row.get(key)))
+        if (table == "followUps" and key == "has_unread_reply")
+        or (table == "actionTasks" and key == "generated")
+        else normalize_value(row.get(key))
+        for key in keys
+    ]
+
+
+def upsert_table(conn, table, columns, rows):
+    keys = list(columns.keys())
+    table_id = sql_identifier(table)
+    column_sql = ", ".join(sql_identifier(key) for key in keys)
+    placeholders = ", ".join("?" for _ in keys)
+    update_columns = [key for key in keys if key != "id"]
+    update_sql = ", ".join(
+        f"{sql_identifier(key)} = excluded.{sql_identifier(key)}" for key in update_columns
+    )
+    insert_sql = (
+        f"INSERT INTO {table_id} ({column_sql}) VALUES ({placeholders}) "
+        f"ON CONFLICT({sql_identifier('id')}) DO UPDATE SET {update_sql}"
+    )
+
+    incoming_ids = set()
+    for row in rows:
+        values = row_values(table, row, keys)
+        incoming_ids.add(str(row["id"]))
+        conn.execute(insert_sql, values)
+
+    existing_ids = [
+        str(row["id"])
+        for row in conn.execute(f"SELECT {sql_identifier('id')} AS id FROM {table_id}").fetchall()
+    ]
+    removed_ids = [record_id for record_id in existing_ids if record_id not in incoming_ids]
+    if removed_ids:
+        delete_sql = f"DELETE FROM {table_id} WHERE {sql_identifier('id')} = ?"
+        conn.executemany(delete_sql, ((record_id,) for record_id in removed_ids))
+
+
+def save_state(conn, state, db_path=None):
     create_schema(conn)
     payload = dict(state or {})
     meta = payload.get("meta") or {}
@@ -549,16 +629,15 @@ def save_state(conn, state):
         "updatedAt": meta.get("updatedAt") or current_time_iso(),
     }
 
+    resolved_db_path = db_path
+    if resolved_db_path is None:
+        resolved_db_path = Path(conn.execute("PRAGMA database_list").fetchone()[2])
+    create_recovery_backup(conn, Path(resolved_db_path))
     with conn:
-        for table in SCHEMA:
-            conn.execute(f"DELETE FROM {sql_identifier(table)}")
-
-        conn.execute("DELETE FROM meta")
-        for key, value in {
-            **payload["meta"],
-            "version": next_version,
-            "updatedAt": payload["meta"]["updatedAt"],
-        }.items():
+        stored_meta = {**current.get("meta", {}), **payload["meta"]}
+        stored_meta["version"] = next_version
+        stored_meta["updatedAt"] = payload["meta"]["updatedAt"]
+        for key, value in stored_meta.items():
             if key == "version":
                 stored_value = str(value)
             elif key == "updatedAt":
@@ -568,19 +647,9 @@ def save_state(conn, state):
             conn.execute("INSERT OR REPLACE INTO meta (key, value) VALUES (?, ?)", (str(key), stored_value))
 
         for table, columns in SCHEMA.items():
-            rows = payload.get(table) or []
-            keys = list(columns.keys())
-            placeholders = ", ".join("?" for _ in keys)
-            table_id = sql_identifier(table)
-            column_sql = ", ".join(sql_identifier(key) for key in keys)
-            insert_sql = f"INSERT INTO {table_id} ({column_sql}) VALUES ({placeholders})"
-
-            for row in rows:
-                values = [
-                    int(parse_flag(row.get(key))) if (table == "followUps" and key == "has_unread_reply") or (table == "actionTasks" and key == "generated") else normalize_value(row.get(key))
-                    for key in keys
-                ]
-                conn.execute(insert_sql, values)
+            if table not in payload:
+                continue
+            upsert_table(conn, table, columns, payload.get(table) or [])
     return {"ok": True, "version": next_version}
 
 
@@ -659,10 +728,17 @@ def main():
     if command == "save_state":
         body = sys.stdin.read().strip() or "{}"
         payload = json.loads(body)
-        result = save_state(conn, payload)
+        result = save_state(conn, payload, db_path)
         if result and result.get("ok") is False:
             print(json.dumps(result, ensure_ascii=False))
             return
+        state = rows_to_state(conn)
+        write_json_mirror(state_json_path, state)
+        print(json.dumps({"ok": True, "version": state["meta"]["version"]}, ensure_ascii=False))
+        return
+
+    if command == "restore_backup":
+        restore_recovery_backup(conn, db_path)
         state = rows_to_state(conn)
         write_json_mirror(state_json_path, state)
         print(json.dumps({"ok": True, "version": state["meta"]["version"]}, ensure_ascii=False))

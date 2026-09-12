@@ -32,6 +32,10 @@
 - `createdAt`
 - `updatedAt`
 
+## 本地 SQLite 保存与恢复
+
+本地 SQLite 是业务状态的主存储。每次状态保存会先校验客户端携带的全局 `meta.version`，再在同一事务中按表内 `id` 执行新增、修改和删除；未出现在请求中的表不会被清空，提交失败会整体回滚。保存前会生成自包含的 `resource-workbench.sqlite3.bak` 恢复点，CLI 可通过 `restore_backup` 恢复到最近一次成功保存之前的版本；项目侧 `state.json` 仅作为镜像，不作为并发写入依据。
+
 ## resources
 
 资源库主表，用于记录 Deal 站、社群、联盟、媒体等资源。

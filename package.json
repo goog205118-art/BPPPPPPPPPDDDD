@@ -24,7 +24,8 @@
     "test:mail-triage-console": "node tools/mail-triage-console-regression-test.cjs",
     "test:mail-triage-case-actions": "node tools/mail-triage-case-actions-regression-test.cjs",
     "test:mail-triage-lead": "node tools/mail-triage-lead-regression-test.cjs",
-    "test:storage-concurrency": "node tools/storage-concurrency-regression-test.cjs"
+    "test:storage-concurrency": "node tools/storage-concurrency-regression-test.cjs",
+    "test:storage-record-transaction": "node tools/storage-record-transaction-regression-test.cjs"
   },
   "dependencies": {
     "@vercel/blob": "^2.8.0",
