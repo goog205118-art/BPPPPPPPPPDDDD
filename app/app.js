@@ -29,6 +29,7 @@ const ACTION_TASK_TYPE_LABELS = {
   quote_confirmation_pending: "待确认报价",
   publish_pending: "待发布",
   performance_data_pending: "待回收数据",
+  ai_suggestion_review: "AI 建议待审核",
   general: "通用",
 };
 const FOLLOW_UP_STAGES = ["已联系待回复", "初步沟通", "已回复", "谈合作方式 / 报价", "条款确认", "待寄样", "运输中", "已签收", "待发布", "已发布", "数据回收", "已结案", "暂停跟进", "未谈妥"];
@@ -93,6 +94,11 @@ const defaultMailSettings = {
     retryLimit: 2,
     retryBackoffMinutes: 15,
     aiSuggestionsEnabled: false,
+    aiSuggestionMinIntervalMinutes: 60,
+    aiSuggestionMaxPerRun: 5,
+    aiSuggestionAccountIds: [],
+    aiSuggestionState: { byCaseId: {} },
+    aiSuggestionRunHistory: [],
     accountState: {},
     runHistory: [],
   },
@@ -721,6 +727,9 @@ const elements = {
   mailAutomationRetryLimit: document.getElementById("mailAutomationRetryLimit"),
   mailAutomationRetryBackoff: document.getElementById("mailAutomationRetryBackoff"),
   mailAutomationAiSuggestions: document.getElementById("mailAutomationAiSuggestions"),
+  mailAutomationAiSuggestionAccountIds: document.getElementById("mailAutomationAiSuggestionAccountIds"),
+  mailAutomationAiSuggestionMinInterval: document.getElementById("mailAutomationAiSuggestionMinInterval"),
+  mailAutomationAiSuggestionMaxPerRun: document.getElementById("mailAutomationAiSuggestionMaxPerRun"),
   mailAutomationSaveBtn: document.getElementById("mailAutomationSaveBtn"),
   mailAutomationCheckBtn: document.getElementById("mailAutomationCheckBtn"),
   mailAutomationStatus: document.getElementById("mailAutomationStatus"),
@@ -2008,6 +2017,15 @@ function normalizedMailAutomation(settings = state.mailSettings, accounts = sett
     retryLimit: number(source.retryLimit, 2, 0, 3),
     retryBackoffMinutes: number(source.retryBackoffMinutes, 15, 1, 1440),
     aiSuggestionsEnabled: parseFlag(source.aiSuggestionsEnabled),
+    aiSuggestionMinIntervalMinutes: number(source.aiSuggestionMinIntervalMinutes, 60, 15, 1440),
+    aiSuggestionMaxPerRun: number(source.aiSuggestionMaxPerRun, 5, 1, 20),
+    aiSuggestionAccountIds: [...new Set((Array.isArray(source.aiSuggestionAccountIds) ? source.aiSuggestionAccountIds : []).map(text).filter((id) => knownAccountIds.has(id)))],
+    aiSuggestionState: source.aiSuggestionState && typeof source.aiSuggestionState === "object"
+      ? clone(source.aiSuggestionState)
+      : { byCaseId: {} },
+    aiSuggestionRunHistory: Array.isArray(source.aiSuggestionRunHistory)
+      ? clone(source.aiSuggestionRunHistory).slice(0, 60)
+      : [],
     accountState: source.accountState && typeof source.accountState === "object" ? source.accountState : {},
     runHistory: history.slice(0, 12),
   };
@@ -2279,6 +2297,7 @@ function readMailSettingsForm() {
 
 function readMailAutomation() {
   const accountIds = [...(elements.mailAutomationAccountIds?.selectedOptions || [])].map((option) => text(option.value)).filter(Boolean);
+  const aiSuggestionAccountIds = [...(elements.mailAutomationAiSuggestionAccountIds?.selectedOptions || [])].map((option) => text(option.value)).filter(Boolean);
   return normalizedMailAutomation({
     accounts: state.mailSettings.accounts,
     automation: {
@@ -2289,6 +2308,11 @@ function readMailAutomation() {
       retryLimit: elements.mailAutomationRetryLimit?.value,
       retryBackoffMinutes: elements.mailAutomationRetryBackoff?.value,
       aiSuggestionsEnabled: Boolean(elements.mailAutomationAiSuggestions?.checked),
+      aiSuggestionAccountIds,
+      aiSuggestionMinIntervalMinutes: elements.mailAutomationAiSuggestionMinInterval?.value,
+      aiSuggestionMaxPerRun: elements.mailAutomationAiSuggestionMaxPerRun?.value,
+      aiSuggestionState: state.mailSettings.automation?.aiSuggestionState,
+      aiSuggestionRunHistory: state.mailSettings.automation?.aiSuggestionRunHistory,
       accountState: state.mailSettings.automation?.accountState,
       runHistory: state.mailSettings.automation?.runHistory,
     },
@@ -2299,10 +2323,12 @@ function renderMailAutomationSettings() {
   const automation = normalizedMailAutomation();
   const accounts = state.mailSettings.accounts || [];
   const selectedIds = new Set(automation.accountIds);
-  elements.mailAutomationEnabled.checked = automation.enabled;
-  elements.mailAutomationAccountIds.innerHTML = accounts.map((account) => (
+  const selectedAiSuggestionIds = new Set(automation.aiSuggestionAccountIds);
+  const accountOptions = accounts.map((account) => (
     `<option value="${escapeHtml(account.id)}">${escapeHtml(account.label || account.imap?.user || "未命名邮箱")} · ${escapeHtml(mailAccountBrandNames(account).join(" / ") || "未绑定品牌")}</option>`
   )).join("");
+  elements.mailAutomationEnabled.checked = automation.enabled;
+  elements.mailAutomationAccountIds.innerHTML = accountOptions;
   [...elements.mailAutomationAccountIds.options].forEach((option) => {
     option.selected = selectedIds.has(option.value);
   });
@@ -2311,9 +2337,15 @@ function renderMailAutomationSettings() {
   elements.mailAutomationRetryLimit.value = String(automation.retryLimit);
   elements.mailAutomationRetryBackoff.value = String(automation.retryBackoffMinutes);
   elements.mailAutomationAiSuggestions.checked = automation.aiSuggestionsEnabled;
+  elements.mailAutomationAiSuggestionAccountIds.innerHTML = accountOptions;
+  [...elements.mailAutomationAiSuggestionAccountIds.options].forEach((option) => {
+    option.selected = selectedAiSuggestionIds.has(option.value);
+  });
+  elements.mailAutomationAiSuggestionMinInterval.value = String(automation.aiSuggestionMinIntervalMinutes);
+  elements.mailAutomationAiSuggestionMaxPerRun.value = String(automation.aiSuggestionMaxPerRun);
   const history = automation.runHistory || [];
   elements.mailAutomationStatus.textContent = automation.enabled
-    ? `已启用：${automation.accountIds.length ? `选定 ${automation.accountIds.length} 个账户` : "全部已启用账户"}；仅同步到期账户。AI 定时建议仍是预留项，当前不会调用模型。`
+    ? `已启用：${automation.accountIds.length ? `选定 ${automation.accountIds.length} 个账户` : "全部已启用账户"}；仅同步到期账户。${automation.aiSuggestionsEnabled ? `AI 只会为 ${automation.aiSuggestionAccountIds.length ? `${automation.aiSuggestionAccountIds.length} 个选定账户` : "未选定账户"}生成待审核建议。` : "AI 待审核建议当前关闭。"}`
     : "当前关闭。手动同步不受影响；开启后仍不会自动发信或自动推进阶段。";
   elements.mailAutomationHistory.innerHTML = history.length
     ? history.slice(0, 5).map((run) => {
@@ -6449,6 +6481,61 @@ function closeFollowUpDetail() {
   elements.followUpDetailBody.innerHTML = "";
 }
 
+function scheduledAiSuggestionMarkup(followUp, model) {
+  const suggestions = Array.isArray(state.data.followUpAiSuggestions) ? state.data.followUpAiSuggestions : [];
+  const suggestion = suggestions
+    .filter((item) => text(item.follow_up_id) === text(followUp.id)
+      && text(item.case_id) === text(model.caseId || followUp.case_id))
+    .sort((left, right) => Date.parse(right.created_at || 0) - Date.parse(left.created_at || 0))[0];
+  if (!suggestion) return "";
+
+  const analysis = suggestion.analysis && typeof suggestion.analysis === "object" ? suggestion.analysis : {};
+  const contextScope = suggestion.context_scope && typeof suggestion.context_scope === "object" ? suggestion.context_scope : {};
+  const statusLabel = {
+    pending_review: "待人工审核",
+    failed: "生成失败",
+    dismissed: "已忽略",
+    superseded: "已被新建议替代",
+  }[text(suggestion.status)] || "待确认";
+  const facts = [
+    ["对方意图", analysis.counterparty_intent_cn],
+    ["建议下一步", analysis.recommended_next_action],
+    ["建议阶段", analysis.suggested_stage],
+    ["缺失信息", Array.isArray(analysis.missing_information) ? analysis.missing_information.join("；") : analysis.missing_information],
+    ["风险提示", Array.isArray(analysis.risk_notes) ? analysis.risk_notes.join("；") : analysis.risk_notes],
+  ].filter(([, value]) => text(value));
+  const warnings = Array.isArray(analysis.warnings) ? analysis.warnings.map(text).filter(Boolean) : [];
+  const contextItems = [
+    Number.isFinite(Number(contextScope.email_count)) ? `纳入 ${Number(contextScope.email_count)} 封邮件` : "",
+    text(contextScope.body_authorized) === "true" || contextScope.body_authorized === true ? "已授权正文上下文" : "",
+    text(contextScope.range_label),
+  ].filter(Boolean);
+
+  return `
+    <section class="followup-detail-section followup-scheduled-ai-panel">
+      <header>
+        <div><span>SCHEDULED AI</span><h3>定时 AI 待审核建议</h3></div>
+        <small class="scheduled-ai-status scheduled-ai-status-${escapeHtml(text(suggestion.status) || "pending_review")}">${escapeHtml(statusLabel)}</small>
+      </header>
+      <p class="followup-scheduled-ai-notice">只读建议，不会自动应用、不自动发送邮件、不自动推进阶段，也不会清除新回信未读状态。</p>
+      <div class="followup-scheduled-ai-meta">
+        <span>来源：定时邮件同步</span>
+        <span>${escapeHtml(formatDateTime(suggestion.created_at) || "生成时间未知")}</span>
+        ${text(suggestion.model_name) ? `<span>${escapeHtml([suggestion.model_profile, suggestion.model_name].filter(Boolean).join(" · "))}</span>` : ""}
+      </div>
+      ${text(suggestion.status) === "failed"
+        ? `<p class="followup-scheduled-ai-error">${escapeHtml(suggestion.error || "未返回可审核建议，请人工查看当前邮件上下文。")}</p>`
+        : `
+          <p class="followup-scheduled-ai-summary">${escapeHtml(analysis.summary_cn || "AI 未返回可审核摘要。")}</p>
+          ${facts.length ? `<dl class="followup-scheduled-ai-facts">${facts.map(([label, value]) => `<div><dt>${escapeHtml(label)}</dt><dd>${escapeHtml(value)}</dd></div>`).join("")}</dl>` : ""}
+          ${warnings.length ? `<ul class="followup-scheduled-ai-warnings">${warnings.map((warning) => `<li>${escapeHtml(warning)}</li>`).join("")}</ul>` : ""}
+          ${contextItems.length ? `<p class="followup-context-scope">${contextItems.map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</p>` : ""}
+        `}
+      <button type="button" class="ghost" data-followup-open-scheduled-ai-review>进入人工研判</button>
+    </section>
+  `;
+}
+
 function renderFollowUpDetail() {
   if (!state.followUpDetail.open) return;
   const followUp = rows("followups").find((row) => text(row.id) === text(state.followUpDetail.followUpId));
@@ -6550,6 +6637,8 @@ function renderFollowUpDetail() {
       </section>
 
       <aside class="followup-detail-side">
+        ${scheduledAiSuggestionMarkup(followUp, model)}
+
         <section class="followup-detail-section followup-ai-panel">
           <header><div><span>AI REVIEW</span><h3>沟通研判</h3></div></header>
           <p class="followup-context-scope">${followUpBodyContextSummary(followUp).map((item) => `<span>${escapeHtml(item)}</span>`).join("")}</p>
@@ -6589,6 +6678,11 @@ function renderFollowUpDetail() {
   });
   elements.followUpDetailBody.querySelector("[data-followup-detail-import]")?.addEventListener("click", () => openFollowUpMailImport(followUp.id));
   elements.followUpDetailBody.querySelector("[data-followup-ai-analyze]")?.addEventListener("click", () => void analyzeFollowUpDetail());
+  elements.followUpDetailBody.querySelector("[data-followup-open-scheduled-ai-review]")?.addEventListener("click", () => {
+    const analyzer = elements.followUpDetailBody.querySelector("[data-followup-ai-analyze]");
+    analyzer?.scrollIntoView({ behavior: "smooth", block: "center" });
+    analyzer?.focus();
+  });
   elements.followUpDetailBody.querySelector("[data-followup-open-stage-apply]")?.addEventListener("click", () => {
     state.followUpDetail.stageApplyOpen = !state.followUpDetail.stageApplyOpen;
     renderFollowUpDetail();

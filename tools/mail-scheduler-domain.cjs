@@ -1,6 +1,10 @@
 "use strict";
 
 const crypto = require("crypto");
+const {
+  DEFAULT_AI_SUGGESTION_AUTOMATION,
+  normalizeAiSuggestionAutomation,
+} = require("./mail-ai-suggestion-domain.cjs");
 
 const MAX_RUN_HISTORY = 60;
 const MIN_INTERVAL_MINUTES = 15;
@@ -17,7 +21,7 @@ const DEFAULT_MAIL_AUTOMATION = Object.freeze({
   maxPerFolder: 120,
   retryLimit: 2,
   retryBackoffMinutes: 15,
-  aiSuggestionsEnabled: false,
+  ...DEFAULT_AI_SUGGESTION_AUTOMATION,
   accountState: {},
   runHistory: [],
 });
@@ -114,6 +118,7 @@ function normalizeMailAutomation(input = {}, accounts = [], previous = {}) {
   });
   const rawHistory = Array.isArray(source.runHistory) ? source.runHistory : Array.isArray(fallback.runHistory) ? fallback.runHistory : [];
 
+  const aiSuggestions = normalizeAiSuggestionAutomation(source, accounts, fallback);
   return {
     enabled: source.enabled === undefined ? flag(fallback.enabled) : flag(source.enabled),
     intervalMinutes: integer(source.intervalMinutes ?? fallback.intervalMinutes, DEFAULT_MAIL_AUTOMATION.intervalMinutes, MIN_INTERVAL_MINUTES, MAX_INTERVAL_MINUTES),
@@ -121,7 +126,7 @@ function normalizeMailAutomation(input = {}, accounts = [], previous = {}) {
     maxPerFolder: integer(source.maxPerFolder ?? fallback.maxPerFolder, DEFAULT_MAIL_AUTOMATION.maxPerFolder, 1, MAX_MESSAGES_PER_FOLDER),
     retryLimit: integer(source.retryLimit ?? fallback.retryLimit, DEFAULT_MAIL_AUTOMATION.retryLimit, 0, MAX_RETRY_LIMIT),
     retryBackoffMinutes: integer(source.retryBackoffMinutes ?? fallback.retryBackoffMinutes, DEFAULT_MAIL_AUTOMATION.retryBackoffMinutes, 1, MAX_BACKOFF_MINUTES),
-    aiSuggestionsEnabled: source.aiSuggestionsEnabled === undefined ? flag(fallback.aiSuggestionsEnabled) : flag(source.aiSuggestionsEnabled),
+    ...aiSuggestions,
     accountState,
     runHistory: rawHistory.map(sanitizeRunRecord).filter((run) => run.id).slice(0, MAX_RUN_HISTORY),
   };
@@ -227,6 +232,11 @@ function publicMailAutomation(automationInput = {}, accounts = []) {
     retryLimit: automation.retryLimit,
     retryBackoffMinutes: automation.retryBackoffMinutes,
     aiSuggestionsEnabled: automation.aiSuggestionsEnabled,
+    aiSuggestionMinIntervalMinutes: automation.aiSuggestionMinIntervalMinutes,
+    aiSuggestionMaxPerRun: automation.aiSuggestionMaxPerRun,
+    aiSuggestionAccountIds: automation.aiSuggestionAccountIds,
+    aiSuggestionState: automation.aiSuggestionState,
+    aiSuggestionRunHistory: automation.aiSuggestionRunHistory,
     accountState: automation.accountState,
     runHistory: automation.runHistory,
   };

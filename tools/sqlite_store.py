@@ -222,6 +222,26 @@ SCHEMA = {
         "createdAt": "TEXT",
         "updatedAt": "TEXT",
     },
+    "followUpAiSuggestions": {
+        "id": "TEXT PRIMARY KEY",
+        "brand_id": "TEXT",
+        "brand": "TEXT",
+        "case_id": "TEXT",
+        "follow_up_id": "TEXT",
+        "trigger_event_id": "TEXT",
+        "status": "TEXT",
+        "created_at": "TEXT",
+        "model_profile": "TEXT",
+        "model_name": "TEXT",
+        "source": "TEXT",
+        "analysis": "TEXT",
+        "context_scope": "TEXT",
+        "error": "TEXT",
+        "reviewed_at": "TEXT",
+        "reviewed_by": "TEXT",
+        "createdAt": "TEXT",
+        "updatedAt": "TEXT",
+    },
     "matches": {
         "id": "TEXT PRIMARY KEY",
         "brand_id": "TEXT",
@@ -520,6 +540,7 @@ def rows_to_state(conn):
         "cases": [],
         "actionTasks": [],
         "actionTaskEvents": [],
+        "followUpAiSuggestions": [],
         "followUpEvents": [],
         "contacts": [],
         "mailInbox": [],
@@ -562,7 +583,7 @@ def row_to_dict(row):
     for key in ("is_primary", "unsubscribed", "blacklisted", "is_deleted"):
         if key in payload:
             payload[key] = parse_flag(payload[key])
-    for key in ("beforeCounts", "snapshot", "selected_resource_ids", "product_ids", "candidate_creator_ids", "candidate_lead_ids", "candidate_brand_ids", "candidate_follow_up_ids", "candidate_case_ids", "match_reasons", "match_candidates", "references", "metadata", "scopes"):
+    for key in ("beforeCounts", "snapshot", "selected_resource_ids", "product_ids", "candidate_creator_ids", "candidate_lead_ids", "candidate_brand_ids", "candidate_follow_up_ids", "candidate_case_ids", "match_reasons", "match_candidates", "references", "metadata", "scopes", "analysis", "context_scope"):
         if payload.get(key):
             try:
                 payload[key] = json.loads(payload[key])

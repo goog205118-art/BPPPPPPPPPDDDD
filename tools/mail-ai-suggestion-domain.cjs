@@ -6,7 +6,6 @@ const {
   taskKey,
   unreadReplyEventForCase,
 } = require("./crm-domain.cjs");
-const { accountBrandIds, redactLogText } = require("./mail-scheduler-domain.cjs");
 
 const MAX_SUGGESTIONS_PER_RUN = 20;
 const MAX_SUGGESTION_HISTORY = 60;
@@ -25,6 +24,17 @@ const DEFAULT_AI_SUGGESTION_AUTOMATION = Object.freeze({
 
 function text(value) {
   return String(value ?? "").trim();
+}
+
+function accountBrandIds(account = {}) {
+  return [...new Set((Array.isArray(account.brand_ids) ? account.brand_ids : [account.brand_id]).map(text).filter(Boolean))];
+}
+
+function redactLogText(value) {
+  return text(value)
+    .replace(/\b(?:password|passwd|authorization|token|api[_ -]?key)\s*[:=]\s*\S+/gi, "[已隐藏]")
+    .replace(/\bdata:(?:text|message|application)\/[^,\s]+,[^\s]+/gi, "[已隐藏]")
+    .slice(0, 600);
 }
 
 function flag(value) {

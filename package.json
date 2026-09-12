@@ -33,7 +33,9 @@
     "test:compliance-retention": "node tools/compliance-retention-regression-test.cjs",
     "test:mail-scheduler": "node tools/mail-scheduler-regression-test.cjs",
     "test:mail-scheduler-executor": "node tools/mail-scheduler-executor-regression-test.cjs",
-    "test:mail-ai-suggestions": "node tools/mail-ai-suggestion-regression-test.cjs"
+    "test:mail-ai-suggestions": "node tools/mail-ai-suggestion-regression-test.cjs",
+    "test:mail-ai-suggestions-runtime": "node tools/mail-ai-suggestion-runtime-regression-test.cjs",
+    "test:mail-ai-suggestions-ui": "node tools/mail-ai-suggestion-ui-regression-test.cjs"
   },
   "dependencies": {
     "@vercel/blob": "^2.8.0",

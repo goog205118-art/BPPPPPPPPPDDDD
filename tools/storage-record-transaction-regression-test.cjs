@@ -50,7 +50,7 @@ function runPython(python, script, ...args) {
   return result.stdout.trim();
 }
 
-function payload(version, creatorRows) {
+function payload(version, creatorRows, followUpAiSuggestions = []) {
   return {
     expectedVersion: version,
     meta: { version, updatedAt: `2026-09-12T12:0${version}:00.000Z` },
@@ -61,6 +61,7 @@ function payload(version, creatorRows) {
       updatedAt: "2026-09-12T12:00:00.000Z",
     }],
     creators: creatorRows,
+    followUpAiSuggestions,
   };
 }
 
@@ -86,7 +87,19 @@ function testRecordWritesAndRecovery() {
     bridgeJson(python, "save_state", dbPath, statePath, payload(1, [
       creator("CR-A", "初始 A"),
       creator("CR-B", "初始 B"),
-    ]));
+    ], [{
+      id: "AISUG-1",
+      brand_id: "BR-A",
+      case_id: "CASE-1",
+      status: "pending_review",
+      analysis: { summary_cn: "待人工审核。" },
+      context_scope: { email_count: 2 },
+      createdAt: "2026-09-12T12:00:00.000Z",
+      updatedAt: "2026-09-12T12:00:00.000Z",
+    }]));
+    const seeded = bridgeJson(python, "load_state", dbPath, statePath);
+    assert.equal(seeded.followUpAiSuggestions[0].analysis.summary_cn, "待人工审核。");
+    assert.equal(seeded.followUpAiSuggestions[0].context_scope.email_count, 2);
 
     runPython(
       python,

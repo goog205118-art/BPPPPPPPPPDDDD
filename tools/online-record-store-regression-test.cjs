@@ -19,6 +19,7 @@ function normalize(state) {
     cases: Array.isArray(state?.cases) ? state.cases : [],
     actionTasks: Array.isArray(state?.actionTasks) ? state.actionTasks : [],
     actionTaskEvents: Array.isArray(state?.actionTaskEvents) ? state.actionTaskEvents : [],
+    followUpAiSuggestions: Array.isArray(state?.followUpAiSuggestions) ? state.followUpAiSuggestions : [],
     followUpEvents: Array.isArray(state?.followUpEvents) ? state.followUpEvents : [],
     contactTracks: Array.isArray(state?.contactTracks) ? state.contactTracks : [],
     mailInbox: Array.isArray(state?.mailInbox) ? state.mailInbox : [],
@@ -92,6 +93,19 @@ async function run() {
   assert.equal(noOp.meta.version, 9);
   assert.equal(operations.length, 2, "无变化保存不能制造空操作。");
   assert.equal(writes.every((operation) => operation.id), true);
+
+  const suggestionUpdate = clone(merged.state);
+  suggestionUpdate.followUpAiSuggestions = [{
+    id: "AISUG-1",
+    brand_id: "BR-HSU",
+    case_id: "CASE-1",
+    status: "pending_review",
+    analysis: { summary_cn: "待人工审核。" },
+    context_scope: { email_count: 2 },
+  }];
+  const suggestionSaved = await firstStore.save(suggestionUpdate, merged.state.meta.version);
+  assert.equal(suggestionSaved.followUpAiSuggestions[0].analysis.summary_cn, "待人工审核。");
+  assert.equal(suggestionSaved.followUpAiSuggestions[0].context_scope.email_count, 2);
   console.log("PASS online record store regression: stale disjoint writes merge, same-record writes conflict, and legacy snapshot is never overwritten.");
 }
 

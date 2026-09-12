@@ -8,6 +8,7 @@ const {
   finalizeRun,
   redactLogText,
 } = require("./mail-scheduler-domain.cjs");
+const { generateScheduledAiSuggestions } = require("./mail-ai-suggestion-domain.cjs");
 
 function text(value) {
   return String(value ?? "").trim();
@@ -101,6 +102,85 @@ async function syncAndSaveWithRetry(dependencies, settings, account, options) {
   return { summary: lastSummary, state: null, retries };
 }
 
+function suggestionKey(suggestion = {}) {
+  return `${text(suggestion.case_id)}::${text(suggestion.trigger_event_id)}`;
+}
+
+function aiAutomationPatch(automation = {}) {
+  return {
+    aiSuggestionsEnabled: automation.aiSuggestionsEnabled,
+    aiSuggestionMinIntervalMinutes: automation.aiSuggestionMinIntervalMinutes,
+    aiSuggestionMaxPerRun: automation.aiSuggestionMaxPerRun,
+    aiSuggestionAccountIds: automation.aiSuggestionAccountIds,
+    aiSuggestionState: automation.aiSuggestionState,
+    aiSuggestionRunHistory: automation.aiSuggestionRunHistory,
+  };
+}
+
+function mergeScheduledAiSuggestionState(currentState, generatedState) {
+  const current = currentState && typeof currentState === "object" ? currentState : {};
+  const generated = generatedState && typeof generatedState === "object" ? generatedState : {};
+  const currentSuggestions = Array.isArray(current.followUpAiSuggestions) ? current.followUpAiSuggestions : [];
+  const generatedSuggestions = Array.isArray(generated.followUpAiSuggestions) ? generated.followUpAiSuggestions : [];
+  const existingSuggestionKeys = new Set(currentSuggestions.map(suggestionKey));
+  const additions = generatedSuggestions.filter((row) => {
+    const key = suggestionKey(row);
+    return key !== "::" && !existingSuggestionKeys.has(key);
+  });
+  const suggestionIds = new Set(additions.map((row) => text(row.id)).filter(Boolean));
+  const currentTasks = Array.isArray(current.actionTasks) ? current.actionTasks : [];
+  const generatedTasks = Array.isArray(generated.actionTasks) ? generated.actionTasks : [];
+  const existingTaskKeys = new Set(currentTasks.map((row) => `${text(row.case_id)}::${text(row.dedupe_key)}`));
+  const taskAdditions = generatedTasks.filter((row) => (
+    text(row.type) === "ai_suggestion_review"
+    && suggestionIds.has(text(row.source_id))
+    && !existingTaskKeys.has(`${text(row.case_id)}::${text(row.dedupe_key)}`)
+  ));
+  return {
+    ...current,
+    followUpAiSuggestions: [...currentSuggestions, ...additions],
+    actionTasks: [...currentTasks, ...taskAdditions],
+  };
+}
+
+async function saveScheduledAiSuggestionsWithRetry(dependencies, state, expectedVersion, input = {}) {
+  const generatedState = clone(state);
+  const outcome = await generateScheduledAiSuggestions(generatedState, input);
+  if (!outcome.suggestions?.length) return { ...outcome, state, retries: 0, persisted: false };
+
+  const maxRetries = Math.min(2, Math.max(0, Number(input.maxStateSaveRetries ?? 1)));
+  let retries = 0;
+  let current = generatedState;
+  let version = expectedVersion;
+  while (retries <= maxRetries) {
+    try {
+      current._saveAudit = {
+        actorId: "mail_scheduler_ai",
+        actorName: "邮箱定时 AI 建议",
+        source: input.source,
+        reason: `邮件同步后生成 AI 待审核建议：${text(input.account?.id)}`,
+      };
+      const savedState = await dependencies.saveState(current, version);
+      return { ...outcome, state: savedState, retries, persisted: true };
+    } catch (error) {
+      if (error?.code !== "version_conflict" || retries >= maxRetries) {
+        return {
+          ...outcome,
+          state,
+          retries,
+          persisted: false,
+          persistenceError: redactLogText(error?.message || "AI 建议保存失败"),
+        };
+      }
+      retries += 1;
+      const latest = await dependencies.loadState();
+      current = mergeScheduledAiSuggestionState(latest, generatedState);
+      version = latest?.meta?.version;
+    }
+  }
+  return { ...outcome, state, retries, persisted: false };
+}
+
 async function executeMailScheduler(dependencies, options = {}) {
   const now = options.now instanceof Date ? options.now : new Date(options.now || Date.now());
   const source = ["local_timer", "vercel_cron", "manual"].includes(text(options.source)) ? text(options.source) : "manual";
@@ -172,14 +252,50 @@ async function executeMailScheduler(dependencies, options = {}) {
           source,
           maxPerFolder: reservation.automation.maxPerFolder,
         });
+        let aiOutcome = null;
+        if (outcome.state) {
+          try {
+            aiOutcome = await saveScheduledAiSuggestionsWithRetry(
+              dependencies,
+              outcome.state,
+              outcome.state?.meta?.version,
+              {
+                source,
+                account,
+                accounts: settings.accounts,
+                automation: settings.automation,
+                runId: `${reservation.run.id}-ai`,
+                maxStateSaveRetries: options.maxStateSaveRetries,
+                generateFollowUpAiSuggestion: dependencies.generateFollowUpAiSuggestion,
+              },
+            );
+          } catch (error) {
+            aiOutcome = {
+              status: "failed",
+              suggestions: [],
+              persistenceError: redactLogText(error?.message || "AI 建议生成失败"),
+            };
+          }
+        }
         const status = outcome.summary?.warnings?.length ? "partial" : "succeeded";
+        const aiAutomation = aiOutcome?.automation
+          ? normalizeMailAutomation(aiOutcome.automation, settings.accounts, settings.automation)
+          : normalizeMailAutomation(settings.automation, settings.accounts, settings.automation);
         const finalized = finalizeRun(reservation.automation, reservation.run, {
           accounts: settings.accounts,
           status,
           summary: summaryForLog(outcome.summary),
           warning: outcome.retries ? `保存版本冲突后已重试 ${outcome.retries} 次。` : "",
         }, new Date());
-        settings = updateAccountSyncMetadata({ ...settings, automation: finalized.automation }, account.id, outcome.summary, new Date());
+        settings = updateAccountSyncMetadata({
+          ...settings,
+          // AI suggestions own only their settings and history. Preserve the just-finalized
+          // scheduler lease/account state/run log rather than reapplying stale settings.
+          automation: normalizeMailAutomation({
+            ...finalized.automation,
+            ...aiAutomationPatch(aiAutomation),
+          }, settings.accounts, finalized.automation),
+        }, account.id, outcome.summary, new Date());
         settings = await dependencies.saveSettings(settings);
         results.push({
           accountId: text(account.id),
@@ -187,7 +303,15 @@ async function executeMailScheduler(dependencies, options = {}) {
           summary: summaryForLog(outcome.summary),
           retries: outcome.retries,
           runId: finalized.run.id,
-          state: outcome.state,
+          state: aiOutcome?.state || outcome.state,
+          ai: aiOutcome ? {
+            status: aiOutcome.status,
+            generated: Number(aiOutcome.run?.generated || 0),
+            failed: Number(aiOutcome.run?.failed || 0),
+            skipped: Number(aiOutcome.run?.skipped || 0),
+            persisted: aiOutcome.persisted === true,
+            warning: aiOutcome.persistenceError || "",
+          } : null,
         });
       } catch (error) {
         const finalized = finalizeRun(reservation.automation, reservation.run, {
@@ -236,4 +360,7 @@ module.exports = {
   executeMailScheduler,
   updateAccountSyncMetadata,
   syncAndSaveWithRetry,
+  mergeScheduledAiSuggestionState,
+  saveScheduledAiSuggestionsWithRetry,
+  aiAutomationPatch,
 };

@@ -93,6 +93,7 @@ const defaultState = {
   cases: [],
   actionTasks: [],
   actionTaskEvents: [],
+  followUpAiSuggestions: [],
   followUpEvents: [],
   contacts: [],
   contactTracks: [],
@@ -154,7 +155,7 @@ function generatedBrandId(name) {
 
 function normalizeBusinessState(rawState) {
   const state = rawState && typeof rawState === "object" ? rawState : {};
-  const rawCollections = ["creators", "resources", "leads", "products", "cooperations", "matches", "cases", "followUps", "contacts", "contactTracks", "actionTasks"];
+  const rawCollections = ["creators", "resources", "leads", "products", "cooperations", "matches", "cases", "followUps", "contacts", "contactTracks", "actionTasks", "followUpAiSuggestions"];
   const brandsByKey = new Map();
   const brandsById = new Map();
   const addBrand = (raw) => {
@@ -430,6 +431,31 @@ function normalizeBusinessState(rawState) {
         };
       })
     : [];
+  const followUpAiSuggestions = Array.isArray(state.followUpAiSuggestions)
+    ? state.followUpAiSuggestions.map((row) => {
+        const linkedCase = caseById.get(textValue(row.case_id));
+        const validStatus = ["pending_review", "failed", "dismissed", "superseded"].includes(textValue(row.status))
+          ? textValue(row.status)
+          : "pending_review";
+        return resolveBrand({
+          ...row,
+          case_id: textValue(row.case_id),
+          follow_up_id: textValue(row.follow_up_id),
+          trigger_event_id: textValue(row.trigger_event_id),
+          status: linkedCase && textValue(row.brand_id) && textValue(row.brand_id) !== textValue(linkedCase.brand_id)
+            ? "failed"
+            : validStatus,
+          model_profile: textValue(row.model_profile),
+          model_name: textValue(row.model_name),
+          source: textValue(row.source) || "scheduled_mail_sync",
+          analysis: row.analysis && typeof row.analysis === "object" && !Array.isArray(row.analysis) ? row.analysis : {},
+          context_scope: row.context_scope && typeof row.context_scope === "object" && !Array.isArray(row.context_scope) ? row.context_scope : {},
+          error: textValue(row.error),
+          reviewed_at: textValue(row.reviewed_at),
+          reviewed_by: textValue(row.reviewed_by),
+        }, brandsById.get(textValue(linkedCase?.brand_id)));
+      }).filter((row) => row.id && row.case_id && row.brand_id)
+    : [];
 
   return {
     ...defaultState,
@@ -449,6 +475,7 @@ function normalizeBusinessState(rawState) {
     followUps,
     actionTasks,
     actionTaskEvents,
+    followUpAiSuggestions,
     followUpEvents,
     contacts,
     contactTracks,
@@ -536,7 +563,7 @@ function localConflictItems(requestedState, currentState) {
   const collections = [
     "brands", "creators", "resources", "leads", "products", "cooperations",
     "matches", "followUps", "cases", "actionTasks", "actionTaskEvents",
-    "followUpEvents", "contactTracks", "mailInbox", "importHistory", "complianceAudit",
+    "followUpAiSuggestions", "followUpEvents", "contactTracks", "mailInbox", "importHistory", "complianceAudit",
   ];
   const conflicts = [];
   for (const table of collections) {
@@ -668,6 +695,22 @@ function localMailSchedulerDependencies() {
     loadState: async () => loadState(),
     saveState: async (state, expectedVersion) => saveState(state, expectedVersion),
     syncMailAccount,
+    generateFollowUpAiSuggestion: async (state, input) => {
+      const saved = loadAiSettings();
+      const profileKey = aiProfileKeys.includes(saved.assignments?.followup)
+        ? saved.assignments.followup
+        : defaultAiSettings.assignments.followup;
+      const profile = resolveAiSettings("followup");
+      const analysis = await analyzeFollowUpWithAi(state, {
+        followUpId: input.follow_up_id,
+      }, loadMailSettings());
+      return {
+        analysis,
+        model_profile: profileKey,
+        model_name: profile.model,
+        context_scope: analysis.context_scope || {},
+      };
+    },
     credentialKeyMaterial: credentialKeyMaterial(),
     acquireSchedulerLock: acquireLocalMailSchedulerLock,
     releaseSchedulerLock: releaseLocalMailSchedulerLock,

@@ -10,6 +10,7 @@ const COLLECTIONS = [
   "cases",
   "actionTasks",
   "actionTaskEvents",
+  "followUpAiSuggestions",
   "followUpEvents",
   "contacts",
   "contactTracks",
