@@ -1,4 +1,8 @@
 const { randomUUID } = require("node:crypto");
+const {
+  personEmailAddresses,
+  contactIdentityForEmail,
+} = require("./contact-domain.cjs");
 
 const CASE_STAGES = new Set([
   "待开发",
@@ -302,7 +306,7 @@ function updateContactTrackForInboundArchive(state, caseRow, followUp, mailRow, 
   const creator = (Array.isArray(state?.creators) ? state.creators : [])
     .find((item) => text(item.id) === text(caseRow.creator_id)
       && text(item.brand_id) === text(caseRow.brand_id));
-  const creatorEmails = new Set(addressList(creator?.email));
+  const creatorEmails = new Set(personEmailAddresses(state, "creator", creator, caseRow.brand_id));
   const senderEmails = new Set(addressList(mailRow?.sender));
   const matchedEmail = [...senderEmails].find((email) => creatorEmails.has(email));
   if (!matchedEmail) return null;
@@ -311,6 +315,7 @@ function updateContactTrackForInboundArchive(state, caseRow, followUp, mailRow, 
   const track = tracks.find((item) => text(item.brand_id) === text(caseRow.brand_id)
     && text(item.person_type || "creator") === "creator"
     && text(item.person_id) === text(caseRow.creator_id)
+    && (!text(item.contact_id) || text(item.contact_id) === text(contactIdentityForEmail(state, "creator", caseRow.creator_id, matchedEmail, caseRow.brand_id)?.id))
     && text(item.email).toLowerCase() === matchedEmail
     && (!text(item.follow_up_id) || text(item.follow_up_id) === text(followUp?.id)));
   if (!track) return null;
@@ -318,6 +323,7 @@ function updateContactTrackForInboundArchive(state, caseRow, followUp, mailRow, 
     status: "replied",
     follow_up_id: text(followUp?.id),
     case_id: caseRow.id,
+    contact_id: contactIdentityForEmail(state, "creator", caseRow.creator_id, matchedEmail, caseRow.brand_id)?.id || text(track.contact_id),
     replied_at: latestTimestamp(track.replied_at, text(mailRow.occurred_at) || timestamp),
     updatedAt: timestamp,
   });

@@ -3,6 +3,11 @@ const { ImapFlow } = require("imapflow");
 const { simpleParser } = require("mailparser");
 const nodemailer = require("nodemailer");
 const { scoreMailRouting } = require("./mail-routing-domain.cjs");
+const {
+  contactsForPerson,
+  personEmailAddresses,
+  contactIdentityForEmail,
+} = require("./contact-domain.cjs");
 
 const DEFAULT_MAIL_ACCOUNT = {
   id: "",
@@ -513,7 +518,7 @@ function findCreatorMatches(state, emailAddresses, brandId = "") {
   if (!all.size) return [];
   return (Array.isArray(state.creators) ? state.creators : []).filter((creator) => {
     if (text(brandId) && text(creator.brand_id) !== text(brandId)) return false;
-    return emailsIn(creator.email).some((email) => all.has(email));
+    return personEmailAddresses(state, "creator", creator, brandId).some((email) => all.has(email));
   });
 }
 
@@ -525,7 +530,7 @@ function findLeadMatches(state, emailAddresses, brandId = "") {
     // with the creator record during mailbox routing.
     if (text(lead.status) === "已转达人库") return false;
     if (text(brandId) && text(lead.brand_id) !== text(brandId)) return false;
-    return emailsIn(lead.email).some((email) => all.has(email));
+    return personEmailAddresses(state, "lead", lead, brandId).some((email) => all.has(email));
   });
 }
 
@@ -533,8 +538,26 @@ function findPeopleMatches(state, emailAddresses, brandIds = []) {
   const scope = uniqueTextList(brandIds);
   const people = [];
   for (const brandId of scope) {
-    findCreatorMatches(state, emailAddresses, brandId).forEach((person) => people.push({ ...person, person_type: "creator" }));
-    findLeadMatches(state, emailAddresses, brandId).forEach((person) => people.push({ ...person, person_type: "lead" }));
+    findCreatorMatches(state, emailAddresses, brandId).forEach((person) => {
+      const matchedEmail = personEmailAddresses(state, "creator", person, brandId)
+        .find((email) => emailAddresses.map(normalizeEmail).includes(email));
+      people.push({
+        ...person,
+        person_type: "creator",
+        matched_contact_id: contactIdentityForEmail(state, "creator", person.id, matchedEmail, brandId)?.id || "",
+        _contactEmails: personEmailAddresses(state, "creator", person, brandId),
+      });
+    });
+    findLeadMatches(state, emailAddresses, brandId).forEach((person) => {
+      const matchedEmail = personEmailAddresses(state, "lead", person, brandId)
+        .find((email) => emailAddresses.map(normalizeEmail).includes(email));
+      people.push({
+        ...person,
+        person_type: "lead",
+        matched_contact_id: contactIdentityForEmail(state, "lead", person.id, matchedEmail, brandId)?.id || "",
+        _contactEmails: personEmailAddresses(state, "lead", person, brandId),
+      });
+    });
   }
   return people;
 }
@@ -546,8 +569,10 @@ function activeFollowUps(state, creatorId) {
     .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
 }
 
-function directionFor(creator, senderEmails, recipientEmails) {
-  const creatorEmails = emailsIn(creator?.email);
+function directionFor(creator, senderEmails, recipientEmails, state = null, personType = "creator") {
+  const creatorEmails = state
+    ? personEmailAddresses(state, personType, creator, creator?.brand_id)
+    : emailsIn(creator?.email);
   if (creatorEmails.some((email) => senderEmails.includes(email))) return "inbound";
   if (creatorEmails.some((email) => recipientEmails.includes(email))) return "outbound";
   return "unknown";
@@ -559,7 +584,7 @@ function directionForFollowUp(state, followUp, record) {
     .find((item) => text(item.id) === text(followUp?.creator_id)) ||
     (Array.isArray(state?.leads) ? state.leads : [])
       .find((item) => text(item.id) === text(followUp?.lead_id));
-  return directionFor(person, emailsIn(record?.sender), emailsIn(record?.recipients));
+  return directionFor(person, emailsIn(record?.sender), emailsIn(record?.recipients), state, followUp?.lead_id ? "lead" : "creator");
 }
 
 const FOLLOW_UP_TERMINAL_STAGES = new Set(["已结案", "暂停跟进", "未谈妥"]);
@@ -593,21 +618,34 @@ function updateFollowUpAfterInboundReply(followUp, now) {
 }
 
 function updateFollowUpContactTrack(state, followUp, record, account, direction, now) {
-  const creator = (Array.isArray(state?.creators) ? state.creators : [])
-    .find((person) => text(person.id) === text(followUp?.creator_id));
-  if (!creator || !text(creator.email)) return null;
-  const creatorEmails = emailsIn(creator.email);
+  // A promoted follow-up keeps lead_id for provenance, but its live identity
+  // is the creator once creator_id has been assigned.
+  const personType = text(followUp?.creator_id) ? "creator" : "lead";
+  const collection = personType === "lead" ? state.leads : state.creators;
+  const personId = personType === "lead" ? followUp?.lead_id : followUp?.creator_id;
+  const creator = (Array.isArray(collection) ? collection : [])
+    .find((person) => text(person.id) === text(personId));
+  if (!creator) return null;
+  const creatorEmails = personEmailAddresses(state, personType, creator, followUp.brand_id);
+  if (!creatorEmails.length) return null;
+  const senderEmails = emailsIn(record?.sender);
+  const matchedEmail = senderEmails.find((candidate) => creatorEmails.includes(candidate)) || creatorEmails[0];
+  const contact = contactIdentityForEmail(state, personType, creator.id, matchedEmail, followUp.brand_id);
+  // Keep the complete known address set for legacy display and matching.
+  // contact_id still records the specific identity used by this message.
   const email = creatorEmails.join("; ");
   const existing = (Array.isArray(state.contactTracks) ? state.contactTracks : []).find((track) =>
     text(track.brand_id) === text(followUp.brand_id) &&
-    text(track.person_type) === "creator" &&
+    text(track.person_type) === personType &&
     text(track.person_id) === text(creator.id) &&
+    (!text(track.contact_id) || text(track.contact_id) === text(contact?.id)) &&
     (!text(track.mailbox_account_id) || text(track.mailbox_account_id) === text(account?.id)) &&
-    emailsIn(track.email).some((candidate) => creatorEmails.includes(candidate)),
+    (!text(track.follow_up_id) || text(track.follow_up_id) === text(followUp.id)),
   );
   if (direction === "inbound") {
     if (existing) {
       existing.email = email;
+      existing.contact_id = contact?.id || text(existing.contact_id);
       existing.status = "replied";
       existing.follow_up_id = followUp.id;
       existing.replied_at = text(record.occurred_at) || now;
@@ -617,10 +655,11 @@ function updateFollowUpContactTrack(state, followUp, record, account, direction,
     return upsertContactTrack(state, {
       brand_id: followUp.brand_id,
       brand: followUp.brand,
-      person_type: "creator",
+      person_type: personType,
       person_id: creator.id,
       person_name: creator.name,
       email,
+      contact_id: contact?.id || "",
       mailbox_account_id: account.id,
       last_outbound_at: "",
       status: "replied",
@@ -632,10 +671,11 @@ function updateFollowUpContactTrack(state, followUp, record, account, direction,
   return upsertContactTrack(state, {
     brand_id: followUp.brand_id,
     brand: followUp.brand,
-    person_type: "creator",
+    person_type: personType,
     person_id: creator.id,
     person_name: creator.name,
     email,
+    contact_id: contact?.id || "",
     mailbox_account_id: account.id,
     last_outbound_at: record.occurred_at,
     last_outbound_subject: record.subject,
@@ -974,6 +1014,7 @@ function upsertContactTrack(state, input = {}, now = new Date().toISOString()) {
     text(track.brand_id) === text(input.brand_id) &&
     text(track.person_type) === text(input.person_type) &&
     text(track.person_id) === text(input.person_id) &&
+    (!text(input.contact_id) || !text(track.contact_id) || text(track.contact_id) === text(input.contact_id)) &&
     emailsIn(track.email).some((candidate) => emails.includes(candidate)) &&
     text(track.mailbox_account_id) === text(input.mailbox_account_id),
   );
@@ -989,6 +1030,7 @@ function upsertContactTrack(state, input = {}, now = new Date().toISOString()) {
     person_type: text(input.person_type) || "creator",
     person_id: text(input.person_id),
     person_name: text(input.person_name),
+    contact_id: text(input.contact_id),
     email,
     mailbox_account_id: text(input.mailbox_account_id),
     last_outbound_at: shouldRefreshOutbound ? text(inputOutboundAt || foundOutboundAt || now) : foundOutboundAt,
@@ -1013,8 +1055,8 @@ function routeMailRecord(state, record, account, now = new Date().toISOString())
   const recipientEmails = emailsIn(record.recipients);
   const directions = [];
   const people = findPeopleMatches(state, [...senderEmails, ...recipientEmails], scope);
-  const inboundPeople = people.filter((person) => emailsIn(person.email).some((email) => senderEmails.includes(email)));
-  const outboundPeople = people.filter((person) => emailsIn(person.email).some((email) => recipientEmails.includes(email)));
+  const inboundPeople = people.filter((person) => (person._contactEmails || emailsIn(person.email)).some((email) => senderEmails.includes(email)));
+  const outboundPeople = people.filter((person) => (person._contactEmails || emailsIn(person.email)).some((email) => recipientEmails.includes(email)));
   const inboundTracks = findContactTrackMatches(state, senderEmails, account, "inbound", record.occurred_at);
   const threadIds = new Set([
     normalizeMessageId(record.in_reply_to),
@@ -1133,7 +1175,9 @@ function routeMailRecord(state, record, account, now = new Date().toISOString())
         person_type: person.person_type,
         person_id: person.id,
         person_name: person.name,
-        email: emailsIn(person.email)[0],
+        email: senderEmails.find((email) => (person._contactEmails || []).includes(email))
+          || (person._contactEmails || emailsIn(person.email))[0],
+        contact_id: person.matched_contact_id || "",
         mailbox_account_id: account.id,
         last_outbound_at: person.last_outreach_at,
         status: "waiting_reply",
@@ -1176,7 +1220,9 @@ function routeMailRecord(state, record, account, now = new Date().toISOString())
       person_type: person.person_type,
       person_id: person.id,
       person_name: person.name,
-      email: emailsIn(person.email)[0],
+      email: recipientEmails.find((email) => (person._contactEmails || []).includes(email))
+        || (person._contactEmails || emailsIn(person.email))[0],
+      contact_id: person.matched_contact_id || "",
       mailbox_account_id: account.id,
       last_outbound_at: record.occurred_at,
       last_outbound_subject: record.subject,
@@ -1723,7 +1769,22 @@ async function sendMailAccount(settings, state, keyMaterial, input = {}) {
   if (!accountBrandIds(account).includes(targetBrandId)) {
     throw new Error("所选官方邮箱不属于当前品牌工作区，无法跨品牌发送。");
   }
-  const to = lead ? recipientList(lead.email) : recipientList(input.to);
+  const personType = lead ? "lead" : "creator";
+  const personId = lead?.id || creator?.id || followUp?.creator_id;
+  const contact = text(input.contactId)
+    ? contactsForPerson(state, personType, personId, targetBrandId)
+      .find((item) => text(item.id) === text(input.contactId))
+    : null;
+  if (text(input.contactId) && !contact) {
+    throw new Error("所选联系人不属于当前品牌或达人，已阻止发送。");
+  }
+  if (contact?.unsubscribed) throw new Error("该联系人已退订，禁止发送邮件。");
+  if (contact?.validity === "invalid") throw new Error("该联系人邮箱已标记为无效，禁止发送邮件。");
+  const to = contact
+    ? recipientList(contact.email)
+    : lead ? recipientList(lead.email) : recipientList(input.to);
+  if (!to.length) throw new Error("当前达人没有可用邮箱，请先选择或补充联系人。");
+  const resolvedContact = contact || contactIdentityForEmail(state, personType, personId, to[0], targetBrandId);
   if (lead && text(lead.status) === "已转达人库") {
     throw new Error("该待开发达人已转入达人库，请从合作跟进中继续发信。");
   }
@@ -1755,6 +1816,7 @@ async function sendMailAccount(settings, state, keyMaterial, input = {}) {
         person_id: lead.id,
         person_name: text(lead.name || lead.handle || lead.social_url),
         email: to[0],
+        contact_id: resolvedContact?.id || "",
         mailbox_account_id: account.id,
         last_outbound_at: now,
         last_outbound_subject: subject,
@@ -1769,6 +1831,7 @@ async function sendMailAccount(settings, state, keyMaterial, input = {}) {
     lead_id: lead?.id || "",
     person_type: lead ? "lead" : "creator",
     person_id: lead?.id || text(creator?.id || followUp?.creator_id),
+    contact_id: resolvedContact?.id || "",
     contact_track_id: track?.id || "",
     type: "mail_sent",
     occurred_at: now,
@@ -1816,6 +1879,7 @@ async function sendMailAccount(settings, state, keyMaterial, input = {}) {
       person_id: text(creator?.id || followUp.creator_id),
       person_name: text(creator?.name || followUp.creator_name),
       email: to[0],
+      contact_id: resolvedContact?.id || "",
       mailbox_account_id: account.id,
       last_outbound_at: now,
       last_outbound_subject: subject,

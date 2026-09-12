@@ -25,6 +25,7 @@ const {
   rollbackLegacyCaseMigration,
 } = require("./case-migration.cjs");
 const { reconcileCaseTasks } = require("./crm-domain.cjs");
+const { normalizeContact } = require("./contact-domain.cjs");
 
 const rootDir = path.resolve(__dirname, "..");
 const appDir = path.join(rootDir, "app");
@@ -87,6 +88,7 @@ const defaultState = {
   actionTasks: [],
   actionTaskEvents: [],
   followUpEvents: [],
+  contacts: [],
   contactTracks: [],
   mailInbox: [],
   importHistory: [],
@@ -145,7 +147,7 @@ function generatedBrandId(name) {
 
 function normalizeBusinessState(rawState) {
   const state = rawState && typeof rawState === "object" ? rawState : {};
-  const rawCollections = ["creators", "resources", "leads", "products", "cooperations", "matches", "cases", "followUps", "contactTracks", "actionTasks"];
+  const rawCollections = ["creators", "resources", "leads", "products", "cooperations", "matches", "cases", "followUps", "contacts", "contactTracks", "actionTasks"];
   const brandsByKey = new Map();
   const brandsById = new Map();
   const addBrand = (raw) => {
@@ -198,6 +200,10 @@ function normalizeBusinessState(rawState) {
     : [];
   const products = Array.isArray(state.products)
     ? state.products.map((row) => ({ ...resolveBrand(row), country: normalizeCountry(row.country) }))
+    : [];
+  const contacts = Array.isArray(state.contacts)
+    ? state.contacts.map((row) => normalizeContact(resolveBrand(row)))
+      .filter((row) => row.id && row.person_id && row.email)
     : [];
   const creatorByName = new Map(creators.map((row) => [String(row.name || "").trim(), row]));
   const resourceByName = new Map(resources.map((row) => [String(row.name || "").trim(), row]));
@@ -294,7 +300,13 @@ function normalizeBusinessState(rawState) {
     ? state.followUpEvents.map((row) => {
         const followUp = followUpById.get(textValue(row.follow_up_id));
         return resolveBrand(
-          { ...row, case_id: textValue(row.case_id), brand_id: textValue(row.brand_id || followUp?.brand_id), body: textValue(row.body) },
+          {
+            ...row,
+            case_id: textValue(row.case_id),
+            brand_id: textValue(row.brand_id || followUp?.brand_id),
+            contact_id: textValue(row.contact_id),
+            body: textValue(row.body),
+          },
           brandsById.get(textValue(followUp?.brand_id)),
         );
       })
@@ -308,6 +320,7 @@ function normalizeBusinessState(rawState) {
         match_score: Number(row.match_score) || 0,
         match_reasons: Array.isArray(row.match_reasons) ? row.match_reasons.map(textValue).filter(Boolean) : [],
         match_candidates: Array.isArray(row.match_candidates) ? row.match_candidates : [],
+        matched_contact_id: textValue(row.matched_contact_id),
         triage_status: textValue(row.triage_status),
         triage_reason: textValue(row.triage_reason),
         triage_resolved_at: textValue(row.triage_resolved_at),
@@ -322,6 +335,7 @@ function normalizeBusinessState(rawState) {
           ...row,
           case_id: textValue(row.case_id),
           email: textValue(row.email),
+          contact_id: textValue(row.contact_id),
           person_type: textValue(row.person_type) || "creator",
         });
       })
@@ -429,6 +443,7 @@ function normalizeBusinessState(rawState) {
     actionTasks,
     actionTaskEvents,
     followUpEvents,
+    contacts,
     contactTracks,
     mailInbox,
     importHistory: Array.isArray(state.importHistory) ? state.importHistory : [],

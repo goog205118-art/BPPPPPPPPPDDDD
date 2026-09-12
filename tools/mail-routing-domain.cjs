@@ -1,3 +1,8 @@
+const {
+  contactIdentityForEmail,
+  personEmailAddresses,
+} = require("./contact-domain.cjs");
+
 const TERMINAL_STAGES = new Set(["已结案", "合作终止", "暂停跟进", "未谈妥"]);
 const MIN_CONFIDENT_SCORE = 50;
 const AMBIGUITY_DELTA = 15;
@@ -143,6 +148,7 @@ function makeCandidate(target = {}) {
     lead_id: text(person.person_type) === "lead" ? text(person.id) : "",
     follow_up_id: text(target.followUp?.id),
     case_id: text(target.caseRow?.id),
+    matched_contact_id: "",
     score: 0,
     evidence: [],
   };
@@ -170,12 +176,33 @@ function recordParticipantEmails(record = {}, direction = "") {
   return unique([...emailsIn(record.sender), ...emailsIn(record.recipients)]);
 }
 
-function directionForPerson(record, person) {
-  const personEmails = new Set(emailsIn(person?.email));
+function directionForPerson(record, person, state = null) {
+  const personEmails = new Set(
+    state
+      ? personEmailAddresses(state, person?.person_type, person, person?.brand_id)
+      : emailsIn(person?.email),
+  );
   if (!personEmails.size) return "";
   if (emailsIn(record?.sender).some((email) => personEmails.has(email))) return "inbound";
   if (emailsIn(record?.recipients).some((email) => personEmails.has(email))) return "outbound";
   return "";
+}
+
+function matchedContactForRecord(state, record, person, direction) {
+  const addresses = direction === "inbound"
+    ? emailsIn(record?.sender)
+    : direction === "outbound"
+      ? emailsIn(record?.recipients)
+      : unique([...emailsIn(record?.sender), ...emailsIn(record?.recipients)]);
+  return addresses
+    .map((email) => contactIdentityForEmail(
+      state,
+      person?.person_type,
+      person?.id,
+      email,
+      person?.brand_id,
+    ))
+    .find(Boolean) || null;
 }
 
 function targetForFollowUp(state, followUp) {
@@ -221,7 +248,7 @@ function addThreadCandidates(state, record, scope, candidateMap) {
         ? targetForCase(state, caseRow)
         : null;
     if (!target || text(target.person.brand_id) !== brandId) continue;
-    const direction = directionForPerson(record, target.person);
+    const direction = directionForPerson(record, target.person, state);
     if (!direction) continue;
     addEvidence(candidateMap, target, {
       rule: "thread_reference",
@@ -280,7 +307,7 @@ function scoreMailRouting(state, record = {}, account = {}) {
       if (collection.person_type === "lead" && text(row.status) === "已转达人库") continue;
       if (!scope.has(text(row.brand_id))) continue;
       const person = { ...row, person_type: collection.person_type };
-      const direction = directionForPerson(record, person);
+      const direction = directionForPerson(record, person, state);
       if (!direction || (forcedDirection && forcedDirection !== direction)) continue;
       candidatesByPerson.set(`${collection.person_type}|${text(row.id)}`, { person, direction });
     }
@@ -288,6 +315,7 @@ function scoreMailRouting(state, record = {}, account = {}) {
 
   for (const { person, direction } of candidatesByPerson.values()) {
     const targets = targetRows(state, person, person.brand_id);
+    const matchedContact = matchedContactForRecord(state, record, person, direction);
     for (const target of targets) {
       addEvidence(candidateMap, target, {
         rule: "contact_identity",
@@ -301,6 +329,8 @@ function scoreMailRouting(state, record = {}, account = {}) {
           detail: "回信位于达人最近首联/复联后的 30 天窗口内。",
         });
       }
+      const candidate = candidateMap.get(targetKey(target));
+      if (candidate && matchedContact?.id) candidate.matched_contact_id = matchedContact.id;
       if (target.followUp) {
         addEvidence(candidateMap, target, {
           rule: "active_follow_up",
@@ -357,6 +387,7 @@ function scoreMailRouting(state, record = {}, account = {}) {
     brand_id: resolvedBrandId,
     creator_id: selected?.creator_id || "",
     lead_id: selected?.lead_id || "",
+    matched_contact_id: selected?.matched_contact_id || "",
     follow_up_id: selected?.follow_up_id || "",
     case_id: selected?.case_id || "",
     score: selected?.score || top?.score || 0,

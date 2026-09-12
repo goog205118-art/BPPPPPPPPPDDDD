@@ -277,6 +277,7 @@ SCHEMA = {
         "person_type": "TEXT",
         "person_id": "TEXT",
         "contact_track_id": "TEXT",
+        "contact_id": "TEXT",
         "type": "TEXT",
         "occurred_at": "TEXT",
         "direction": "TEXT",
@@ -318,6 +319,7 @@ SCHEMA = {
         "person_type": "TEXT",
         "person_id": "TEXT",
         "person_name": "TEXT",
+        "contact_id": "TEXT",
         "email": "TEXT",
         "mailbox_account_id": "TEXT",
         "last_outbound_at": "TEXT",
@@ -327,6 +329,23 @@ SCHEMA = {
         "case_id": "TEXT",
         "replied_at": "TEXT",
         "source": "TEXT",
+        "createdAt": "TEXT",
+        "updatedAt": "TEXT",
+    },
+    "contacts": {
+        "id": "TEXT PRIMARY KEY",
+        "brand_id": "TEXT",
+        "brand": "TEXT",
+        "person_type": "TEXT",
+        "person_id": "TEXT",
+        "name": "TEXT",
+        "email": "TEXT",
+        "role": "TEXT",
+        "is_primary": "REAL",
+        "validity": "TEXT",
+        "unsubscribed": "REAL",
+        "unsubscribed_at": "TEXT",
+        "notes": "TEXT",
         "createdAt": "TEXT",
         "updatedAt": "TEXT",
     },
@@ -359,6 +378,7 @@ SCHEMA = {
         "status": "TEXT",
         "matched_creator_id": "TEXT",
         "matched_creator_name": "TEXT",
+        "matched_contact_id": "TEXT",
         "candidate_creator_ids": "TEXT",
         "candidate_lead_ids": "TEXT",
         "candidate_brand_ids": "TEXT",
@@ -457,6 +477,7 @@ def rows_to_state(conn):
         "actionTasks": [],
         "actionTaskEvents": [],
         "followUpEvents": [],
+        "contacts": [],
         "mailInbox": [],
         "contactTracks": [],
         "importHistory": [],
@@ -491,6 +512,9 @@ def row_to_dict(row):
         payload["has_unread_reply"] = parse_flag(payload["has_unread_reply"])
     if "generated" in payload:
         payload["generated"] = parse_flag(payload["generated"])
+    for key in ("is_primary", "unsubscribed"):
+        if key in payload:
+            payload[key] = parse_flag(payload[key])
     for key in ("beforeCounts", "snapshot", "selected_resource_ids", "product_ids", "candidate_creator_ids", "candidate_lead_ids", "candidate_brand_ids", "candidate_follow_up_ids", "candidate_case_ids", "match_reasons", "match_candidates", "references", "metadata"):
         if payload.get(key):
             try:

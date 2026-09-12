@@ -11,6 +11,7 @@ const COLLECTIONS = [
   "actionTasks",
   "actionTaskEvents",
   "followUpEvents",
+  "contacts",
   "contactTracks",
   "mailInbox",
   "importHistory",

@@ -95,6 +95,26 @@
 
 社媒地址和邮箱会与正式达人库双向去重。确认可合作时，可从待开发页直接转入达人库，原线索会保留并标记为“已转达人库”。
 
+## contacts
+
+联系人身份表，用于在同一达人或待开发达人下管理多个邮箱，而不是把经纪人、商务和抄送地址混在单一 `email` 字段中。
+
+- `id`（稳定联系人 ID）
+- `brand_id`、`brand`
+- `person_type`、`person_id`（关联 `creators` 或 `leads`）
+- `name`
+- `email`
+- `role`（`primary`、`agent`、`business`、`cc`、`other`）
+- `is_primary`
+- `validity`（`unknown`、`valid`、`invalid`）
+- `unsubscribed`、`unsubscribed_at`
+- `notes`
+- `createdAt`、`updatedAt`
+
+`creators.email` 和 `leads.email` 是旧数据兼容字段。读取时，旧邮箱会按“人员类型 + 人员 ID + 邮箱”生成稳定的隐式主联系人 ID，不会因为重复读取产生新身份；新数据应优先写入 `contacts`。联系人查询、邮件匹配、跟进轨迹和发信记录均可通过 `contact_id` / `matched_contact_id` 追溯到实际邮箱身份，并始终限制在当前品牌工作区内。
+
+本阶段只建立身份和发送前的基础状态校验，不实现退信解析、黑名单、触达频控或定时 IMAP 同步；这些能力分别留给 `CRM-70-02` 和已延期的 `CRM-60`。
+
 ## products
 
 产品库主表，用于维护可供达人开发邮件选择的产品。产品可按品牌、国家/地区、类目和店铺归档；填写产品链接后可尝试读取公开页面的标题、主图和简介，人工填写内容不会被自动覆盖。
