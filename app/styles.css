@@ -801,6 +801,104 @@ h1 {
   white-space: nowrap;
 }
 
+.mail-automation-settings {
+  display: grid;
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid #304256;
+  border-radius: 5px;
+  background: #172330;
+}
+
+.mail-automation-settings > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.mail-automation-settings strong {
+  color: #e8f2fb;
+  font-size: 0.79rem;
+}
+
+.mail-automation-settings small,
+.mail-automation-status {
+  margin: 0;
+  color: #9cb1c4;
+  font-size: 0.68rem;
+  line-height: 1.45;
+}
+
+.mail-automation-grid {
+  display: grid;
+  grid-template-columns: minmax(145px, 0.95fr) minmax(190px, 1.3fr) repeat(4, minmax(105px, 0.72fr));
+  gap: 8px 10px;
+  align-items: end;
+}
+
+.mail-automation-grid .field {
+  gap: 4px;
+  color: #b9cce0;
+  font-size: 0.69rem;
+}
+
+.mail-automation-grid input,
+.mail-automation-grid select {
+  min-height: 30px;
+  border: 1px solid #354a60;
+  border-radius: 5px;
+  background: #121c27;
+  color: #e0edf8;
+  font-size: 0.72rem;
+}
+
+.mail-automation-grid select[multiple] {
+  min-height: 72px;
+  padding: 3px;
+}
+
+.mail-automation-actions {
+  display: flex;
+  gap: 6px;
+  align-items: end;
+}
+
+.mail-automation-actions button {
+  min-height: 30px;
+  white-space: nowrap;
+}
+
+.mail-automation-history {
+  display: grid;
+  gap: 3px;
+  max-height: 152px;
+  overflow: auto;
+  padding-top: 2px;
+}
+
+.mail-automation-history-row {
+  display: grid;
+  grid-template-columns: minmax(110px, 0.65fr) minmax(220px, 1.4fr) auto;
+  gap: 8px;
+  align-items: center;
+  padding: 5px 6px;
+  border: 1px solid #263a4e;
+  border-radius: 4px;
+  color: #bbccdc;
+  background: #111a24;
+  font-size: 0.66rem;
+}
+
+.mail-automation-history-row time {
+  color: #7f97ad;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+.mail-automation-history-empty {
+  color: #7f97ad;
+  font-size: 0.67rem;
+}
+
 .mail-settings .option-settings-head {
   display: flex;
   align-items: flex-start;
@@ -5351,6 +5449,18 @@ body.access-locked .app-shell {
 }
 
 @media (max-width: 900px) {
+  .mail-automation-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .mail-automation-history-row {
+    grid-template-columns: minmax(110px, 0.7fr) minmax(0, 1.35fr);
+  }
+
+  .mail-automation-history-row time {
+    grid-column: 2;
+  }
+
   .followup-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
@@ -5361,6 +5471,19 @@ body.access-locked .app-shell {
 }
 
 @media (max-width: 560px) {
+  .mail-automation-grid,
+  .mail-automation-history-row {
+    grid-template-columns: 1fr;
+  }
+
+  .mail-automation-history-row time {
+    grid-column: auto;
+  }
+
+  .mail-automation-actions {
+    flex-wrap: wrap;
+  }
+
   .followup-head {
     display: grid;
   }

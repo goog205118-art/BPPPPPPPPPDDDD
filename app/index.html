@@ -343,6 +343,48 @@
             </div>
             <p>关闭正文缓存会立即清除已缓存正文。未授权 AI 时，沟通研判只使用邮件摘要。</p>
           </section>
+          <section class="mail-automation-settings" aria-labelledby="mailAutomationTitle">
+            <div>
+              <strong id="mailAutomationTitle">受控定时同步</strong>
+              <small>默认关闭。仅同步选定账户的近期邮件；不自动发信、不自动推进合作阶段，无法唯一归属的邮件仍进入人工分诊。</small>
+            </div>
+            <div class="mail-automation-grid">
+              <label class="field checkbox-field" for="mailAutomationEnabled">
+                <span>定时同步</span>
+                <span><input id="mailAutomationEnabled" type="checkbox" /> 启用受控同步</span>
+              </label>
+              <div class="field">
+                <label for="mailAutomationAccountIds">同步账户范围</label>
+                <select id="mailAutomationAccountIds" multiple size="3"></select>
+              </div>
+              <div class="field">
+                <label for="mailAutomationInterval">间隔（分钟）</label>
+                <input id="mailAutomationInterval" type="number" min="15" max="1440" value="30" />
+              </div>
+              <div class="field">
+                <label for="mailAutomationMaxPerFolder">每文件夹上限</label>
+                <input id="mailAutomationMaxPerFolder" type="number" min="1" max="250" value="120" />
+              </div>
+              <div class="field">
+                <label for="mailAutomationRetryLimit">失败重试次数</label>
+                <input id="mailAutomationRetryLimit" type="number" min="0" max="3" value="2" />
+              </div>
+              <div class="field">
+                <label for="mailAutomationRetryBackoff">重试退避（分钟）</label>
+                <input id="mailAutomationRetryBackoff" type="number" min="1" max="1440" value="15" />
+              </div>
+              <label class="field checkbox-field" for="mailAutomationAiSuggestions">
+                <span>AI 建议（预留）</span>
+                <span><input id="mailAutomationAiSuggestions" type="checkbox" disabled /> 当前版本不执行 AI</span>
+              </label>
+              <div class="mail-automation-actions">
+                <button type="button" id="mailAutomationSaveBtn" class="ghost">保存定时策略</button>
+                <button type="button" id="mailAutomationCheckBtn" class="ghost">检查到期账户</button>
+              </div>
+            </div>
+            <p class="mail-automation-status" id="mailAutomationStatus"></p>
+            <div class="mail-automation-history" id="mailAutomationHistory"></div>
+          </section>
           <section class="mail-account-editor" id="mailAccountEditor">
             <div class="mail-account-editor-head">
               <div>

@@ -11,6 +11,7 @@ const API_PRODUCT_PREVIEW = "/api/products/preview";
 const API_MAIL_SETTINGS = "/api/mail/settings";
 const API_MAIL_TEST = "/api/mail/test";
 const API_MAIL_SYNC = "/api/mail/sync";
+const API_MAIL_SCHEDULER_CHECK = "/api/mail/scheduler/check";
 const API_MAIL_SMTP_TEST = "/api/mail/test-smtp";
 const API_MAIL_SEND = "/api/mail/send";
 const API_FOLLOWUP_ANALYZE = "/api/ai/followup-analyze";
@@ -83,6 +84,17 @@ const defaultMailSettings = {
     cacheBodies: false,
     allowAiContext: false,
     retentionDays: 90,
+  },
+  automation: {
+    enabled: false,
+    intervalMinutes: 30,
+    accountIds: [],
+    maxPerFolder: 120,
+    retryLimit: 2,
+    retryBackoffMinutes: 15,
+    aiSuggestionsEnabled: false,
+    accountState: {},
+    runHistory: [],
   },
 };
 
@@ -702,6 +714,17 @@ const elements = {
   mailAllowAiContext: document.getElementById("mailAllowAiContext"),
   mailBodyRetentionDays: document.getElementById("mailBodyRetentionDays"),
   mailSaveContentPolicyBtn: document.getElementById("mailSaveContentPolicyBtn"),
+  mailAutomationEnabled: document.getElementById("mailAutomationEnabled"),
+  mailAutomationAccountIds: document.getElementById("mailAutomationAccountIds"),
+  mailAutomationInterval: document.getElementById("mailAutomationInterval"),
+  mailAutomationMaxPerFolder: document.getElementById("mailAutomationMaxPerFolder"),
+  mailAutomationRetryLimit: document.getElementById("mailAutomationRetryLimit"),
+  mailAutomationRetryBackoff: document.getElementById("mailAutomationRetryBackoff"),
+  mailAutomationAiSuggestions: document.getElementById("mailAutomationAiSuggestions"),
+  mailAutomationSaveBtn: document.getElementById("mailAutomationSaveBtn"),
+  mailAutomationCheckBtn: document.getElementById("mailAutomationCheckBtn"),
+  mailAutomationStatus: document.getElementById("mailAutomationStatus"),
+  mailAutomationHistory: document.getElementById("mailAutomationHistory"),
   mailSettingsStatus: document.getElementById("mailSettingsStatus"),
   timezoneBar: document.getElementById("timezoneBar"),
   brandWorkspaceSelect: document.getElementById("brandWorkspaceSelect"),
@@ -1965,6 +1988,28 @@ function normalizeMailSettingsPayload(payload = {}) {
     ...clone(defaultMailSettings),
     accounts: rawAccounts.map(account),
     contentPolicy: normalizedMailContentPolicy(settings),
+    automation: normalizedMailAutomation(settings, rawAccounts),
+  };
+}
+
+function normalizedMailAutomation(settings = state.mailSettings, accounts = settings?.accounts || []) {
+  const source = settings?.automation && typeof settings.automation === "object" ? settings.automation : {};
+  const knownAccountIds = new Set((Array.isArray(accounts) ? accounts : []).map((account) => text(account.id)).filter(Boolean));
+  const number = (value, fallback, minimum, maximum) => {
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? Math.min(maximum, Math.max(minimum, Math.round(parsed))) : fallback;
+  };
+  const history = Array.isArray(source.runHistory) ? source.runHistory : [];
+  return {
+    enabled: parseFlag(source.enabled),
+    intervalMinutes: number(source.intervalMinutes, 30, 15, 1440),
+    accountIds: [...new Set((Array.isArray(source.accountIds) ? source.accountIds : []).map(text).filter((id) => knownAccountIds.has(id)))],
+    maxPerFolder: number(source.maxPerFolder, 120, 1, 250),
+    retryLimit: number(source.retryLimit, 2, 0, 3),
+    retryBackoffMinutes: number(source.retryBackoffMinutes, 15, 1, 1440),
+    aiSuggestionsEnabled: parseFlag(source.aiSuggestionsEnabled),
+    accountState: source.accountState && typeof source.accountState === "object" ? source.accountState : {},
+    runHistory: history.slice(0, 12),
   };
 }
 
@@ -2224,7 +2269,64 @@ function readMailSettingsForm() {
   const index = accounts.findIndex((item) => text(item.id) === id);
   if (index >= 0) accounts[index] = account;
   else accounts.unshift(account);
-  return { accounts, editingId: id, contentPolicy: readMailContentPolicy() };
+  return {
+    accounts,
+    editingId: id,
+    contentPolicy: readMailContentPolicy(),
+    automation: normalizedMailAutomation(),
+  };
+}
+
+function readMailAutomation() {
+  const accountIds = [...(elements.mailAutomationAccountIds?.selectedOptions || [])].map((option) => text(option.value)).filter(Boolean);
+  return normalizedMailAutomation({
+    accounts: state.mailSettings.accounts,
+    automation: {
+      enabled: Boolean(elements.mailAutomationEnabled?.checked),
+      accountIds,
+      intervalMinutes: elements.mailAutomationInterval?.value,
+      maxPerFolder: elements.mailAutomationMaxPerFolder?.value,
+      retryLimit: elements.mailAutomationRetryLimit?.value,
+      retryBackoffMinutes: elements.mailAutomationRetryBackoff?.value,
+      aiSuggestionsEnabled: Boolean(elements.mailAutomationAiSuggestions?.checked),
+      accountState: state.mailSettings.automation?.accountState,
+      runHistory: state.mailSettings.automation?.runHistory,
+    },
+  });
+}
+
+function renderMailAutomationSettings() {
+  const automation = normalizedMailAutomation();
+  const accounts = state.mailSettings.accounts || [];
+  const selectedIds = new Set(automation.accountIds);
+  elements.mailAutomationEnabled.checked = automation.enabled;
+  elements.mailAutomationAccountIds.innerHTML = accounts.map((account) => (
+    `<option value="${escapeHtml(account.id)}">${escapeHtml(account.label || account.imap?.user || "未命名邮箱")} · ${escapeHtml(mailAccountBrandNames(account).join(" / ") || "未绑定品牌")}</option>`
+  )).join("");
+  [...elements.mailAutomationAccountIds.options].forEach((option) => {
+    option.selected = selectedIds.has(option.value);
+  });
+  elements.mailAutomationInterval.value = String(automation.intervalMinutes);
+  elements.mailAutomationMaxPerFolder.value = String(automation.maxPerFolder);
+  elements.mailAutomationRetryLimit.value = String(automation.retryLimit);
+  elements.mailAutomationRetryBackoff.value = String(automation.retryBackoffMinutes);
+  elements.mailAutomationAiSuggestions.checked = automation.aiSuggestionsEnabled;
+  const history = automation.runHistory || [];
+  elements.mailAutomationStatus.textContent = automation.enabled
+    ? `已启用：${automation.accountIds.length ? `选定 ${automation.accountIds.length} 个账户` : "全部已启用账户"}；仅同步到期账户。AI 定时建议仍是预留项，当前不会调用模型。`
+    : "当前关闭。手动同步不受影响；开启后仍不会自动发信或自动推进阶段。";
+  elements.mailAutomationHistory.innerHTML = history.length
+    ? history.slice(0, 5).map((run) => {
+      const account = accounts.find((item) => text(item.id) === text(run.accountId));
+      const summary = run.summary || {};
+      const status = run.status === "succeeded" ? "完成" : run.status === "partial" ? "部分完成" : run.status === "failed" ? "失败" : "运行中";
+      return `<div class="mail-automation-history-row">
+        <span>${escapeHtml(account?.label || account?.imap?.user || run.accountId || "账户")}</span>
+        <span>${escapeHtml(status)} · 扫描 ${Number(summary.scanned || 0)} · 归档 ${Number(summary.matched || 0)} · 待分诊 ${Number(summary.pending || 0)}</span>
+        <time>${escapeHtml(formatDateTime(run.finishedAt || run.startedAt))}</time>
+      </div>`;
+    }).join("")
+    : `<span class="mail-automation-history-empty">尚无定时同步记录。</span>`;
 }
 
 function renderMailSettings() {
@@ -2299,6 +2401,7 @@ function renderMailSettings() {
   elements.mailAllowAiContext.checked = contentPolicy.allowAiContext;
   elements.mailAllowAiContext.disabled = !contentPolicy.cacheBodies;
   elements.mailBodyRetentionDays.value = String(contentPolicy.retentionDays);
+  renderMailAutomationSettings();
   elements.mailSettingsStatus.textContent = formatMailSyncStatus();
 }
 
@@ -2443,7 +2546,7 @@ async function saveMailSettings(event) {
       const response = await apiFetch(API_MAIL_SETTINGS, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accounts: formPayload.accounts, contentPolicy: formPayload.contentPolicy }),
+        body: JSON.stringify({ accounts: formPayload.accounts, contentPolicy: formPayload.contentPolicy, automation: formPayload.automation }),
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || result.ok === false) throw new Error(result.error || "邮箱配置保存失败");
@@ -2466,7 +2569,7 @@ async function saveMailContentPolicy() {
       const response = await apiFetch(API_MAIL_SETTINGS, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accounts: state.mailSettings.accounts || [], contentPolicy }),
+        body: JSON.stringify({ accounts: state.mailSettings.accounts || [], contentPolicy, automation: normalizedMailAutomation() }),
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || result.ok === false) throw new Error(result.error || "正文策略保存失败");
@@ -2483,6 +2586,58 @@ async function saveMailContentPolicy() {
     elements.mailSettingsStatus.textContent = `正文策略已保存。${changes.length ? ` ${changes.join("；")}。` : ""}`;
   } catch (error) {
     elements.mailSettingsStatus.textContent = error.message || "正文策略保存失败";
+  }
+}
+
+async function saveMailAutomation() {
+  elements.mailAutomationStatus.textContent = "正在保存定时同步策略...";
+  try {
+    const automation = readMailAutomation();
+    const payload = await withActivity("正在保存定时同步策略", "正在更新同步范围、频率和安全开关...", async () => {
+      const response = await apiFetch(API_MAIL_SETTINGS, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          accounts: state.mailSettings.accounts || [],
+          contentPolicy: normalizedMailContentPolicy(),
+          automation,
+        }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.ok === false) throw new Error(result.error || "定时同步策略保存失败");
+      return result;
+    });
+    state.mailSettings = normalizeMailSettingsPayload(payload);
+    renderMailSettings();
+    elements.mailAutomationStatus.textContent = automation.enabled
+      ? "定时同步策略已保存。不会自动发信或自动推进合作阶段。"
+      : "定时同步已关闭，手动同步保持可用。";
+  } catch (error) {
+    elements.mailAutomationStatus.textContent = error.message || "定时同步策略保存失败";
+  }
+}
+
+async function checkScheduledMailSync() {
+  elements.mailAutomationStatus.textContent = "正在检查到期账户...";
+  try {
+    const payload = await withActivity("正在检查定时同步", "只会同步已启用且已到期的账户；不会发送邮件或推进阶段...", async () => {
+      const response = await apiFetch(API_MAIL_SCHEDULER_CHECK, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ requestId: uid("SCH") }),
+      });
+      const result = await response.json().catch(() => ({}));
+      if (!response.ok || result.ok === false) throw new Error(result.error || "定时同步检查失败");
+      return result;
+    });
+    if (payload.state) state.data = ensureStateShape(payload.state);
+    state.mailSettings = normalizeMailSettingsPayload(payload.settings);
+    render();
+    elements.mailAutomationStatus.textContent = payload.status === "skipped"
+      ? "当前没有到期且可同步的账户。"
+      : "已完成本次到期账户检查；同步结果已写入运行记录。";
+  } catch (error) {
+    elements.mailAutomationStatus.textContent = error.message || "定时同步检查失败";
   }
 }
 
@@ -2597,7 +2752,7 @@ async function deleteMailAccount(accountId) {
       const response = await apiFetch(API_MAIL_SETTINGS, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ accounts, contentPolicy: normalizedMailContentPolicy() }),
+        body: JSON.stringify({ accounts, contentPolicy: normalizedMailContentPolicy(), automation: normalizedMailAutomation() }),
       });
       const result = await response.json().catch(() => ({}));
       if (!response.ok || result.ok === false) throw new Error(result.error || "邮箱配置删除失败");
@@ -9482,6 +9637,8 @@ function bindEvents() {
     button.addEventListener("click", () => runSignatureCommand(button.dataset.signatureCommand));
   });
   elements.mailSaveContentPolicyBtn.addEventListener("click", () => void saveMailContentPolicy());
+  elements.mailAutomationSaveBtn.addEventListener("click", () => void saveMailAutomation());
+  elements.mailAutomationCheckBtn.addEventListener("click", () => void checkScheduledMailSync());
   elements.mailCacheBodies.addEventListener("change", () => {
     elements.mailAllowAiContext.disabled = !elements.mailCacheBodies.checked;
     if (!elements.mailCacheBodies.checked) elements.mailAllowAiContext.checked = false;

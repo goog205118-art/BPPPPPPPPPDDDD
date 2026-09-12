@@ -14,6 +14,11 @@ const {
   evaluateSendPolicy,
   applyDeliveryNotification,
 } = require("./delivery-governance-domain.cjs");
+const {
+  DEFAULT_MAIL_AUTOMATION,
+  normalizeMailAutomation,
+  publicMailAutomation,
+} = require("./mail-scheduler-domain.cjs");
 
 const DEFAULT_MAIL_ACCOUNT = {
   id: "",
@@ -61,6 +66,7 @@ const DEFAULT_MAIL_SETTINGS = {
     retentionDays: 90,
   },
   deliveryPolicy: { ...DEFAULT_DELIVERY_POLICY },
+  automation: { ...DEFAULT_MAIL_AUTOMATION },
 };
 const REPLY_WINDOW_DAYS = 30;
 const REPLY_WINDOW_MS = REPLY_WINDOW_DAYS * 24 * 60 * 60 * 1000;
@@ -301,7 +307,7 @@ function normalizeMailSettings(raw = {}, existing = {}, keyMaterial) {
     .slice(0, 24)
     .map((account) => normalizeAccount(account, previousById.get(text(account.id)) || {}, keyMaterial));
 
-  return {
+  const normalized = {
     ...DEFAULT_MAIL_SETTINGS,
     accounts,
     contentPolicy: normalizeContentPolicy(source.contentPolicy, existing?.contentPolicy),
@@ -309,6 +315,8 @@ function normalizeMailSettings(raw = {}, existing = {}, keyMaterial) {
       deliveryPolicy: source.deliveryPolicy ?? existing?.deliveryPolicy,
     }),
   };
+  normalized.automation = normalizeMailAutomation(source.automation, accounts, existing?.automation);
+  return normalized;
 }
 
 function publicMailSettings(settings = {}) {
@@ -356,6 +364,7 @@ function publicMailSettings(settings = {}) {
     accounts,
     contentPolicy: mailContentPolicy(settings),
     deliveryPolicy: deliveryPolicy(settings),
+    automation: publicMailAutomation(settings.automation, accounts),
   };
 }
 

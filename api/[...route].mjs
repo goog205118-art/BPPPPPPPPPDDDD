@@ -5,6 +5,8 @@ const STATE_BLOB = "resource-workbench/state.json";
 const STATE_OPERATION_PREFIX = "resource-workbench/state-operations/";
 const SETTINGS_BLOB = "resource-workbench/private-ai-settings.json";
 const MAIL_SETTINGS_BLOB = "resource-workbench/private-mail-settings.json";
+const MAIL_SYNC_LOCK_PREFIX = "resource-workbench/mail-sync-locks/";
+const MAIL_SCHEDULER_GLOBAL_LOCK_ID = "__mail_scheduler_global__";
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 const AI_REQUEST_TIMEOUT_MS = Number(process.env.AI_REQUEST_TIMEOUT_MS || 60000);
 let blobClientPromise;
@@ -20,6 +22,7 @@ const {
   testSmtpConnection,
   sendMailAccount,
 } = require("../tools/mail-sync.cjs");
+const { executeMailScheduler } = require("../tools/mail-scheduler-executor.cjs");
 const {
   linkLegacyCaseReferences,
   migrateLegacyFollowUps,
@@ -540,6 +543,82 @@ async function writeBlobJson(pathname, data) {
   });
 }
 
+function mailSyncLockPath(accountId) {
+  return `${MAIL_SYNC_LOCK_PREFIX}${createHash("sha256").update(textValue(accountId), "utf8").digest("hex")}.json`;
+}
+
+function lockExpiresAt(now = new Date(), leaseMinutes = 20) {
+  const minutes = Math.min(30, Math.max(1, Number(leaseMinutes) || 20));
+  return new Date(now.getTime() + minutes * 60 * 1000).toISOString();
+}
+
+async function removeBlob(blob) {
+  if (!blob?.url) return;
+  const token = requireBlobToken();
+  const { del } = await getBlobClient();
+  await del(blob.url, { token });
+}
+
+async function acquireOnlineMailSyncLock({ account, run, now, leaseMinutes }) {
+  const pathname = mailSyncLockPath(account?.id);
+  const token = requireBlobToken();
+  const { put } = await getBlobClient();
+  const startedAt = now instanceof Date ? now : new Date();
+  const body = {
+    runId: textValue(run?.id),
+    accountId: textValue(account?.id),
+    acquiredAt: startedAt.toISOString(),
+    expiresAt: lockExpiresAt(startedAt, leaseMinutes),
+  };
+  const write = () => put(pathname, JSON.stringify(body), {
+    access: "private",
+    addRandomSuffix: false,
+    allowOverwrite: false,
+    contentType: "application/json; charset=utf-8",
+    token,
+  });
+  try {
+    await write();
+    return { acquired: true, pathname, runId: body.runId };
+  } catch {
+    // A stale lock is released first; a second conditional create decides ownership without overwriting a live run.
+    const existingBlob = await findBlob(pathname);
+    const existing = existingBlob ? await readBlobJson(pathname, {}) : {};
+    if (Date.parse(textValue(existing?.expiresAt)) > Date.now()) return { acquired: false };
+    if (existingBlob) {
+      try {
+        await removeBlob(existingBlob);
+      } catch {
+        return { acquired: false };
+      }
+    }
+    try {
+      await write();
+      return { acquired: true, pathname, runId: body.runId };
+    } catch {
+      return { acquired: false };
+    }
+  }
+}
+
+async function acquireOnlineMailSchedulerLock({ run, now, leaseMinutes }) {
+  return acquireOnlineMailSyncLock({
+    account: { id: MAIL_SCHEDULER_GLOBAL_LOCK_ID },
+    run,
+    now,
+    leaseMinutes,
+  });
+}
+
+async function releaseOnlineMailSyncLock(lock) {
+  if (!lock?.pathname || !lock?.runId) return;
+  const blob = await findBlob(lock.pathname);
+  if (!blob) return;
+  const current = await readBlobJson(lock.pathname, {});
+  if (textValue(current?.runId) !== textValue(lock.runId)) return;
+  await removeBlob(blob);
+}
+
 let onlineStateStore;
 
 function getOnlineStateStore() {
@@ -690,6 +769,21 @@ async function saveMailSettings(input) {
   const next = normalizeMailSettings(input, existing, credentialKeyMaterial());
   await writeBlobJson(MAIL_SETTINGS_BLOB, next);
   return next;
+}
+
+function onlineMailSchedulerDependencies() {
+  return {
+    loadSettings: loadMailSettings,
+    saveSettings: saveMailSettings,
+    loadState,
+    saveState,
+    syncMailAccount,
+    credentialKeyMaterial: credentialKeyMaterial(),
+    acquireSchedulerLock: acquireOnlineMailSchedulerLock,
+    releaseSchedulerLock: releaseOnlineMailSyncLock,
+    acquireAccountLock: acquireOnlineMailSyncLock,
+    releaseAccountLock: releaseOnlineMailSyncLock,
+  };
 }
 
 async function saveMailSyncResult(settings, summary, accountId) {
@@ -2392,8 +2486,41 @@ async function parseExcel(contentBase64) {
 }
 
 export default async function handler(req, res) {
-  if (!requireAccess(req, res)) return;
   const pathname = new URL(req.url || "/", "http://localhost").pathname;
+  if (pathname === "/api/cron/mail-sync") {
+    const cronSecret = String(process.env.CRON_SECRET || "");
+    const authorization = textValue(req.headers.authorization);
+    const suppliedSecret = authorization.startsWith("Bearer ") ? authorization.slice(7).trim() : "";
+    if (!cronSecret) {
+      json(res, 503, { ok: false, error: "未配置 CRON_SECRET，定时邮箱同步保持关闭。" });
+      return;
+    }
+    if (!constantTimeMatches(cronSecret, suppliedSecret)) {
+      json(res, 401, { ok: false, error: "定时任务认证失败。" });
+      return;
+    }
+    if (req.method !== "GET") {
+      json(res, 405, { ok: false, error: "仅支持 GET 定时触发。" });
+      return;
+    }
+    try {
+      const result = await executeMailScheduler(onlineMailSchedulerDependencies(), {
+        source: "vercel_cron",
+        leaseMinutes: 20,
+        requestId: textValue(req.headers["x-vercel-id"]) || `cron-${Date.now()}`,
+      });
+      json(res, result.ok ? 200 : 207, {
+        ok: result.ok,
+        status: result.status,
+        results: result.results.map(({ state, ...entry }) => entry),
+      });
+    } catch {
+      json(res, 500, { ok: false, error: "定时邮箱同步执行失败。" });
+    }
+    return;
+  }
+
+  if (!requireAccess(req, res)) return;
 
   try {
     if (req.method === "GET" && pathname === "/api/state") {
@@ -2585,15 +2712,47 @@ export default async function handler(req, res) {
 
     if (req.method === "POST" && pathname === "/api/mail/sync") {
       try {
-        const state = await loadState();
         const settings = await loadMailSettings();
         const body = JSON.parse((await readBody(req)) || "{}");
         const account = (settings.accounts || []).find((item) => textValue(item.id) === textValue(body.accountId)) || (settings.accounts || []).find((item) => item.enabled);
         if (!account?.enabled) throw new Error("邮箱同步尚未启用。请先在设置页保存并启用对应 IMAP 邮箱。");
-        const summary = await syncMailAccount(settings, state, credentialKeyMaterial(), { accountId: account.id, maxPerFolder: body.maxPerFolder });
-        await saveState(state, state.meta?.version);
-        const nextSettings = await saveMailSyncResult(settings, summary, account.id);
-        json(res, 200, { ok: true, summary, settings: publicMailSettings(nextSettings), state });
+        const result = await executeMailScheduler(onlineMailSchedulerDependencies(), {
+          source: "manual",
+          force: true,
+          accountId: account.id,
+          maxPerFolder: body.maxPerFolder,
+          leaseMinutes: 20,
+          requestId: textValue(body.requestId),
+        });
+        const accountResult = result.results.find((item) => textValue(item.accountId) === textValue(account.id));
+        if (!accountResult || accountResult.status === "failed") throw new Error(accountResult?.error || "邮箱同步失败");
+        json(res, 200, {
+          ok: true,
+          summary: accountResult.summary || {},
+          settings: publicMailSettings(result.settings),
+          state: accountResult.state || await loadState(),
+        });
+      } catch (error) {
+        json(res, 400, { ok: false, error: formatMailError(error) });
+      }
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/mail/scheduler/check") {
+      try {
+        const body = JSON.parse((await readBody(req)) || "{}");
+        const result = await executeMailScheduler(onlineMailSchedulerDependencies(), {
+          source: "manual",
+          leaseMinutes: 20,
+          requestId: textValue(body.requestId),
+        });
+        json(res, 200, {
+          ok: result.ok,
+          status: result.status,
+          results: result.results.map(({ state, ...entry }) => entry),
+          settings: publicMailSettings(result.settings),
+          state: await loadState(),
+        });
       } catch (error) {
         json(res, 400, { ok: false, error: formatMailError(error) });
       }

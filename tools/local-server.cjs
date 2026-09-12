@@ -19,6 +19,7 @@ const {
   testSmtpConnection,
   sendMailAccount,
 } = require("./mail-sync.cjs");
+const { executeMailScheduler } = require("./mail-scheduler-executor.cjs");
 const {
   linkLegacyCaseReferences,
   migrateLegacyFollowUps,
@@ -48,6 +49,7 @@ const sqliteBridge = path.join(rootDir, "tools", "sqlite_store.py");
 const port = Number(process.env.PORT || 4173);
 const pythonEnv = { ...process.env, PYTHONIOENCODING: "utf-8" };
 const aiRequestTimeoutMs = Number(process.env.AI_REQUEST_TIMEOUT_MS || 60000);
+const localMailAutomationEnabled = String(process.env.MAIL_AUTOMATION_LOCAL_ENABLED || "").trim().toLowerCase() === "true";
 const localProxyPorts = [7890, 7891, 7892, 7893, 7897, 7899, 1080, 10808, 10809, 20171];
 const localProxyProbeTimeoutMs = Number(process.env.LOCAL_PROXY_PROBE_TIMEOUT_MS || 350);
 const defaultAiProfile = {
@@ -655,7 +657,64 @@ function saveMailSettings(input) {
   const existing = loadMailSettings();
   const next = normalizeMailSettings(input, existing, credentialKeyMaterial());
   fs.writeFileSync(mailSettingsFile, JSON.stringify(next, null, 2), "utf8");
+  refreshLocalMailScheduler(next);
   return next;
+}
+
+function localMailSchedulerDependencies() {
+  return {
+    loadSettings: async () => loadMailSettings(),
+    saveSettings: async (settings) => saveMailSettings(settings),
+    loadState: async () => loadState(),
+    saveState: async (state, expectedVersion) => saveState(state, expectedVersion),
+    syncMailAccount,
+    credentialKeyMaterial: credentialKeyMaterial(),
+    acquireSchedulerLock: acquireLocalMailSchedulerLock,
+    releaseSchedulerLock: releaseLocalMailSchedulerLock,
+  };
+}
+
+let localMailSchedulerTimer = null;
+let localMailSchedulerRunLock = null;
+
+async function acquireLocalMailSchedulerLock({ runId }) {
+  if (localMailSchedulerRunLock) return { acquired: false };
+  localMailSchedulerRunLock = textValue(runId) || `local-mail-scheduler-${Date.now()}`;
+  return { acquired: true, runId: localMailSchedulerRunLock };
+}
+
+async function releaseLocalMailSchedulerLock(lock) {
+  if (!lock?.runId || textValue(lock.runId) !== localMailSchedulerRunLock) return;
+  localMailSchedulerRunLock = null;
+}
+
+async function runLocalMailScheduler() {
+  if (!localMailAutomationEnabled) return;
+  try {
+    const result = await executeMailScheduler(localMailSchedulerDependencies(), {
+      source: "local_timer",
+    });
+    if (result.status === "failed" || result.status === "partial") {
+      console.warn(`[mail-scheduler] ${result.status}: ${result.results.map((item) => `${item.accountId}:${item.status}`).join(", ")}`);
+    }
+  } catch (error) {
+    console.warn("[mail-scheduler] local timer check failed.");
+  }
+}
+
+function refreshLocalMailScheduler(settings = loadMailSettings()) {
+  const shouldRun = localMailAutomationEnabled && settings?.automation?.enabled === true;
+  if (!shouldRun) {
+    if (localMailSchedulerTimer) clearInterval(localMailSchedulerTimer);
+    localMailSchedulerTimer = null;
+    return;
+  }
+  if (localMailSchedulerTimer) return;
+  localMailSchedulerTimer = setInterval(() => {
+    runLocalMailScheduler();
+  }, 60 * 1000);
+  localMailSchedulerTimer.unref?.();
+  setTimeout(() => runLocalMailScheduler(), 1000).unref?.();
 }
 
 function saveMailSyncResult(settings, summary, accountId) {
@@ -2913,15 +2972,45 @@ function handleApi(req, res, pathname) {
   if (req.method === "POST" && pathname === "/api/mail/sync") {
     readBody(req)
       .then(async (body) => {
-        const settings = loadMailSettings();
-        const state = loadState();
         const parsed = JSON.parse(body || "{}");
+        const settings = loadMailSettings();
         const account = (settings.accounts || []).find((item) => String(item.id || "") === String(parsed.accountId || "")) || (settings.accounts || []).find((item) => item.enabled);
         if (!account?.enabled) throw new Error("邮箱同步尚未启用。请先在设置页保存并启用对应 IMAP 邮箱。");
-        const summary = await syncMailAccount(settings, state, credentialKeyMaterial(), { accountId: account.id, maxPerFolder: parsed.maxPerFolder });
-        saveState(state, state.meta?.version);
-        const nextSettings = saveMailSyncResult(settings, summary, account.id);
-        jsonResponse(res, 200, { ok: true, summary, settings: publicMailSettings(nextSettings), state });
+        const result = await executeMailScheduler(localMailSchedulerDependencies(), {
+          source: "manual",
+          force: true,
+          accountId: account.id,
+          maxPerFolder: parsed.maxPerFolder,
+          requestId: textValue(parsed.requestId),
+        });
+        const accountResult = result.results.find((item) => String(item.accountId) === String(account.id));
+        if (!accountResult || accountResult.status === "failed") throw new Error(accountResult?.error || "邮箱同步失败");
+        jsonResponse(res, 200, {
+          ok: true,
+          summary: accountResult.summary || {},
+          settings: publicMailSettings(result.settings),
+          state: accountResult.state || loadState(),
+        });
+      })
+      .catch((error) => jsonResponse(res, 400, { ok: false, error: formatMailError(error) }));
+    return true;
+  }
+
+  if (req.method === "POST" && pathname === "/api/mail/scheduler/check") {
+    readBody(req)
+      .then(async (body) => {
+        const parsed = JSON.parse(body || "{}");
+        const result = await executeMailScheduler(localMailSchedulerDependencies(), {
+          source: "manual",
+          requestId: textValue(parsed.requestId),
+        });
+        jsonResponse(res, 200, {
+          ok: result.ok,
+          status: result.status,
+          results: result.results.map(({ state, ...entry }) => entry),
+          settings: publicMailSettings(result.settings),
+          state: loadState(),
+        });
       })
       .catch((error) => jsonResponse(res, 400, { ok: false, error: formatMailError(error) }));
     return true;
@@ -3226,4 +3315,13 @@ const server = http.createServer(async (req, res) => {
 
 server.listen(port, () => {
   console.log(`Resource Workbench running at http://localhost:${port}`);
+  refreshLocalMailScheduler();
 });
+
+function stopLocalMailScheduler() {
+  if (localMailSchedulerTimer) clearInterval(localMailSchedulerTimer);
+  localMailSchedulerTimer = null;
+}
+
+process.once("SIGINT", stopLocalMailScheduler);
+process.once("SIGTERM", stopLocalMailScheduler);

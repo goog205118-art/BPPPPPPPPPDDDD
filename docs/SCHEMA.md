@@ -116,7 +116,22 @@
 
 `creators.email` 和 `leads.email` 是旧数据兼容字段。读取时，旧邮箱会按“人员类型 + 人员 ID + 邮箱”生成稳定的隐式主联系人 ID，不会因为重复读取产生新身份；新数据应优先写入 `contacts`。联系人查询、邮件匹配、跟进轨迹和发信记录均可通过 `contact_id` / `matched_contact_id` 追溯到实际邮箱身份，并始终限制在当前品牌工作区内。
 
-发送前会在当前品牌、联系人和收件邮箱范围内执行投递治理：退订、黑名单、明确无效或已退信联系人会被拦截；默认近 7 天最多触达 3 次，策略可在邮件设置中调整。退信/投递失败通知仅在已有 IMAP 人工同步时识别，优先按 `In-Reply-To`、`References` 或唯一收件人匹配原始出站事件；无法唯一匹配时只进入人工分诊，不猜测归属。SMTP `accepted` 仅表示发信服务器已接受，不代表最终送达。定时 IMAP 同步仍由 `CRM-60` 延后。
+发送前会在当前品牌、联系人和收件邮箱范围内执行投递治理：退订、黑名单、明确无效或已退信联系人会被拦截；默认近 7 天最多触达 3 次，策略可在邮件设置中调整。退信/投递失败通知仅在已有 IMAP 同步时识别，优先按 `In-Reply-To`、`References` 或唯一收件人匹配原始出站事件；无法唯一匹配时只进入人工分诊，不猜测归属。SMTP `accepted` 仅表示发信服务器已接受，不代表最终送达。
+
+## mailSettings.automation
+
+邮箱设置中的 `automation` 是独立于业务状态的受控定时同步策略，保存在本地加密邮箱设置文件或线上私有 Blob；浏览器只会拿到脱敏后的运行信息。
+
+- `enabled`（默认 `false`）
+- `accountIds`（可选账户范围；空数组表示全部已启用且配置完整的账户）
+- `intervalMinutes`（15 至 1440 分钟）
+- `maxPerFolder`（每文件夹本次处理上限，1 至 250）
+- `retryLimit`、`retryBackoffMinutes`（失败后指数退避）
+- `accountState`（账户租约、最近运行、下一到期时间、连续失败次数）
+- `runHistory`（最多 60 条脱敏摘要：账户、品牌 ID、来源、时间、状态、数量和截断错误）
+- `aiSuggestionsEnabled`（仅兼容预留标识；`CRM-60-02` 未启动，不能触发 AI）
+
+定时同步只复用现有的只读 IMAP、去重、唯一归档与人工分诊规则。手动同步可以只绕过本次 `enabled` 判定，不能把持久化策略改为开启。每次执行先取得整次调度运行锁，再为账户写入短期租约；本地运行还要求进程环境变量 `MAIL_AUTOMATION_LOCAL_ENABLED=true`，线上运行还要求 Cron Bearer 密钥。它不自动发送、不会自动推进 Case/FollowUp 阶段、不抓取附件、HTML 或原始 MIME，也不调用 AI。
 
 ## complianceAudit
 

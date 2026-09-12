@@ -22,6 +22,7 @@ This project can be deployed as a private online workbench. The online version d
 | `WORKBENCH_ACCESS_PASSWORD` | A strong private password for this workbench | Yes |
 | `BLOB_READ_WRITE_TOKEN` | Automatically added after connecting Vercel Blob | Yes |
 | `WORKBENCH_CREDENTIAL_ENCRYPTION_KEY` | A separate long random secret used to encrypt saved IMAP authorization codes | Required when enabling IMAP |
+| `CRON_SECRET` | Long random secret used only by `GET /api/cron/mail-sync` | Required only when enabling scheduled IMAP sync |
 | `RESOURCE_WORKBENCH_CREATOR_AI_KEY` | Optional creator-profile API key fallback | No |
 | `RESOURCE_WORKBENCH_LEAD_AI_KEY` | Optional lead-profile API key fallback | No |
 
@@ -49,6 +50,19 @@ The Settings page includes **Official Mailbox IMAP Sync**. Configure the mailbox
 - `WORKBENCH_CREDENTIAL_ENCRYPTION_KEY` should remain stable. Replacing it after saving an authorization code makes the old encrypted code unreadable, and you will need to enter it again.
 - Foxmail remains a client. The online version does not and cannot read Foxmail's local database; it connects directly to the configured IMAP server.
 
+### Controlled Scheduled Sync
+
+Scheduled IMAP sync is disabled by default in two places: the mailbox strategy in the Settings page is off, and this repository intentionally does not add a default cron entry to `vercel.json`. This avoids starting external mailbox polling merely because the project was deployed.
+
+To enable it after the manual mailbox workflow is accepted:
+
+1. Save `CRON_SECRET` in the Vercel environment.
+2. In Settings, enable **Controlled Scheduled Sync**, select the mailbox accounts, and set the interval, folder message limit and retry policy.
+3. Add a Vercel Cron schedule appropriate for the deployment to call `GET /api/cron/mail-sync`. The request must include `Authorization: Bearer <CRON_SECRET>`.
+4. Verify the sanitized run history after the first scheduled run, then keep the manual **Sync Mailbox** action available as the recovery path.
+
+The scheduler reads only the configured recent IMAP folders and uses the same deduplication, routing, data-version retry and manual-triage behavior as a manual sync. It never sends email, never advances a cooperation stage, never downloads attachments/HTML/MIME, and never invokes AI. A global run lock plus per-account lease prevents overlapping cron/manual runs from overwriting the shared mailbox settings or importing the same work twice.
+
 ## Automatic GitHub Deployment
 
 The repository includes `.github/workflows/vercel.yml`. To enable it, add these GitHub repository secrets:
@@ -65,5 +79,5 @@ After the secrets are present, every push to `main` builds and publishes a produ
 
 - The online version is designed for one owner or a small trusted team. The current whole-state save model is not intended for simultaneous editing by many people.
 - XLSX imports should be kept below 3 MB per upload because Vercel serverless requests have size limits.
-- Mailbox sync is manual in this version. Vercel Function connectivity to a mailbox server can be limited by the mailbox provider's firewall or allowlist rules; always test connection from the Settings page.
+- Mailbox sync is manual by default. Controlled scheduled sync requires the explicit `CRON_SECRET`, a deployer-added Cron schedule and a saved opt-in strategy; Vercel Function connectivity to a mailbox server can be limited by the mailbox provider's firewall or allowlist rules, so always test connection from the Settings page first.
 - Export JSON regularly. It is the quickest independent backup and migration format.
