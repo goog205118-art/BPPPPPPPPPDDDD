@@ -5,7 +5,7 @@
 这是合作跟进 CRM 的唯一执行台账，用于替代分散的口头规划、聊天记录和临时待办。后续所有涉及合作跟进、官邮、AI 跟进、达人联系人、任务队列和存储并发的改动，必须先核对本文件，再开始实现。
 
 - 建立日期：2026-09-11
-- 当前里程碑：`CRM-50` 多人协作与存储并发
+- 当前里程碑：`CRM-70` 联系人身份与投递治理
 - 总体状态：`active`
 - 本轮范围：先跑稳人工确认的合作跟进闭环；定时同步暂缓。
 - 数据原则：不改动正式业务资料、不暴露邮箱授权码或 AI Key。
@@ -37,12 +37,12 @@
 
 | 项目 | 当前值 |
 | --- | --- |
-| 当前任务 | `CRM-60-01` |
-| 当前状态 | `deferred` |
-| 当前目标 | 定时 IMAP 同步暂缓；等待人工合作跟进闭环和邮件缓存稳定验收后再重新评估。 |
+| 当前任务 | `CRM-70-01` |
+| 当前状态 | `active` |
+| 当前目标 | 建立达人、经纪人/商务与多个邮箱之间的稳定身份关联；定时 IMAP 同步继续暂缓。 |
 | 已完成前序 | `CRM-00` 基线与执行治理；`CRM-10` Case 模型、兼容迁移、Case 中心展示与阶段审计；`CRM-20` 今日推进与任务生命周期；`CRM-30` 邮件分诊与可靠归档；`CRM-40-01` 至 `CRM-40-04` 人工主导的 AI 跟进工作台。 |
 | 禁止提前启动 | `CRM-60` 定时同步、自动发送、AI 自动推进高风险阶段。 |
-| 最近已验证基线 | `npm.cmd run check`、`npm.cmd run test:followup-ai-stage-application`、`npm.cmd run test:followup-ai-draft-send`、`npm.cmd run test:followup-ai-analysis`、`npm.cmd run test:followup-ai-context`、`npm.cmd run test:followup-isolation`、`npm.cmd run test:crm-regression`、`npm.cmd run test:case-display`、`npm.cmd run test:action-task-storage`、`npm.cmd run test:today-action-center`、`npm.cmd run test:task-collaboration`、`npm.cmd run test:mail-routing-score`、`npm.cmd run test:mail-triage-console`、`npm.cmd run test:mail-triage-case-actions`、`npm.cmd run test:mail-triage-lead`、Python AST 解析、`git diff --check`（功能提交 `4fb015b`；验证证据与完成记录已在本台账检查点归档）。 |
+| 最近已验证基线 | `npm.cmd run check`、`npm.cmd run test:followup-ai-stage-application`、`npm.cmd run test:followup-ai-draft-send`、`npm.cmd run test:followup-ai-analysis`、`npm.cmd run test:followup-ai-context`、`npm.cmd run test:followup-isolation`、`npm.cmd run test:crm-regression`、`npm.cmd run test:case-display`、`npm.cmd run test:action-task-storage`、`npm.cmd run test:today-action-center`、`npm.cmd run test:task-collaboration`、`npm.cmd run test:mail-routing-score`、`npm.cmd run test:mail-triage-console`、`npm.cmd run test:mail-triage-case-actions`、`npm.cmd run test:mail-triage-lead`、Python AST 解析、`git diff --check`（最近功能提交 `3d541a0`；验证证据与完成记录已在本台账检查点归档）。 |
 
 ## 总体闭环与完成定义
 
@@ -104,8 +104,8 @@
 | --- | --- | --- | --- | --- | --- |
 | `CRM-50-01` | P1 | `done` | 为本地 SQLite 和线上存储制定并发策略：记录级写入、版本号/乐观锁、冲突响应与恢复提示。 | `CRM-00-03` | 两个用户或“同步 + 手工编辑”同时操作时，后写不会静默覆盖前写。 |
 | `CRM-50-02` | P1 | `done` | 将本地全表删除重写替换为针对实体的事务性增删改；保留可恢复备份。 | `CRM-50-01` | 多次保存只写入受影响记录；失败可回滚，不损坏其他实体。 |
-| `CRM-50-03` | P1 | `active` | 将线上 Blob 全量状态覆盖迁移到具备记录级并发控制的数据后端或服务层。 | `CRM-50-01` | 跨浏览器并发可检测和解决冲突；邮件同步不覆盖人工编辑。 |
-| `CRM-50-04` | P2 | `active` | 增加变更审计、冲突处理界面及按实体恢复。 | `CRM-50-02`, `CRM-50-03` | 可查看谁何时更改，冲突可选择保留版本或合并字段。 |
+| `CRM-50-03` | P1 | `done` | 将线上 Blob 全量状态覆盖迁移到具备记录级并发控制的数据后端或服务层。 | `CRM-50-01` | 跨浏览器并发可检测和解决冲突；邮件同步不覆盖人工编辑。 |
+| `CRM-50-04` | P2 | `done` | 增加变更审计、冲突处理界面及按实体恢复。 | `CRM-50-02`, `CRM-50-03` | 可查看谁何时更改，冲突可选择保留版本或合并字段。 |
 
 ### CRM-60：定时同步与受控自动建议
 
@@ -188,6 +188,7 @@
 | 2026-09-12（America/New_York） | `CRM-50-03` | `active -> done` | `api/[...route].mjs`、`tools/online-record-store.cjs`、`tools/online-record-store-regression-test.cjs`、`tools/storage-concurrency-regression-test.cjs`、`docs/SCHEMA.md`、`package.json` | `npm.cmd run test:online-record-store`、`npm.cmd run test:storage-concurrency`、`npm.cmd run check`、`npm.cmd run test:crm-regression`、`npm.cmd run test:followup-isolation`、`npm.cmd run test:followup-ai-context`、`npm.cmd run test:followup-ai-draft-send`、`npm.cmd run test:mail-triage-case-actions`、`git diff --check` 全部通过。专项回归证明旧快照只读兼容、不同记录的陈旧保存可合并、同一记录冲突返回 `409 version_conflict`、冲突诊断可返回、操作日志不把 `_storageConflicts` 写入业务补丁。 | `bf7cf41`（功能提交） | 数据影响：未读取或写入正式线上资料，未连接真实 IMAP、SMTP 或 AI；线上新保存追加 `resource-workbench/state-operations/<operation-id>.json`，旧 `resource-workbench/state.json` 不再被保存覆盖。回滚：`git revert bf7cf41`；已写入的操作日志需在回滚前保留或按后续维护脚本处理，不直接删除线上 Blob。核对：已复读 `CRM-00` 至 `CRM-50-02` 完成证据，未重复本地 SQLite 事务改造；未启动 `CRM-50-04` 冲突界面/恢复、`CRM-60` 定时同步、自动发信或 AI 自动推进高风险阶段。下一门槛：仅激活 `CRM-50-04`，开始前先读取本台账当前指针与最后三条日志。 |
 | 2026-09-12（America/New_York） | `CRM-50-04` | `planned -> active` | `docs/CRM_EXECUTION_TASKS.md` | 已复读 `CRM-50-03` 完成记录、当前工作区与前置任务证据。确认线上操作日志已能合并/阻止记录冲突，但尚无变更审计展示、冲突处理界面或按实体恢复入口。本阶段不启动定时同步、自动发信、AI 自动推进或真实线上数据操作。 | 待提交 | 计划：为本地/线上保存记录审计来源与操作者，前端展示冲突并提供重新读取、保留当前版本或按记录合并的人工入口；恢复只针对隔离测试存储，先建立可回归契约再接入正式数据。 |
 | 2026-09-12（America/New_York） | `CRM-50-04` | `active -> done` | `tools/online-record-store.cjs`、`api/[...route].mjs`、`tools/local-server.cjs`、`app/app.js`、`app/index.html`、`app/styles.css`、`tools/storage-audit-conflict-regression-test.cjs`、`package.json`、`docs/SCHEMA.md` | `npm.cmd run check`、`python -c "import ast; ast.parse(open('tools/sqlite_store.py', encoding='utf-8').read())"`、`npm.cmd run test:storage-audit-conflict`、`npm.cmd run test:online-record-store`、`npm.cmd run test:storage-concurrency`、`npm.cmd run test:storage-record-transaction`、`npm.cmd run test:crm-regression`、`npm.cmd run test:case-display`、`npm.cmd run test:action-task-storage`、`npm.cmd run test:today-action-center`、`npm.cmd run test:task-collaboration`、`npm.cmd run test:followup-isolation`、`npm.cmd run test:followup-ai-context`、`npm.cmd run test:followup-ai-analysis`、`npm.cmd run test:followup-ai-draft-send`、`npm.cmd run test:followup-ai-stage-application`、`npm.cmd run test:mail-routing-score`、`npm.cmd run test:mail-triage-console`、`npm.cmd run test:mail-triage-case-actions`、`npm.cmd run test:mail-triage-lead`、`git diff --check` 全部通过。专项回归验证操作审计字段传递、审计字段不进入业务补丁、不同记录合并、同记录 `409` 冲突及竞争操作者/来源/原因、删除后按历史版本恢复、禁止恢复 `meta`/无效版本；前端冲突弹层支持重新读取、逐条选择服务端或当前页面后合并保存；线上提供带当前版本校验的 `POST /api/state/restore-entity`；本地冲突返回结构化记录并追加 `storage-audit.jsonl`。 | `3d541a0`（功能提交） | 数据影响：未读取或写入正式业务资料，未连接真实 IMAP、SMTP 或 AI；本地仅新增审计旁车写入能力，线上仅新增操作日志审计字段和恢复服务层，不覆盖旧 `state.json`。回滚：`git revert 3d541a0`；线上已追加的操作日志需保留或按后续维护脚本处理，不直接删除 Blob；本地 SQLite 继续使用既有 `.bak` 整体恢复。核对：已复读 `CRM-00` 至 `CRM-50-03` 完成证据，未重复本地事务、线上操作日志或前序 AI/邮件能力；未启动 `CRM-60` 定时同步、自动发信或 AI 自动推进高风险阶段。下一门槛：`CRM-60-01` 继续保持 `deferred`，只有人工邮件闭环、失败重试/幂等/日志开关方案重新评审通过后才可激活。 |
+| 2026-09-12（America/New_York） | `CRM-70-01` | `planned -> active` | `docs/CRM_EXECUTION_TASKS.md` | 已复读 `CRM-00` 至 `CRM-50-04` 的完成证据，并校正任务表中 `CRM-50-03/04` 残留的 `active` 状态；确认 `CRM-60` 按用户决定继续 `deferred`。现有联系人只有单一 `email`，本阶段先建立多身份/多邮箱契约、兼容读取和隔离回归，不启动退信、退订、黑名单或定时同步。 | 待提交 | 计划：为达人/线索增加稳定联系人身份与多个邮箱角色、主邮箱、有效性和退订字段；让邮件归档与发信选择使用统一身份数据，并保持旧 `email` 字段兼容。下一门槛：多邮箱身份回归通过后才可进入 `CRM-70-02` 投递治理。 |
 
 ## 阶段完成记录模板
 
