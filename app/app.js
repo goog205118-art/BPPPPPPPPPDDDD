@@ -623,7 +623,7 @@ const emptyState = {
 
 const state = {
   data: clone(emptyState),
-  activeTab: "creators",
+  activeTab: TODAY_ACTION_TAB.key,
   settingsSection: "workspace",
   editingId: null,
   editorDraft: null,
@@ -1843,6 +1843,29 @@ async function loadState() {
     const raw = localStorage.getItem(STORAGE_FALLBACK);
     state.data = raw ? ensureStateShape(JSON.parse(raw)) : clone(emptyState);
   }
+}
+
+function hasBusinessData(source = state.data) {
+  const businessCollections = [
+    "creators",
+    "resources",
+    "leads",
+    "products",
+    "cooperations",
+    "matches",
+    "followUps",
+    "cases",
+    "actionTasks",
+    "contactTracks",
+    "mailInbox",
+  ];
+  return businessCollections.some((key) => Array.isArray(source?.[key]) && source[key].length > 0);
+}
+
+function resolveInitialWorkspaceTab() {
+  // Both established and new workspaces begin at the action center. The page
+  // decides whether to show live work or the three no-data starting actions.
+  return TODAY_ACTION_TAB.key;
 }
 
 async function persist() {
@@ -7797,12 +7820,44 @@ function renderTodayActionPage() {
   const owners = [...new Set(tasks.map((task) => text(task.owner_name)).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-CN"));
   const types = [...new Set(tasks.map((task) => text(task.type)).filter(Boolean))].sort();
   const notice = text(state.todayActionNotice);
+  const isNewWorkspace = !hasBusinessData();
 
   const selectOptions = (items, selected, allLabel, map = (item) => ({ value: item, label: item })) =>
     `<option value="">${escapeHtml(allLabel)}</option>${items.map((item) => {
       const option = map(item);
       return `<option value="${escapeHtml(option.value)}" ${text(selected) === text(option.value) ? "selected" : ""}>${escapeHtml(option.label)}</option>`;
     }).join("")}`;
+
+  if (isNewWorkspace) {
+    elements.todayActionPage.innerHTML = `
+      <header class="today-action-head">
+        <div>
+          <span class="eyebrow">WORKSPACE START</span>
+          <h2>从这里开始建立工作区</h2>
+          <p class="panel-hint">先导入已有资料，或从一位达人、一个品牌开始。后续的合作跟进和今日任务会自动汇集在这里。</p>
+        </div>
+        <span class="today-action-total">尚无资料</span>
+      </header>
+      <section class="today-onboarding" aria-label="工作区起步操作">
+        <button type="button" class="today-onboarding-action is-primary" data-today-onboarding-action="import">
+          <span class="today-onboarding-icon" aria-hidden="true">⇧</span>
+          <span><strong>导入表格</strong><small>将现有达人资料整理到工作区</small></span>
+        </button>
+        <button type="button" class="today-onboarding-action" data-today-onboarding-action="creator">
+          <span class="today-onboarding-icon" aria-hidden="true">+</span>
+          <span><strong>新增达人</strong><small>从一条达人资料开始建档</small></span>
+        </button>
+        <button type="button" class="today-onboarding-action" data-today-onboarding-action="brand">
+          <span class="today-onboarding-icon" aria-hidden="true">□</span>
+          <span><strong>创建品牌</strong><small>先建立独立的品牌工作区</small></span>
+        </button>
+      </section>
+    `;
+    elements.todayActionPage.querySelectorAll("[data-today-onboarding-action]").forEach((button) => {
+      button.addEventListener("click", () => openTodayOnboardingAction(button.dataset.todayOnboardingAction));
+    });
+    return;
+  }
 
   elements.todayActionPage.innerHTML = `
     <header class="today-action-head">
@@ -7858,6 +7913,23 @@ function renderTodayActionPage() {
   elements.todayActionPage.querySelectorAll("[data-today-action-open-case]").forEach((button) => {
     button.addEventListener("click", () => openTodayActionCase(button.dataset.todayActionOpenCase));
   });
+}
+
+function openTodayOnboardingAction(action) {
+  if (action === "brand") {
+    openBrandManager({ create: true });
+    return;
+  }
+
+  state.activeTab = "creators";
+  state.matchingEditingId = null;
+  resetEditorState();
+  render();
+  if (action === "creator") {
+    openEditor();
+    return;
+  }
+  window.requestAnimationFrame(() => elements.importTableInput.click());
 }
 
 async function saveTodayActionMutation(message, mutate) {
@@ -10253,6 +10325,7 @@ async function init() {
   bindEvents();
   loadDuplicateIgnores();
   await loadState();
+  state.activeTab = resolveInitialWorkspaceTab();
   await loadAiSettings();
   await loadMailSettings();
   startTimeZoneTicker();

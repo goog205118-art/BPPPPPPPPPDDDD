@@ -4640,6 +4640,87 @@ body.access-locked .app-shell {
   font-size: 0.62rem;
 }
 
+.today-onboarding {
+  display: grid;
+  grid-template-columns: minmax(0, 1.2fr) repeat(2, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.today-onboarding-action {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  min-height: 76px;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #30465a;
+  border-radius: 5px;
+  background: #182633;
+  color: #dbe9f5;
+  text-align: left;
+  transition: border-color 140ms ease, background 140ms ease, transform 140ms ease;
+}
+
+.today-onboarding-action:hover,
+.today-onboarding-action:focus-visible {
+  border-color: #5c88b0;
+  background: #1d3041;
+  outline: none;
+}
+
+.today-onboarding-action:active {
+  transform: translateY(1px);
+}
+
+.today-onboarding-action.is-primary {
+  border-color: #467cae;
+  background: #173047;
+}
+
+.today-onboarding-action.is-primary:hover,
+.today-onboarding-action.is-primary:focus-visible {
+  border-color: #70a9d7;
+  background: #1a3a56;
+}
+
+.today-onboarding-icon {
+  display: grid;
+  width: 28px;
+  height: 28px;
+  place-items: center;
+  border: 1px solid #3d607e;
+  border-radius: 4px;
+  background: #122536;
+  color: #a9d8f6;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 1rem;
+  font-weight: 700;
+}
+
+.today-onboarding-action.is-primary .today-onboarding-icon {
+  border-color: #5a96c7;
+  background: #1e4564;
+  color: #e2f3ff;
+}
+
+.today-onboarding-action > span:last-child {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.today-onboarding-action strong {
+  color: #edf5fd;
+  font-size: 0.77rem;
+  line-height: 1.2;
+}
+
+.today-onboarding-action small {
+  color: #9fb4c7;
+  font-size: 0.64rem;
+  line-height: 1.35;
+}
+
 .today-action-metrics {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -7506,6 +7587,10 @@ body.access-locked .app-shell {
 }
 
 @media (max-width: 560px) {
+  .today-onboarding {
+    grid-template-columns: 1fr;
+  }
+
   .today-action-metrics,
   .today-action-filters {
     grid-template-columns: repeat(2, minmax(0, 1fr));

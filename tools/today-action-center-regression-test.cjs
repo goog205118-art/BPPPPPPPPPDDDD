@@ -104,8 +104,29 @@ function testUiContracts() {
   }
 }
 
+function testWorkspaceEntryContracts() {
+  for (const marker of [
+    "activeTab: TODAY_ACTION_TAB.key",
+    "function hasBusinessData",
+    "function resolveInitialWorkspaceTab",
+    "state.activeTab = resolveInitialWorkspaceTab();",
+    "function openTodayOnboardingAction",
+    "data-today-onboarding-action=\"import\"",
+    "data-today-onboarding-action=\"creator\"",
+    "data-today-onboarding-action=\"brand\"",
+    "openBrandManager({ create: true })",
+    "elements.importTableInput.click()",
+  ]) {
+    assert.match(appSource, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  for (const selector of [".today-onboarding", ".today-onboarding-action", ".today-onboarding-icon"]) {
+    assert.match(stylesSource, new RegExp(selector.replace(".", "\\.")));
+  }
+}
+
 testSkipAndReconcile();
 testDeferValidation();
 testCompleteDoesNotAdvanceCase();
 testUiContracts();
-console.log("PASS today action center regression: task lifecycle, no stage automation, and UI contracts.");
+testWorkspaceEntryContracts();
+console.log("PASS today action center regression: task lifecycle, no stage automation, UI contracts, and workspace entry.");
