@@ -2459,7 +2459,6 @@ function renderMailWizard() {
   elements.mailSettingsForm.querySelectorAll("[data-mail-wizard-step]").forEach((panel) => {
     panel.classList.toggle("hidden", Number(panel.dataset.mailWizardStep) !== step);
   });
-  elements.mailAccountEditor.classList.toggle("hidden", step === MAIL_WIZARD_STEPS.length);
   if (step === MAIL_WIZARD_STEPS.length) renderMailWizardCompletionStatus();
 }
 
