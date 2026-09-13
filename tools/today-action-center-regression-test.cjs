@@ -8,6 +8,7 @@ const appSource = fs.readFileSync(path.join(rootDir, "app", "app.js"), "utf8");
 const htmlSource = fs.readFileSync(path.join(rootDir, "app", "index.html"), "utf8");
 const stylesSource = fs.readFileSync(path.join(rootDir, "app", "styles.css"), "utf8");
 const emptyWorkspaceFixture = JSON.parse(fs.readFileSync(path.join(rootDir, "tools", "fixtures", "empty-workspace-state.json"), "utf8"));
+const focusWorkspaceFixture = JSON.parse(fs.readFileSync(path.join(rootDir, "tools", "fixtures", "today-action-focus-state.json"), "utf8"));
 
 function fixture() {
   return {
@@ -96,11 +97,31 @@ function testUiContracts() {
     "function actionTaskHistoryMarkup",
     "data-today-action-open-case",
     "openFollowUpDetail(followUp.id)",
+    'const TODAY_ACTION_FOCUS_VALUE = "priority"',
+    "function isTodayActionFocusTask",
+    "function compareTodayActionTasks",
+    "function actionTaskPrimaryAction",
+    "function todayActionEmptyMarkup",
+    'data-today-action-focus="${TODAY_ACTION_FOCUS_VALUE}"',
+    'data-today-action-primary="${escapeHtml(task.id)}"',
+    'data-today-action-empty-action="sync"',
+    'data-today-action-empty-action="triage"',
+    'data-today-action-empty-action="new-followup"',
+    "data-today-action-filter=\"brand\"",
+    "today-action-filter-details",
   ]) {
     assert.match(appSource, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
   }
   assert.match(htmlSource, /id="todayActionPage"/);
-  for (const selector of [".today-action-page", ".today-action-row", ".today-action-filters"]) {
+  for (const selector of [
+    ".today-action-page",
+    ".today-action-row",
+    ".today-action-filters",
+    ".today-action-focusbar",
+    ".today-action-filter-details",
+    ".today-action-primary",
+    ".today-action-empty-actions",
+  ]) {
     assert.match(stylesSource, new RegExp(selector.replace(".", "\\.")));
   }
 }
@@ -249,6 +270,16 @@ function testEmptyWorkspaceFixture() {
   }
 }
 
+function testFocusWorkspaceFixture() {
+  assert.equal(focusWorkspaceFixture.brands.length, 1, "今日推进视觉夹具应提供一个隔离品牌。");
+  assert.equal(focusWorkspaceFixture.cases.length, 1, "今日推进视觉夹具应提供一个隔离 Case。");
+  assert.deepEqual(
+    focusWorkspaceFixture.actionTasks.map((task) => task.type),
+    ["new_reply", "reply_overdue", "publish_pending"],
+    "今日推进视觉夹具应同时覆盖新回复、待复联和未来待办。",
+  );
+}
+
 testSkipAndReconcile();
 testDeferValidation();
 testCompleteDoesNotAdvanceCase();
@@ -258,4 +289,5 @@ testGroupedNavigationContracts();
 testCompactTopbarContracts();
 testFollowUpActionListContracts();
 testEmptyWorkspaceFixture();
+testFocusWorkspaceFixture();
 console.log("PASS today action center regression: task lifecycle, no stage automation, UI contracts, workspace entry, grouped navigation, compact topbar, and follow-up action list.");

@@ -1,0 +1,119 @@
+{
+  "meta": {
+    "version": 1,
+    "updatedAt": "2026-09-13T09:00:00.000Z"
+  },
+  "brands": [
+    {
+      "id": "BR-FOCUS",
+      "name": "HSU",
+      "timezone": "America/Los_Angeles",
+      "createdAt": "2026-09-01T09:00:00.000Z",
+      "updatedAt": "2026-09-01T09:00:00.000Z"
+    }
+  ],
+  "creators": [
+    {
+      "id": "CR-FOCUS",
+      "brand_id": "BR-FOCUS",
+      "brand": "HSU",
+      "name": "Maya Rides",
+      "handle": "@mayarides",
+      "email": "maya@example.com",
+      "platform": "YouTube",
+      "createdAt": "2026-09-01T09:00:00.000Z",
+      "updatedAt": "2026-09-01T09:00:00.000Z"
+    }
+  ],
+  "resources": [],
+  "leads": [],
+  "products": [],
+  "cooperations": [],
+  "matches": [],
+  "followUps": [
+    {
+      "id": "FU-FOCUS",
+      "case_id": "CASE-FOCUS",
+      "brand_id": "BR-FOCUS",
+      "brand": "HSU",
+      "creator_id": "CR-FOCUS",
+      "creator_name": "Maya Rides",
+      "stage": "初步沟通",
+      "next_action": "阅读达人最新回复并确认下一步",
+      "next_action_at": "2026-09-13T16:00:00.000Z",
+      "createdAt": "2026-09-01T09:00:00.000Z",
+      "updatedAt": "2026-09-13T09:00:00.000Z"
+    }
+  ],
+  "cases": [
+    {
+      "id": "CASE-FOCUS",
+      "brand_id": "BR-FOCUS",
+      "brand": "HSU",
+      "creator_id": "CR-FOCUS",
+      "creator_name": "Maya Rides",
+      "stage": "初步沟通",
+      "priority": "高",
+      "next_action": "阅读达人最新回复并确认下一步",
+      "next_action_at": "2026-09-13T16:00:00.000Z",
+      "version": 1,
+      "createdAt": "2026-09-01T09:00:00.000Z",
+      "updatedAt": "2026-09-13T09:00:00.000Z"
+    }
+  ],
+  "actionTasks": [
+    {
+      "id": "TASK-REPLY",
+      "brand_id": "BR-FOCUS",
+      "brand": "HSU",
+      "case_id": "CASE-FOCUS",
+      "type": "new_reply",
+      "title": "处理达人新回信",
+      "description": "达人今天回复了样品合作邀请，尚未人工阅读和确认下一步。",
+      "priority": "高",
+      "due_at": "2026-09-13T09:30:00.000Z",
+      "status": "待处理",
+      "version": 1,
+      "createdAt": "2026-09-13T09:30:00.000Z",
+      "updatedAt": "2026-09-13T09:30:00.000Z"
+    },
+    {
+      "id": "TASK-OVERDUE",
+      "brand_id": "BR-FOCUS",
+      "brand": "HSU",
+      "case_id": "CASE-FOCUS",
+      "type": "reply_overdue",
+      "title": "已联系超过三天未回复",
+      "description": "最近一次外联后三天仍无更晚的达人回信，建议人工决定是否复联。",
+      "priority": "中",
+      "due_at": "2026-09-10T16:00:00.000Z",
+      "status": "待处理",
+      "version": 1,
+      "createdAt": "2026-09-10T16:00:00.000Z",
+      "updatedAt": "2026-09-10T16:00:00.000Z"
+    },
+    {
+      "id": "TASK-FUTURE",
+      "brand_id": "BR-FOCUS",
+      "brand": "HSU",
+      "case_id": "CASE-FOCUS",
+      "type": "publish_pending",
+      "title": "待确认内容发布",
+      "description": "样品合作已进入待发布阶段，需人工核对发布时间或发布链接。",
+      "priority": "中",
+      "due_at": "2026-09-18T16:00:00.000Z",
+      "status": "待处理",
+      "version": 1,
+      "createdAt": "2026-09-13T09:00:00.000Z",
+      "updatedAt": "2026-09-13T09:00:00.000Z"
+    }
+  ],
+  "actionTaskEvents": [],
+  "followUpAiSuggestions": [],
+  "followUpEvents": [],
+  "contacts": [],
+  "contactTracks": [],
+  "mailInbox": [],
+  "importHistory": [],
+  "complianceAudit": []
+}

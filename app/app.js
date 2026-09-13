@@ -98,6 +98,8 @@ const ACTION_TASK_TYPE_LABELS = {
   ai_suggestion_review: "AI 建议待审核",
   general: "通用",
 };
+const TODAY_ACTION_FOCUS_VALUE = "priority";
+const TODAY_ACTION_FOCUS_TYPES = new Set(["new_reply", "mail_triage", "reply_overdue"]);
 const FOLLOW_UP_STAGES = ["已联系待回复", "初步沟通", "已回复", "谈合作方式 / 报价", "条款确认", "待寄样", "运输中", "已签收", "待发布", "已发布", "数据回收", "已结案", "暂停跟进", "未谈妥"];
 const FOLLOW_UP_TERMINAL_STAGES = new Set(["已结案", "暂停跟进", "未谈妥"]);
 const AI_HIGH_RISK_STAGE_APPLICATIONS = new Set([
@@ -715,7 +717,7 @@ const state = {
     stageApplyConfirmed: false,
     stageApplyHighRiskConfirmed: false,
   },
-  todayActionFilter: { brand: "", owner: "", priority: "", due: "", type: "", status: "待处理" },
+  todayActionFilter: { brand: "", owner: "", priority: "", due: TODAY_ACTION_FOCUS_VALUE, type: "", status: "待处理" },
   todayActionNotice: "",
   topbarMoreOpen: false,
   timeZonePopoverOpen: false,
@@ -7942,13 +7944,40 @@ function actionTaskDueCategory(task, now = new Date()) {
   return dueAt.getTime() <= sevenDaysLater.getTime() ? "未来 7 天" : "稍后";
 }
 
+function isTodayActionFocusTask(task, now = new Date()) {
+  if (!["待处理", "待修复"].includes(text(task?.status))) return false;
+  const dueCategory = actionTaskDueCategory(task, now);
+  return TODAY_ACTION_FOCUS_TYPES.has(text(task?.type))
+    || dueCategory === "已逾期"
+    || dueCategory === "今天";
+}
+
+function compareTodayActionTasks(left, right, now = new Date()) {
+  const urgency = (task) => {
+    const type = text(task?.type);
+    if (type === "new_reply") return 0;
+    if (type === "mail_triage") return 1;
+    if (type === "reply_overdue") return 2;
+    const dueCategory = actionTaskDueCategory(task, now);
+    if (dueCategory === "已逾期") return 3;
+    if (dueCategory === "今天") return 4;
+    return 5;
+  };
+  const priority = (task) => ({ 高: 0, 中: 1, 普通: 2, 低: 3 }[text(task?.priority)] ?? 4);
+  return urgency(left) - urgency(right)
+    || priority(left) - priority(right)
+    || new Date(left.due_at || "2999-01-01") - new Date(right.due_at || "2999-01-01")
+    || text(left.title).localeCompare(text(right.title), "zh-CN");
+}
+
 function actionTaskMatchesFilters(task, filter = state.todayActionFilter, now = new Date()) {
   if (filter.brand && text(task.brand_id) !== text(filter.brand)) return false;
   if (filter.owner && text(task.owner_name) !== text(filter.owner)) return false;
   if (filter.priority && text(task.priority) !== text(filter.priority)) return false;
   if (filter.type && text(task.type) !== text(filter.type)) return false;
   if (filter.status && text(task.status) !== text(filter.status)) return false;
-  if (filter.due && actionTaskDueCategory(task, now) !== filter.due) return false;
+  if (filter.due === TODAY_ACTION_FOCUS_VALUE && !isTodayActionFocusTask(task, now)) return false;
+  if (filter.due && filter.due !== TODAY_ACTION_FOCUS_VALUE && actionTaskDueCategory(task, now) !== filter.due) return false;
   return true;
 }
 
@@ -7989,6 +8018,21 @@ function actionTaskHistoryMarkup(events) {
   `;
 }
 
+function actionTaskPrimaryAction(task) {
+  const type = text(task?.type);
+  return {
+    new_reply: "查看回复",
+    mail_triage: "处理归档",
+    reply_overdue: "查看沟通",
+    address_needed: "记录地址",
+    sample_pending: "记录寄样",
+    quote_confirmation_pending: "确认报价",
+    publish_pending: "记录发布",
+    performance_data_pending: "记录数据",
+    ai_suggestion_review: "审核建议",
+  }[type] || "查看 Case";
+}
+
 function actionTaskMarkup(task) {
   const caseRow = actionTaskCase(task);
   const creator = actionTaskCreator(task, caseRow);
@@ -8000,6 +8044,7 @@ function actionTaskMarkup(task) {
   const canCollaborate = ["待处理", "待修复"].includes(text(task.status));
   const events = actionTaskEventsFor(task);
   const latestEvent = events.at(-1);
+  const primaryAction = actionTaskPrimaryAction(task);
   return `
     <article class="today-action-row ${dueCategory === "已逾期" ? "is-overdue" : ""}">
       <div class="today-action-main">
@@ -8008,7 +8053,7 @@ function actionTaskMarkup(task) {
           ${statusBadge(task.priority || "普通")}
           <strong>${escapeHtml(task.title)}</strong>
         </div>
-        <p>${escapeHtml(task.description || "暂无补充说明")}</p>
+        <p><span class="today-action-reason-label">处理原因</span>${escapeHtml(task.description || "暂无补充说明")}</p>
         <div class="today-action-meta">
           <span>${escapeHtml(task.brand || "未归属品牌")}</span>
           <span>${escapeHtml(creator?.name || caseRow?.creator_name || "未关联达人")}</span>
@@ -8022,6 +8067,7 @@ function actionTaskMarkup(task) {
         ${actionTaskHistoryMarkup(events)}
       </div>
       <div class="today-action-actions">
+        <button type="button" class="today-action-primary" data-today-action-primary="${escapeHtml(task.id)}" ${hasCase ? "" : "disabled"}>${escapeHtml(primaryAction)}</button>
         <button type="button" class="icon-button" data-today-action-assign="${escapeHtml(task.id)}" title="指派负责人" aria-label="指派负责人" ${canCollaborate ? "" : "disabled"}>@</button>
         <button type="button" class="icon-button" data-today-action-note="${escapeHtml(task.id)}" title="添加内部备注" aria-label="添加内部备注">✎</button>
         <button type="button" class="icon-button" data-today-action-complete="${escapeHtml(task.id)}" title="完成任务" aria-label="完成任务" ${canResolve ? "" : "disabled"}>✓</button>
@@ -8030,6 +8076,33 @@ function actionTaskMarkup(task) {
         <button type="button" class="icon-button" data-today-action-open-case="${escapeHtml(task.id)}" title="进入合作 Case" aria-label="进入合作 Case" ${hasCase ? "" : "disabled"}>↗</button>
       </div>
     </article>
+  `;
+}
+
+function todayActionEmptyMarkup({ hasPendingTasks, hasVisibleTasks, mailConfigured }) {
+  if (hasPendingTasks && !hasVisibleTasks) {
+    return `
+      <section class="today-action-empty">
+        <strong>当前没有需要优先处理的任务</strong>
+        <p>这里默认只显示新回复、待人工归档邮件、已逾期和今天到期事项。其余待办仍在工作区中。</p>
+        <div class="today-action-empty-actions">
+          <button type="button" class="ghost" data-today-action-empty-action="all">查看全部待处理</button>
+          <button type="button" class="ghost" data-today-action-empty-action="followups">查看合作跟进</button>
+        </div>
+      </section>
+    `;
+  }
+
+  return `
+    <section class="today-action-empty">
+      <strong>今天没有待处理事项</strong>
+      <p>可以同步邮箱检查最新回复，处理待人工归档邮件，或为新的合作创建跟进。</p>
+      <div class="today-action-empty-actions">
+        <button type="button" class="primary" data-today-action-empty-action="sync">${mailConfigured ? "同步邮箱" : "配置邮箱"}</button>
+        <button type="button" class="ghost" data-today-action-empty-action="triage">查看邮件分诊</button>
+        <button type="button" class="ghost" data-today-action-empty-action="new-followup">新建合作跟进</button>
+      </div>
+    </section>
   `;
 }
 
@@ -8044,17 +8117,25 @@ function renderTodayActionPage() {
   const now = new Date();
   const tasks = (state.data.actionTasks || [])
     .slice()
-    .sort((left, right) => new Date(left.due_at || "2999-01-01") - new Date(right.due_at || "2999-01-01"));
+    .sort((left, right) => compareTodayActionTasks(left, right, now));
   const visibleTasks = tasks.filter((task) => actionTaskMatchesFilters(task, state.todayActionFilter, now));
-  const pendingTasks = tasks.filter((task) => text(task.status) === "待处理");
+  const pendingTasks = tasks.filter((task) => ["待处理", "待修复"].includes(text(task.status)));
+  const focusCount = pendingTasks.filter((task) => isTodayActionFocusTask(task, now)).length;
   const overdueCount = pendingTasks.filter((task) => actionTaskDueCategory(task, now) === "已逾期").length;
   const todayCount = pendingTasks.filter((task) => actionTaskDueCategory(task, now) === "今天").length;
-  const highCount = pendingTasks.filter((task) => text(task.priority) === "高").length;
+  const waitingReplyCount = pendingTasks.filter((task) => TODAY_ACTION_FOCUS_TYPES.has(text(task.type))).length;
   const brands = (state.data.brands || []).slice().sort((a, b) => text(a.name).localeCompare(text(b.name), "zh-CN"));
   const owners = [...new Set(tasks.map((task) => text(task.owner_name)).filter(Boolean))].sort((a, b) => a.localeCompare(b, "zh-CN"));
   const types = [...new Set(tasks.map((task) => text(task.type)).filter(Boolean))].sort();
   const notice = text(state.todayActionNotice);
   const isNewWorkspace = !hasBusinessData();
+  const activeMailAccount = state.activeBrandId ? availableMailAccount(state.activeBrandId) : null;
+  const mailConfigured = Boolean(
+    activeMailAccount?.enabled
+      && activeMailAccount.imap?.host
+      && activeMailAccount.imap?.user
+      && activeMailAccount.imap?.hasPassword,
+  );
 
   const selectOptions = (items, selected, allLabel, map = (item) => ({ value: item, label: item })) =>
     `<option value="">${escapeHtml(allLabel)}</option>${items.map((item) => {
@@ -8103,31 +8184,51 @@ function renderTodayActionPage() {
       <span class="today-action-total">待处理 ${pendingTasks.length}</span>
     </header>
     <div class="today-action-metrics">
-      <div><span>待处理</span><strong>${pendingTasks.length}</strong></div>
+      <div><span>优先处理</span><strong>${focusCount}</strong></div>
       <div><span>已逾期</span><strong>${overdueCount}</strong></div>
       <div><span>今天到期</span><strong>${todayCount}</strong></div>
-      <div><span>高优任务</span><strong>${highCount}</strong></div>
+      <div><span>回信 / 归档</span><strong>${waitingReplyCount}</strong></div>
     </div>
-    <div class="today-action-filters">
+    <div class="today-action-focusbar">
+      <div class="today-action-focus-tabs" role="group" aria-label="今日推进默认范围">
+        <button type="button" class="today-action-focus-toggle ${state.todayActionFilter.due === TODAY_ACTION_FOCUS_VALUE ? "is-active" : ""}" data-today-action-focus="${TODAY_ACTION_FOCUS_VALUE}" aria-pressed="${state.todayActionFilter.due === TODAY_ACTION_FOCUS_VALUE}">优先处理 <span>${focusCount}</span></button>
+        <button type="button" class="today-action-focus-toggle ${state.todayActionFilter.due === "" ? "is-active" : ""}" data-today-action-focus="" aria-pressed="${state.todayActionFilter.due === ""}">全部待处理 <span>${pendingTasks.length}</span></button>
+      </div>
+      <small>优先处理：新回复、待归档、已逾期和今天到期。</small>
+    </div>
+    <details class="today-action-filter-details">
+      <summary>更多筛选</summary>
+      <div class="today-action-filters">
       <label><span>品牌</span><select data-today-action-filter="brand">${selectOptions(brands, state.todayActionFilter.brand, "全部品牌", (brand) => ({ value: brand.id, label: brand.name }))}</select></label>
       <label><span>负责人</span><select data-today-action-filter="owner">${selectOptions(owners, state.todayActionFilter.owner, "全部负责人")}</select></label>
       <label><span>优先级</span><select data-today-action-filter="priority">${selectOptions(["高", "中", "低", "普通"], state.todayActionFilter.priority, "全部优先级")}</select></label>
-      <label><span>截止</span><select data-today-action-filter="due">${selectOptions(["已逾期", "今天", "未来 7 天", "未设截止"], state.todayActionFilter.due, "全部时间")}</select></label>
+      <label><span>截止</span><select data-today-action-filter="due">${selectOptions(["已逾期", "今天", "未来 7 天", "未设截止"], state.todayActionFilter.due === TODAY_ACTION_FOCUS_VALUE ? "" : state.todayActionFilter.due, "全部时间")}</select></label>
       <label><span>类型</span><select data-today-action-filter="type">${selectOptions(types, state.todayActionFilter.type, "全部类型", (type) => ({ value: type, label: actionTaskTypeLabel(type) }))}</select></label>
       <label><span>状态</span><select data-today-action-filter="status">${selectOptions(["待处理", "待修复", "已完成", "已跳过", "已失效"], state.todayActionFilter.status, "全部状态")}</select></label>
-    </div>
+      </div>
+    </details>
     ${notice ? `<p class="today-action-notice">${escapeHtml(notice)}</p>` : ""}
     <section class="today-action-list">
-      ${visibleTasks.length ? visibleTasks.map(actionTaskMarkup).join("") : `<p class="today-action-empty">当前筛选下没有行动任务。</p>`}
+      ${visibleTasks.length ? visibleTasks.map(actionTaskMarkup).join("") : todayActionEmptyMarkup({ hasPendingTasks: pendingTasks.length > 0, hasVisibleTasks: false, mailConfigured })}
     </section>
   `;
 
+  elements.todayActionPage.querySelectorAll("[data-today-action-focus]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.todayActionFilter.due = button.dataset.todayActionFocus;
+      state.todayActionNotice = "";
+      renderTodayActionPage();
+    });
+  });
   elements.todayActionPage.querySelectorAll("[data-today-action-filter]").forEach((control) => {
     control.addEventListener("change", () => {
       state.todayActionFilter[control.dataset.todayActionFilter] = control.value;
       state.todayActionNotice = "";
       renderTodayActionPage();
     });
+  });
+  elements.todayActionPage.querySelectorAll("[data-today-action-primary]").forEach((button) => {
+    button.addEventListener("click", () => openTodayActionCase(button.dataset.todayActionPrimary));
   });
   elements.todayActionPage.querySelectorAll("[data-today-action-complete]").forEach((button) => {
     button.addEventListener("click", () => void resolveTodayAction(button.dataset.todayActionComplete, "complete"));
@@ -8146,6 +8247,38 @@ function renderTodayActionPage() {
   });
   elements.todayActionPage.querySelectorAll("[data-today-action-open-case]").forEach((button) => {
     button.addEventListener("click", () => openTodayActionCase(button.dataset.todayActionOpenCase));
+  });
+  elements.todayActionPage.querySelectorAll("[data-today-action-empty-action]").forEach((button) => {
+    button.addEventListener("click", () => {
+      const action = button.dataset.todayActionEmptyAction;
+      if (action === "all") {
+        state.todayActionFilter.due = "";
+        state.todayActionNotice = "";
+        renderTodayActionPage();
+        return;
+      }
+      if (action === "new-followup") {
+        state.activeTab = "followups";
+        render();
+        openFollowUpEditor();
+        return;
+      }
+      if (action === "sync") {
+        if (!state.activeBrandId || !mailConfigured) {
+          state.activeTab = SETTINGS_TAB.key;
+          render();
+          openSettingsSection("mail");
+          elements.mailSettingsStatus.textContent = state.activeBrandId
+            ? "请先完成当前品牌的 IMAP 邮箱配置，再同步最新回复。"
+            : "请先选择品牌工作区并完成 IMAP 邮箱配置。";
+          return;
+        }
+        void syncMailbox(activeMailAccount.id);
+        return;
+      }
+      state.activeTab = "followups";
+      render();
+    });
   });
 }
 
