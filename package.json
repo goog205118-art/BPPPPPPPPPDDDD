@@ -16,6 +16,7 @@
     "test:action-task-storage": "node tools/action-task-storage-test.cjs",
     "test:today-action-center": "node tools/today-action-center-regression-test.cjs",
     "test:task-collaboration": "node tools/task-collaboration-regression-test.cjs",
+    "test:creator-columns": "node tools/creator-columns-regression-test.cjs",
     "test:followup-ai-context": "node tools/followup-ai-context-regression-test.cjs",
     "test:followup-ai-analysis": "node tools/followup-ai-analysis-workbench-test.cjs",
     "test:followup-ai-draft-send": "node tools/followup-ai-draft-send-regression-test.cjs",

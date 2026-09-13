@@ -519,6 +519,38 @@ const entityConfig = {
   },
 };
 
+const creatorColumnDefinitions = [
+  { key: "name", label: "达人" },
+  { key: "platform", label: "平台" },
+  { key: "brand", label: "品牌" },
+  { key: "email", label: "邮箱" },
+  { key: "status", label: "阶段/状态" },
+  { key: "priority", label: "优先级" },
+  { key: "last_contacted_summary", label: "最近联系" },
+  { key: "next_action_summary", label: "下一步" },
+  { key: "handle", label: "Handle" },
+  { key: "social_url", label: "社媒地址" },
+  { key: "country", label: "国家/地区" },
+  { key: "niche", label: "内容垂类" },
+  { key: "followers", label: "粉丝" },
+  { key: "avg_views", label: "近 30 条均播" },
+  { key: "engagement", label: "互动率" },
+  { key: "tags", label: "标签" },
+];
+
+const defaultCreatorColumnKeys = [
+  "name",
+  "platform",
+  "brand",
+  "email",
+  "status",
+  "priority",
+  "last_contacted_summary",
+  "next_action_summary",
+];
+
+const requiredCreatorColumnKeys = ["name", "platform", "brand"];
+
 const configurableOptionFields = {
   creators: [
     { key: "brand", label: "品牌" },
@@ -683,6 +715,7 @@ const state = {
   duplicateIgnores: new Set(),
   filters: { query: "", activeKeys: [], values: {} },
   filterMenu: null,
+  columnMenuOpen: false,
   optionSettingsType: "creators",
   aiSettings: clone(defaultAiSettings),
   mailSettings: clone(defaultMailSettings),
@@ -871,6 +904,9 @@ const elements = {
   activeFilters: document.getElementById("activeFilters"),
   clearFiltersBtn: document.getElementById("clearFiltersBtn"),
   filterPopover: document.getElementById("filterPopover"),
+  columnUi: document.getElementById("columnUi"),
+  columnSetupBtn: document.getElementById("columnSetupBtn"),
+  columnPopover: document.getElementById("columnPopover"),
   optionEntitySelect: document.getElementById("optionEntitySelect"),
   optionFieldSelect: document.getElementById("optionFieldSelect"),
   optionValueInput: document.getElementById("optionValueInput"),
@@ -1660,6 +1696,32 @@ function normalizeFilterPreferences(rawPreferences = {}) {
   return output;
 }
 
+function normalizeColumnPreferences(rawPreferences = {}) {
+  const allowed = new Set(creatorColumnDefinitions.map((column) => column.key));
+  const incoming = Array.isArray(rawPreferences.creators)
+    ? rawPreferences.creators
+    : defaultCreatorColumnKeys;
+  const selected = new Set(incoming.map(text).filter((key) => allowed.has(key)));
+  for (const key of requiredCreatorColumnKeys) selected.add(key);
+  return {
+    creators: creatorColumnDefinitions
+      .map((column) => column.key)
+      .filter((key) => selected.has(key)),
+  };
+}
+
+function getCreatorColumnPreferences() {
+  return normalizeColumnPreferences(state.data.meta?.columnPreferences).creators;
+}
+
+function getVisibleTableColumns() {
+  if (state.activeTab === "creators") {
+    const selected = new Set(getCreatorColumnPreferences());
+    return creatorColumnDefinitions.filter((column) => selected.has(column.key));
+  }
+  return config().columns.map(([key, label]) => ({ key, label }));
+}
+
 function defaultRecord(type) {
   const item = {
     id: uid(entityConfig[type].prefix),
@@ -1692,6 +1754,7 @@ function ensureStateShape(nextState) {
     ...(nextState?.meta || {}),
     optionSets: { ...(nextState?.meta?.optionSets || {}) },
     filterPreferences: normalizeFilterPreferences(nextState?.meta?.filterPreferences),
+    columnPreferences: normalizeColumnPreferences(nextState?.meta?.columnPreferences),
     timeZones: normalizeTimeZones(nextState?.meta?.timeZones),
   };
   const caseMigrationPaused = text(shaped.meta.caseMigration?.status) === "rolled_back";
@@ -1949,6 +2012,7 @@ async function persist() {
     updatedAt: new Date().toISOString(),
     optionSets: { ...(state.data.meta.optionSets || {}) },
     filterPreferences: normalizeFilterPreferences(state.data.meta.filterPreferences),
+    columnPreferences: normalizeColumnPreferences(state.data.meta.columnPreferences),
     timeZones: normalizeTimeZones(state.data.meta.timeZones),
   };
   const payloadState = {
@@ -3145,6 +3209,7 @@ function renderTabs() {
   elements.tabs.querySelectorAll("[data-tab]").forEach((button) => {
     button.addEventListener("click", () => {
       state.activeTab = button.dataset.tab;
+      state.columnMenuOpen = false;
       closeCreatorDrawer();
       resetEditorState();
       state.matchingEditingId = null;
@@ -4023,6 +4088,130 @@ function renderGlobalSearch() {
     : `<div class="global-search-empty"><strong>快速定位业务资料</strong><span>达人、合作、商品和资源均可搜索</span></div>`;
 }
 
+function creatorTableFollowUps(creator) {
+  return rows("followups")
+    .filter((followUp) => (
+      text(followUp.creator_id) === text(creator.id)
+      || (!text(followUp.creator_id) && text(followUp.creator_name) === text(creator.name))
+    ))
+    .sort((a, b) => new Date(b.updatedAt || b.createdAt || 0) - new Date(a.updatedAt || a.createdAt || 0));
+}
+
+function creatorTableContext(creator) {
+  const followUps = creatorTableFollowUps(creator);
+  const models = followUps.map((followUp) => ({
+    followUp,
+    model: followUpDisplayModel(followUp),
+  }));
+  const current = models.find(({ model }) => !FOLLOW_UP_TERMINAL_STAGES.has(text(model.stage))) || models[0];
+  const contactDates = [
+    creator.last_outreach_at,
+    ...models.map(({ model }) => model.lastOutreachAt),
+    ...models.flatMap(({ followUp }) => followUpEventsFor(followUp)
+      .filter((event) => event.type === "email" || event.type === "mail_sent")
+      .map((event) => event.occurred_at || event.createdAt)),
+  ]
+    .map((value) => {
+      const time = new Date(value || 0).getTime();
+      return Number.isFinite(time) && time > 0 ? { value, time } : null;
+    })
+    .filter(Boolean)
+    .sort((a, b) => b.time - a.time);
+
+  const next = models
+    .filter(({ model }) => text(model.nextAction))
+    .sort((a, b) => {
+      const aTime = new Date(a.model.nextActionAt || 0).getTime();
+      const bTime = new Date(b.model.nextActionAt || 0).getTime();
+      const aRank = Number.isFinite(aTime) && aTime > 0 ? aTime : Number.POSITIVE_INFINITY;
+      const bRank = Number.isFinite(bTime) && bTime > 0 ? bTime : Number.POSITIVE_INFINITY;
+      if (aRank !== bRank) return aRank - bRank;
+      return new Date(b.followUp.updatedAt || b.followUp.createdAt || 0) - new Date(a.followUp.updatedAt || a.followUp.createdAt || 0);
+    })[0];
+
+  return {
+    status: text(current?.model.stage) || text(creator.status),
+    priority: text(current?.model.priority) || text(creator.priority || creator.follow_up_priority),
+    lastContactedAt: contactDates[0]?.value || "",
+    nextAction: next?.model.nextAction || "",
+    nextActionAt: next?.model.nextActionAt || "",
+  };
+}
+
+function renderCreatorTableCell(row, key) {
+  const context = creatorTableContext(row);
+  if (key === "name") {
+    return `<td class="creator-name-cell"><strong>${escapeHtml(row.name || row.handle || "未命名达人")}</strong>${row.handle ? `<small>${escapeHtml(row.handle)}</small>` : ""}</td>`;
+  }
+  if (key === "status") {
+    const profileStatus = text(row.status);
+    const currentStatus = context.status || profileStatus;
+    const secondary = currentStatus && profileStatus && currentStatus !== profileStatus
+      ? `<small class="table-secondary-value">资料：${escapeHtml(profileStatus)}</small>`
+      : "";
+    return `<td class="creator-stage-cell">${statusBadge(currentStatus)}${secondary}</td>`;
+  }
+  if (key === "priority") {
+    return `<td>${statusBadge(context.priority, "未设置")}</td>`;
+  }
+  if (key === "last_contacted_summary") {
+    return `<td class="table-summary-cell">${context.lastContactedAt ? `<strong>${escapeHtml(formatDateTime(context.lastContactedAt))}</strong>` : `<span class="muted">未联系</span>`}</td>`;
+  }
+  if (key === "next_action_summary") {
+    if (!context.nextAction) return `<td class="table-summary-cell"><span class="muted">未设置</span></td>`;
+    const due = context.nextActionAt ? `<small class="table-secondary-value">${escapeHtml(formatDateTime(context.nextActionAt))}</small>` : "";
+    return `<td class="table-summary-cell"><strong>${escapeHtml(context.nextAction)}</strong>${due}</td>`;
+  }
+  return "";
+}
+
+function renderColumnSettings() {
+  if (!elements.columnUi || !elements.columnSetupBtn || !elements.columnPopover) return;
+  const visible = state.activeTab === "creators";
+  elements.columnUi.classList.toggle("hidden", !visible);
+  elements.columnSetupBtn.setAttribute("aria-expanded", String(visible && state.columnMenuOpen));
+  if (!visible) {
+    state.columnMenuOpen = false;
+    elements.columnPopover.innerHTML = "";
+    elements.columnPopover.classList.add("hidden");
+    return;
+  }
+
+  const selected = new Set(getCreatorColumnPreferences());
+  elements.columnSetupBtn.classList.toggle("active", state.columnMenuOpen);
+  if (!state.columnMenuOpen) {
+    elements.columnPopover.innerHTML = "";
+    elements.columnPopover.classList.add("hidden");
+    return;
+  }
+
+  elements.columnPopover.innerHTML = `
+    <section class="column-popover-sheet" role="dialog" aria-label="达人库显示列">
+      <header class="column-popover-head">
+        <div>
+          <strong>达人库显示列</strong>
+          <span>核心列始终保留，扩展信息可在这里恢复。</span>
+        </div>
+        <button type="button" class="icon-button" data-column-close aria-label="关闭列设置" title="关闭">×</button>
+      </header>
+      <div class="column-option-list">
+        ${creatorColumnDefinitions.map((column) => {
+          const required = requiredCreatorColumnKeys.includes(column.key);
+          return `
+            <label class="column-option">
+              <input type="checkbox" data-column-key="${escapeHtml(column.key)}" ${selected.has(column.key) ? "checked" : ""} ${required ? "disabled" : ""} />
+              <span>${escapeHtml(column.label)}${required ? "<small>核心</small>" : ""}</span>
+            </label>`;
+        }).join("")}
+      </div>
+      <footer class="column-popover-foot">
+        <button type="button" class="ghost" data-column-reset>恢复默认</button>
+        <button type="button" class="primary" data-column-close>完成</button>
+      </footer>
+    </section>`;
+  elements.columnPopover.classList.remove("hidden");
+}
+
 function handleGlobalSearchResult(result) {
   const type = result.dataset.globalResultType;
   const id = result.dataset.globalResultId;
@@ -4058,7 +4247,7 @@ function handleGlobalSearchResult(result) {
 }
 
 function renderTable(visibleRows) {
-  const item = config();
+  const tableColumns = getVisibleTableColumns();
   const isLeadTable = state.activeTab === "leads";
   const selectedIds = state.selectedLeadIds;
   const allVisibleSelected = visibleRows.length > 0 && visibleRows.every((row) => selectedIds.has(row.id));
@@ -4066,17 +4255,20 @@ function renderTable(visibleRows) {
     isLeadTable
       ? `<th class="lead-select-cell"><input type="checkbox" data-select-all-leads aria-label="选择当前筛选结果" title="选择当前筛选结果" ${allVisibleSelected ? "checked" : ""} /></th>`
       : ""
-  }${item.columns.map(([, label]) => `<th>${label}</th>`).join("")}<th>操作</th></tr>`;
+  }${tableColumns.map(({ label }) => `<th>${escapeHtml(label)}</th>`).join("")}<th>操作</th></tr>`;
 
   if (!visibleRows.length) {
-    elements.tableBody.innerHTML = `<tr><td colspan="${item.columns.length + 1 + (isLeadTable ? 1 : 0)}" class="muted">暂无记录，先新增或导入表格。</td></tr>`;
+    elements.tableBody.innerHTML = `<tr><td colspan="${tableColumns.length + 1 + (isLeadTable ? 1 : 0)}" class="muted">暂无记录，先新增或导入表格。</td></tr>`;
     return;
   }
 
   elements.tableBody.innerHTML = visibleRows
     .map((row) => {
-      const cells = item.columns
-        .map(([key]) => {
+      const cells = tableColumns
+        .map(({ key }) => {
+          if (state.activeTab === "creators" && ["name", "status", "priority", "last_contacted_summary", "next_action_summary"].includes(key)) {
+            return renderCreatorTableCell(row, key);
+          }
           if (key === "tags") {
             const tags = splitTags(row[key]).map((tag) => `<span class="tag">${escapeHtml(tag)}</span>`).join("");
             return `<td>${tags || escapeHtml(row[key])}</td>`;
@@ -9026,6 +9218,7 @@ function renderEntityPage() {
   elements.newRecordBtn.textContent = `新增${config().title.replace("库", "")}`;
   elements.outreachBtn.classList.toggle("hidden", state.activeTab !== "leads");
   if (state.activeTab === "leads") elements.outreachBtn.textContent = `AI 开发邮件${state.selectedLeadIds.size ? `（${state.selectedLeadIds.size}）` : ""}`;
+  renderColumnSettings();
   renderFilters();
   const visibleRows = filterRows(rows());
   renderSummary(visibleRows);
@@ -9042,6 +9235,7 @@ function render() {
   renderTopbarMoreMenu();
   renderTimeZoneBar();
   renderTabs();
+  if (state.activeTab !== "creators") renderColumnSettings();
   if (state.activeTab === SETTINGS_TAB.key) {
     elements.outreachBtn.classList.add("hidden");
     resetEditorState();
@@ -10613,8 +10807,54 @@ function bindEvents() {
   });
   elements.filterSetupBtn.addEventListener("click", (event) => {
     event.stopPropagation();
+    state.columnMenuOpen = false;
+    renderColumnSettings();
     state.filterMenu = state.filterMenu?.mode === "drawer" ? null : { mode: "drawer", openSections: ["__fields"] };
     renderFilters();
+  });
+  elements.columnSetupBtn.addEventListener("click", (event) => {
+    event.stopPropagation();
+    state.filterMenu = null;
+    renderFilters();
+    state.columnMenuOpen = !state.columnMenuOpen;
+    elements.columnSetupBtn.setAttribute("aria-expanded", String(state.columnMenuOpen));
+    renderColumnSettings();
+  });
+  elements.columnPopover.addEventListener("change", async (event) => {
+    const input = event.target.closest("[data-column-key]");
+    if (!input || input.disabled) return;
+    const previous = getCreatorColumnPreferences();
+    const next = new Set(previous);
+    if (input.checked) next.add(input.dataset.columnKey);
+    else next.delete(input.dataset.columnKey);
+    state.data.meta.columnPreferences = normalizeColumnPreferences({ creators: [...next] });
+    renderColumnSettings();
+    renderTable(filterRows(rows("creators")));
+    try {
+      await persist();
+    } catch (error) {
+      state.data.meta.columnPreferences = normalizeColumnPreferences({ creators: previous });
+      renderColumnSettings();
+      renderTable(filterRows(rows("creators")));
+      elements.importStatus.textContent = error.message || "列设置保存失败";
+    }
+  });
+  elements.columnPopover.addEventListener("click", async (event) => {
+    if (event.target.closest("[data-column-close]")) {
+      state.columnMenuOpen = false;
+      elements.columnSetupBtn.setAttribute("aria-expanded", "false");
+      renderColumnSettings();
+      return;
+    }
+    if (!event.target.closest("[data-column-reset]")) return;
+    state.data.meta.columnPreferences = normalizeColumnPreferences({ creators: defaultCreatorColumnKeys });
+    renderColumnSettings();
+    renderTable(filterRows(rows("creators")));
+    try {
+      await persist();
+    } catch (error) {
+      elements.importStatus.textContent = error.message || "默认列设置保存失败";
+    }
   });
   elements.activeFilters.addEventListener("click", (event) => {
     const button = event.target.closest("[data-filter-control]");
@@ -10689,9 +10929,15 @@ function bindEvents() {
     renderFilteredRows();
   });
   document.addEventListener("click", (event) => {
-    if (!state.filterMenu || elements.filterUi.contains(event.target)) return;
-    state.filterMenu = null;
-    renderFilters();
+    if (state.filterMenu && !elements.filterUi.contains(event.target)) {
+      state.filterMenu = null;
+      renderFilters();
+    }
+    if (state.columnMenuOpen && !elements.columnUi.contains(event.target)) {
+      state.columnMenuOpen = false;
+      elements.columnSetupBtn.setAttribute("aria-expanded", "false");
+      renderColumnSettings();
+    }
   });
   elements.optionEntitySelect.addEventListener("change", () => {
     state.optionSettingsType = elements.optionEntitySelect.value;
