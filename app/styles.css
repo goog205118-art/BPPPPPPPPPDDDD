@@ -5086,6 +5086,238 @@ body.access-locked .app-shell {
   min-width: 125px;
 }
 
+.followup-viewbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  min-width: 0;
+  padding: 2px 0 1px;
+}
+
+.followup-viewbar > small {
+  overflow: hidden;
+  color: #8fa7bb;
+  font-size: 0.66rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.followup-view-tabs {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid #2d4257;
+  border-radius: 5px;
+  background: #121c27;
+}
+
+.followup-view-toggle {
+  display: inline-flex;
+  min-height: 27px;
+  align-items: center;
+  gap: 5px;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  color: #90a7bb;
+  padding: 0.22rem 0.46rem;
+  font-size: 0.67rem;
+}
+
+.followup-view-toggle:hover {
+  background: #1b2b3a;
+  color: #dce9f4;
+}
+
+.followup-view-toggle.is-active {
+  background: #254b69;
+  color: #f0f7ff;
+}
+
+.followup-view-toggle span {
+  min-width: 17px;
+  color: inherit;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.62rem;
+  font-variant-numeric: tabular-nums;
+  text-align: center;
+}
+
+.followup-action-list {
+  overflow: hidden;
+  border: 1px solid #2c3a4b;
+  border-radius: 5px;
+  background: #141e29;
+}
+
+.followup-action-list-head,
+.followup-action-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: 28px minmax(145px, 1.02fr) minmax(94px, 0.64fr) minmax(180px, 1.2fr) minmax(150px, 0.94fr) minmax(95px, 0.67fr) minmax(155px, 0.9fr);
+  gap: 8px;
+  align-items: center;
+}
+
+.followup-action-list-head {
+  min-height: 33px;
+  border-bottom: 1px solid #2c3a4b;
+  background: #172330;
+  color: #8199ae;
+  padding: 0 8px;
+  font-size: 0.61rem;
+}
+
+.followup-action-list-body {
+  display: grid;
+}
+
+.followup-action-row {
+  min-height: 60px;
+  padding: 6px 8px;
+  border-bottom: 1px solid #293a4b;
+  background: #17222e;
+}
+
+.followup-action-row:last-child {
+  border-bottom: 0;
+}
+
+.followup-action-row:hover {
+  background: #1b2a38;
+}
+
+.followup-action-row.is-overdue {
+  box-shadow: inset 2px 0 0 #b86a5f;
+}
+
+.followup-action-row.has-unread {
+  box-shadow: inset 2px 0 0 #4fb178;
+}
+
+.followup-action-row.has-unread.is-overdue {
+  box-shadow: inset 2px 0 0 #e0a44f;
+}
+
+.followup-action-select {
+  justify-self: center;
+}
+
+.followup-action-person {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 7px;
+}
+
+.followup-action-person > div,
+.followup-action-mail,
+.followup-action-next,
+.followup-action-due {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.followup-action-person strong,
+.followup-action-person small,
+.followup-action-mail strong,
+.followup-action-mail span,
+.followup-action-next strong,
+.followup-action-due strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.followup-action-person strong,
+.followup-action-mail strong,
+.followup-action-next strong,
+.followup-action-due strong {
+  color: #e6f0f9;
+  font-size: 0.71rem;
+}
+
+.followup-action-person small,
+.followup-action-mail small,
+.followup-action-mail span,
+.followup-action-next small,
+.followup-action-due small {
+  color: #8da5b9;
+  font-size: 0.61rem;
+}
+
+.followup-action-mail span {
+  color: #a6b9c9;
+  font-variant-numeric: tabular-nums;
+}
+
+.followup-action-stage {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 4px;
+  align-items: center;
+}
+
+.followup-action-stage .status-pill {
+  max-width: 100%;
+  overflow: hidden;
+  font-size: 0.62rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.followup-action-due.is-overdue strong {
+  color: #f3a394;
+}
+
+.followup-action-actions {
+  display: flex;
+  min-width: 0;
+  justify-content: flex-end;
+  gap: 5px;
+}
+
+.followup-action-open {
+  min-height: 27px;
+  padding: 0.18rem 0.48rem;
+  font-size: 0.63rem;
+}
+
+.followup-action-actions select {
+  width: 96px;
+  min-height: 27px;
+  border: 1px solid #385067;
+  border-radius: 4px;
+  background: #121d28;
+  color: #c9dbe9;
+  padding: 0.18rem 0.28rem;
+  font-size: 0.62rem;
+}
+
+.followup-action-empty {
+  margin: 0;
+  padding: 16px 10px;
+  color: #92a8b9;
+  font-size: 0.7rem;
+  text-align: center;
+}
+
+.followup-action-terminal {
+  border-top: 1px solid #2c3a4b;
+}
+
+.followup-action-terminal summary {
+  cursor: pointer;
+  color: #9db5c8;
+  padding: 7px 9px;
+  font-size: 0.67rem;
+}
+
 .followup-board {
   display: grid;
   grid-auto-columns: minmax(220px, 1fr);
@@ -5991,6 +6223,57 @@ body.access-locked .app-shell {
 
   .followup-board {
     grid-auto-columns: minmax(235px, 74vw);
+  }
+
+  .followup-viewbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .followup-viewbar > small {
+    white-space: normal;
+  }
+
+  .followup-action-list-head {
+    display: none;
+  }
+
+  .followup-action-row {
+    grid-template-columns: 25px minmax(0, 1fr) minmax(0, 1fr) auto;
+    grid-template-areas:
+      "select person stage actions"
+      "select mail next due";
+    gap: 6px 9px;
+    min-height: 78px;
+    padding: 8px;
+  }
+
+  .followup-action-select {
+    grid-area: select;
+  }
+
+  .followup-action-person {
+    grid-area: person;
+  }
+
+  .followup-action-stage {
+    grid-area: stage;
+  }
+
+  .followup-action-mail {
+    grid-area: mail;
+  }
+
+  .followup-action-next {
+    grid-area: next;
+  }
+
+  .followup-action-due {
+    grid-area: due;
+  }
+
+  .followup-action-actions {
+    grid-area: actions;
   }
 }
 
@@ -7728,6 +8011,37 @@ body.access-locked .app-shell {
   .followup-waiting-row,
   .followup-batch-row {
     grid-template-columns: 1fr;
+  }
+
+  .followup-view-tabs {
+    width: 100%;
+  }
+
+  .followup-view-toggle {
+    flex: 1 1 0;
+    justify-content: center;
+  }
+
+  .followup-action-row {
+    grid-template-columns: 25px minmax(0, 1fr) auto;
+    grid-template-areas:
+      "select person actions"
+      "select stage stage"
+      "select mail mail"
+      "select next due";
+    min-height: 0;
+  }
+
+  .followup-action-stage {
+    justify-content: flex-start;
+  }
+
+  .followup-action-actions {
+    justify-self: end;
+  }
+
+  .followup-action-actions select {
+    width: 90px;
   }
 
   .followup-waiting-time,

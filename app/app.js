@@ -684,6 +684,7 @@ const state = {
   storageConflict: null,
   mailImport: { open: false, followUpId: null, messages: [], status: "" },
   followUpBoardFilter: { query: "", stage: "", priority: "", overdueOnly: false },
+  followUpView: "list",
   followUpDetail: {
     open: false,
     followUpId: null,
@@ -6458,6 +6459,79 @@ function followUpCardMarkup(row) {
     </article>`;
 }
 
+function followUpActionRowMarkup(row) {
+  const creator = followUpCreator(row);
+  const model = followUpDisplayModel(row);
+  const latestMail = model.events.find((event) => event.type === "email" || event.type === "mail_sent");
+  const overdue = isFollowUpOverdue(row);
+  const unread = parseFlag(row.has_unread_reply);
+  const creatorLabel = creator?.name || row.creator_name || "未关联达人";
+  const creatorMeta = [creator?.platform, normalizeCountry(creator?.country), model.brand].filter(Boolean).join(" · ") || "达人信息待补充";
+  const latestSubject = text(latestMail?.subject || latestMail?.excerpt || "暂无邮件记录");
+  const latestMeta = latestMail
+    ? `${followUpEventDirectionLabel(latestMail)} · ${formatDateTime(latestMail.occurred_at || latestMail.createdAt) || "时间未知"}`
+    : model.cooperations.length
+      ? `历史合作 ${model.cooperations.length} 条`
+      : "尚未归档邮件";
+  const nextActionAt = model.nextActionAt ? formatDateTime(model.nextActionAt) : "未设置";
+  const actionReason = unread
+    ? "达人有新回复待处理"
+    : overdue
+      ? "下一步已逾期"
+      : model.nextActionAt
+        ? "按计划跟进"
+        : "待安排下一步";
+  const selected = state.followUpSelectedIds.has(text(row.id));
+  return `
+    <article class="followup-action-row ${overdue ? "is-overdue" : ""} ${unread ? "has-unread" : ""}" data-followup-action-row="${escapeHtml(row.id)}">
+      <label class="followup-card-select followup-action-select" title="加入批量 AI 分析">
+        <input type="checkbox" data-followup-select="${escapeHtml(row.id)}" ${selected ? "checked" : ""} aria-label="选择 ${escapeHtml(creatorLabel)} 进行批量 AI 分析" />
+      </label>
+      <div class="followup-action-person">
+        <span class="creator-avatar small">${escapeHtml((creatorLabel || "达").slice(0, 1).toUpperCase())}</span>
+        <div><strong title="${escapeHtml(creatorLabel)}">${escapeHtml(creatorLabel)}</strong><small title="${escapeHtml(creatorMeta)}">${escapeHtml(creatorMeta)}</small></div>
+      </div>
+      <div class="followup-action-stage">
+        ${statusBadge(model.stage)}
+        ${unread ? `<span class="followup-unread-badge">新回复</span>` : ""}
+      </div>
+      <div class="followup-action-mail">
+        <small>最近邮件</small>
+        <strong title="${escapeHtml(latestSubject)}">${escapeHtml(latestSubject)}</strong>
+        <span>${escapeHtml(latestMeta)}</span>
+      </div>
+      <div class="followup-action-next">
+        <small>${escapeHtml(actionReason)}</small>
+        <strong title="${escapeHtml(model.nextAction || "待补充动作")}">${escapeHtml(model.nextAction || "待补充动作")}</strong>
+      </div>
+      <div class="followup-action-due ${overdue ? "is-overdue" : ""}">
+        <small>截止时间</small>
+        <strong>${overdue ? "已逾期" : ""}${escapeHtml(nextActionAt)}</strong>
+      </div>
+      <div class="followup-action-actions">
+        <button type="button" class="ghost followup-action-open" data-followup-action-open="${escapeHtml(row.id)}">查看</button>
+        <select data-followup-stage="${escapeHtml(row.id)}" aria-label="手动推进 ${escapeHtml(creatorLabel)} 的合作阶段" title="手动推进合作阶段">
+          ${FOLLOW_UP_STAGES.map((stage) => `<option value="${escapeHtml(stage)}" ${text(model.stage) === stage ? "selected" : ""}>${escapeHtml(stage)}</option>`).join("")}
+        </select>
+      </div>
+    </article>`;
+}
+
+function compareFollowUpActionRows(left, right) {
+  const score = (row) => {
+    const unread = parseFlag(row.has_unread_reply) ? 0 : 1;
+    const overdue = isFollowUpOverdue(row) ? 0 : 1;
+    const nextAt = Date.parse(followUpDisplayModel(row).nextActionAt);
+    return [unread, overdue, Number.isFinite(nextAt) ? nextAt : Number.MAX_SAFE_INTEGER];
+  };
+  const leftScore = score(left);
+  const rightScore = score(right);
+  for (let index = 0; index < leftScore.length; index += 1) {
+    if (leftScore[index] !== rightScore[index]) return leftScore[index] - rightScore[index];
+  }
+  return text(followUpCreator(left)?.name || left.creator_name).localeCompare(text(followUpCreator(right)?.name || right.creator_name), "zh-CN");
+}
+
 function followUpSmtpAccounts(followUp) {
   const brandId = text(followUp?.brand_id);
   return (state.mailSettings.accounts || []).filter((account) => {
@@ -7587,6 +7661,7 @@ function renderFollowUpPage() {
   });
   const activeRows = visibleRows.filter((row) => !FOLLOW_UP_TERMINAL_STAGES.has(text(followUpDisplayModel(row).stage)));
   const terminalRows = visibleRows.filter((row) => FOLLOW_UP_TERMINAL_STAGES.has(text(followUpDisplayModel(row).stage)));
+  const actionRows = activeRows.slice().sort(compareFollowUpActionRows);
   const metrics = getMetrics("followups", allRows);
   const todayCount = allRows.filter((row) => isSameLocalDay(followUpDisplayModel(row).nextActionAt, new Date())).length;
   const overdueCount = allRows.filter((row) => isFollowUpOverdue(row)).length;
@@ -7639,6 +7714,13 @@ function renderFollowUpPage() {
       <select data-followup-filter="priority"><option value="">全部优先级</option>${["高", "中", "低"].map((priority) => `<option value="${priority}" ${boardFilter.priority === priority ? "selected" : ""}>${priority}优先级</option>`).join("")}</select>
       <span class="followup-toolbar-count">当前显示 ${visibleRows.length} / ${allRows.length} 条</span>
     </div>
+    <div class="followup-viewbar">
+      <div class="followup-view-tabs" role="group" aria-label="合作跟进视图">
+        <button type="button" class="followup-view-toggle ${state.followUpView === "list" ? "is-active" : ""}" data-followup-view="list" aria-pressed="${state.followUpView === "list"}">行动列表 <span>${actionRows.length}</span></button>
+        <button type="button" class="followup-view-toggle ${state.followUpView === "board" ? "is-active" : ""}" data-followup-view="board" aria-pressed="${state.followUpView === "board"}">全漏斗看板 <span>${activeRows.length}</span></button>
+      </div>
+      <small>${state.followUpView === "list" ? "优先显示新回复、逾期和临近截止的事项。" : "按合作阶段查看全部进行中的 Case。"}</small>
+    </div>
     <section class="followup-waiting">
       <header class="followup-waiting-head">
         <div><strong>已联系待回复</strong><small>同步到唯一匹配的回复后，会自动进入“初步沟通”；共享邮箱有歧义时仍需人工确认品牌。</small></div>
@@ -7650,20 +7732,32 @@ function renderFollowUpPage() {
       </div>
       ${pausedTracks.length ? `<details class="followup-waiting-paused"><summary>已暂停等待 ${pausedTracks.length} 条</summary><div class="followup-waiting-list">${pausedTracks.map(waitingTrackMarkup).join("")}</div></details>` : ""}
     </section>
-    <div class="followup-board">
-      ${FOLLOW_UP_BOARD_COLUMNS.map((column) => {
-        const columnRows = activeRows.filter((row) => column.stages.includes(text(row.stage)));
-        return `
-          <section class="followup-column">
-            <header class="followup-column-head"><strong>${escapeHtml(column.title)}</strong><span>${columnRows.length}</span></header>
-            <div class="followup-column-body">${columnRows.length ? columnRows.map(followUpCardMarkup).join("") : `<p class="followup-column-empty">暂无跟进</p>`}</div>
-          </section>`;
-      }).join("")}
-    </div>
-    <section class="followup-closed">
-      <header class="followup-column-head"><strong>已结束 / 暂停</strong><span>${terminalRows.length}</span></header>
-      <div class="followup-closed-list">${terminalRows.length ? terminalRows.map(followUpCardMarkup).join("") : `<p class="followup-column-empty">暂无已结束记录</p>`}</div>
-    </section>
+    ${state.followUpView === "list" ? `
+      <section class="followup-action-list" aria-label="合作跟进行动列表">
+        <header class="followup-action-list-head" aria-hidden="true">
+          <span></span><span>达人</span><span>阶段</span><span>最近邮件</span><span>下一步</span><span>截止时间</span><span>操作</span>
+        </header>
+        <div class="followup-action-list-body">
+          ${actionRows.length ? actionRows.map(followUpActionRowMarkup).join("") : `<p class="followup-action-empty">当前筛选下没有进行中的合作事项。可调整筛选条件，或新建一条跟进。</p>`}
+        </div>
+        ${terminalRows.length ? `<details class="followup-action-terminal"><summary>已结束 / 暂停 ${terminalRows.length} 条</summary><div class="followup-closed-list">${terminalRows.map(followUpCardMarkup).join("")}</div></details>` : ""}
+      </section>
+    ` : `
+      <div class="followup-board">
+        ${FOLLOW_UP_BOARD_COLUMNS.map((column) => {
+          const columnRows = activeRows.filter((row) => column.stages.includes(text(row.stage)));
+          return `
+            <section class="followup-column">
+              <header class="followup-column-head"><strong>${escapeHtml(column.title)}</strong><span>${columnRows.length}</span></header>
+              <div class="followup-column-body">${columnRows.length ? columnRows.map(followUpCardMarkup).join("") : `<p class="followup-column-empty">暂无跟进</p>`}</div>
+            </section>`;
+        }).join("")}
+      </div>
+      <section class="followup-closed">
+        <header class="followup-column-head"><strong>已结束 / 暂停</strong><span>${terminalRows.length}</span></header>
+        <div class="followup-closed-list">${terminalRows.length ? terminalRows.map(followUpCardMarkup).join("") : `<p class="followup-column-empty">暂无已结束记录</p>`}</div>
+      </section>
+    `}
     <section class="mail-inbox">
       <header class="mail-inbox-head">
         <div><strong>邮件分诊台</strong><small>查看候选达人、Case 和评分证据后，由人工确认归档、忽略或新建 Case，避免错写合作历史。</small></div>
@@ -7705,6 +7799,15 @@ function renderFollowUpPage() {
     });
   });
   elements.followUpPage.querySelector("[data-followup-batch-open]")?.addEventListener("click", () => openFollowUpBatch());
+  elements.followUpPage.querySelectorAll("[data-followup-view]").forEach((button) => {
+    button.addEventListener("click", () => {
+      state.followUpView = button.dataset.followupView === "board" ? "board" : "list";
+      renderFollowUpPage();
+    });
+  });
+  elements.followUpPage.querySelectorAll("[data-followup-action-open]").forEach((button) => {
+    button.addEventListener("click", () => openFollowUpDetail(button.dataset.followupActionOpen));
+  });
   elements.followUpPage.querySelectorAll("[data-followup-card]").forEach((card) => {
     card.addEventListener("click", () => openFollowUpDetail(card.dataset.followupCard));
     card.addEventListener("keydown", (event) => {

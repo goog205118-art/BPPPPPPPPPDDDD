@@ -193,6 +193,38 @@ function testCompactTopbarContracts() {
   }
 }
 
+function testFollowUpActionListContracts() {
+  for (const marker of [
+    'followUpView: "list"',
+    "function followUpActionRowMarkup",
+    "function compareFollowUpActionRows",
+    'data-followup-view="list"',
+    'data-followup-view="board"',
+    "data-followup-action-row",
+    "data-followup-action-open",
+    "state.followUpView = button.dataset.followupView",
+    "openFollowUpDetail(button.dataset.followupActionOpen)",
+  ]) {
+    assert.match(appSource, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  for (const selector of [
+    ".followup-viewbar",
+    ".followup-view-tabs",
+    ".followup-view-toggle",
+    ".followup-action-list",
+    ".followup-action-list-head",
+    ".followup-action-row",
+    ".followup-action-person",
+    ".followup-action-stage",
+    ".followup-action-mail",
+    ".followup-action-next",
+    ".followup-action-due",
+    ".followup-action-actions",
+  ]) {
+    assert.match(stylesSource, new RegExp(selector.replace(".", "\\.")));
+  }
+}
+
 function testEmptyWorkspaceFixture() {
   for (const key of [
     "brands",
@@ -218,5 +250,6 @@ testUiContracts();
 testWorkspaceEntryContracts();
 testGroupedNavigationContracts();
 testCompactTopbarContracts();
+testFollowUpActionListContracts();
 testEmptyWorkspaceFixture();
-console.log("PASS today action center regression: task lifecycle, no stage automation, UI contracts, workspace entry, grouped navigation, and compact topbar.");
+console.log("PASS today action center regression: task lifecycle, no stage automation, UI contracts, workspace entry, grouped navigation, compact topbar, and follow-up action list.");
