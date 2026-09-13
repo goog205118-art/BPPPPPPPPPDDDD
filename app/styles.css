@@ -2863,6 +2863,57 @@ button,
   color: #eaf3ff;
 }
 
+.tabs {
+  align-items: stretch;
+  gap: 8px;
+}
+
+.tab-group {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+  gap: 6px;
+  padding-right: 8px;
+  border-right: 1px solid #304154;
+}
+
+.tab-group:last-child {
+  padding-right: 0;
+  border-right: 0;
+}
+
+.tab-group-title {
+  color: #8493a5;
+  font-size: 0.68rem;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.tab-group-items {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.tab--priority {
+  border-color: #35587f;
+  background: #1b2b3d;
+  color: #d6e8ff;
+  font-weight: 700;
+}
+
+.tab--priority:hover {
+  border-color: #5d98ef;
+  background: #253d58;
+}
+
+.tab--priority.active {
+  background: #2a5687;
+  border-color: #70aaf8;
+  color: #f5f9ff;
+}
+
 .global-search-trigger {
   display: inline-flex;
   min-width: 280px;
@@ -3917,6 +3968,18 @@ tbody tr[data-open-creator] {
 }
 
 @media (max-width: 760px) {
+  .tabs {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 6px;
+  }
+
+  .tab-group {
+    align-items: flex-start;
+    padding: 0;
+    border-right: 0;
+  }
+
   .topbar-title {
     width: 100%;
     align-items: flex-start;

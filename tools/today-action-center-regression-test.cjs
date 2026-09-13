@@ -125,6 +125,35 @@ function testWorkspaceEntryContracts() {
   }
 }
 
+function testGroupedNavigationContracts() {
+  for (const marker of [
+    "const NAVIGATION_GROUPS",
+    'key: "library"',
+    'title: "资料"',
+    'key: "collaboration"',
+    'title: "协作"',
+    'key: "analysis"',
+    'title: "分析"',
+    'key: "creators"',
+    'key: "leads"',
+    'key: "products"',
+    'key: "resources"',
+    'key: "today"',
+    'key: "followups"',
+    'key: "matches"',
+    'key: "cooperations"',
+    "function renderTabs",
+    'class="tab-group',
+    'data-tab="${escapeHtml(item.key)}"',
+    "tab--priority",
+  ]) {
+    assert.match(appSource, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  for (const selector of [".tab-group", ".tab-group-title", ".tab-group-items", ".tab--priority"]) {
+    assert.match(stylesSource, new RegExp(selector.replace(".", "\\.")));
+  }
+}
+
 function testEmptyWorkspaceFixture() {
   for (const key of [
     "brands",
@@ -148,5 +177,6 @@ testDeferValidation();
 testCompleteDoesNotAdvanceCase();
 testUiContracts();
 testWorkspaceEntryContracts();
+testGroupedNavigationContracts();
 testEmptyWorkspaceFixture();
-console.log("PASS today action center regression: task lifecycle, no stage automation, UI contracts, and workspace entry.");
+console.log("PASS today action center regression: task lifecycle, no stage automation, UI contracts, workspace entry, and grouped navigation.");

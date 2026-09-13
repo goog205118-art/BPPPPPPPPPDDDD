@@ -20,6 +20,34 @@ const STORAGE_ACCESS_PASSWORD = "resource-workbench-access-password";
 const SETTINGS_TAB = { key: "settings", title: "设置" };
 const MATCHING_TAB = { key: "matches", title: "本周资源匹配" };
 const TODAY_ACTION_TAB = { key: "today", title: "今日推进" };
+const NAVIGATION_GROUPS = [
+  {
+    key: "library",
+    title: "资料",
+    items: [
+      { key: "creators", title: "达人库" },
+      { key: "leads", title: "待开发达人" },
+      { key: "products", title: "产品库" },
+      { key: "resources", title: "资源库" },
+    ],
+  },
+  {
+    key: "collaboration",
+    title: "协作",
+    items: [
+      { ...TODAY_ACTION_TAB, priority: true },
+      { key: "followups", title: "合作跟进", priority: true },
+    ],
+  },
+  {
+    key: "analysis",
+    title: "分析",
+    items: [
+      MATCHING_TAB,
+      { key: "cooperations", title: "合作记录" },
+    ],
+  },
+];
 const SETTINGS_SECTIONS = [
   {
     key: "workspace",
@@ -3050,9 +3078,23 @@ function filterRows(dataRows) {
 }
 
 function renderTabs() {
-  const tabs = [...Object.entries(entityConfig).map(([key, item]) => ({ key, title: item.title })), TODAY_ACTION_TAB, MATCHING_TAB];
-  elements.tabs.innerHTML = tabs
-    .map((item) => `<button class="tab ${item.key === state.activeTab ? "active" : ""}" data-tab="${item.key}">${item.title}</button>`)
+  elements.tabs.innerHTML = NAVIGATION_GROUPS
+    .map((group) => `
+      <section class="tab-group tab-group--${group.key}" aria-label="${escapeHtml(group.title)}">
+        <span class="tab-group-title">${escapeHtml(group.title)}</span>
+        <div class="tab-group-items">
+          ${group.items
+            .map((item) => `
+              <button
+                type="button"
+                class="tab ${item.priority ? "tab--priority" : ""} ${item.key === state.activeTab ? "active" : ""}"
+                data-tab="${escapeHtml(item.key)}"
+              >${escapeHtml(item.title)}</button>
+            `)
+            .join("")}
+        </div>
+      </section>
+    `)
     .join("");
 
   elements.tabs.querySelectorAll("[data-tab]").forEach((button) => {
