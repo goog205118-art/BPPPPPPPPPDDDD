@@ -2209,6 +2209,18 @@ function renderAiSettings() {
     controls.apiKey.placeholder = useEnvironment ? "由环境变量读取" : settings.hasApiKey ? "已保存，可留空不改" : "请输入 API Key";
     controls.model.value = settings.model || defaultAiProfile.model;
     controls.proxyUrl.value = settings.proxyUrl || "";
+    const configured = settings.hasApiKey || settings.keySource === "environment";
+    const protocolLabel = settings.protocol === "openai" ? "OpenAI 兼容" : "Gemini";
+    const keySourceLabel = settings.keySource === "environment" ? "环境变量" : "本地设置";
+    const status = elements.aiSettingsForm.querySelector(`[data-ai-profile-status="${key}"]`);
+    const protocol = elements.aiSettingsForm.querySelector(`[data-ai-profile-protocol="${key}"]`);
+    const keySource = elements.aiSettingsForm.querySelector(`[data-ai-profile-key-source="${key}"]`);
+    if (status) {
+      status.textContent = configured ? "已配置" : "未配置";
+      status.classList.toggle("is-configured", configured);
+    }
+    if (protocol) protocol.textContent = protocolLabel;
+    if (keySource) keySource.textContent = keySourceLabel;
     return settings;
   };
 

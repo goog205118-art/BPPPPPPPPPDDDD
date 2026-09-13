@@ -89,119 +89,146 @@
           <nav class="settings-nav" id="settingsNav" aria-label="设置分类"></nav>
           <div class="settings-content">
         <form id="aiSettingsForm" class="settings-form" data-settings-panel="ai">
-          <section class="ai-profile">
+          <section class="ai-profile" data-ai-profile="standard">
             <div class="ai-profile-head">
-              <h3>普通 AI</h3>
-              <p>适合快速录入、产品资料补全等高频任务。</p>
+              <div>
+                <h3>普通 AI</h3>
+                <p>适合快速录入、产品资料补全等高频任务。</p>
+              </div>
+              <span class="ai-profile-status" data-ai-profile-status="standard">未配置</span>
             </div>
-            <div class="settings-fields">
+            <div class="ai-profile-defaults">
               <div class="field">
-                <label for="standardAiProtocol">接入协议</label>
-                <select id="standardAiProtocol" name="standard.protocol">
-                  <option value="gemini">Gemini</option>
-                  <option value="openai">OpenAI 兼容</option>
-                </select>
-              </div>
-              <div class="field">
-                <label for="standardAiKeySource">Key 来源</label>
-                <select id="standardAiKeySource" name="standard.keySource">
-                  <option value="local">本地设置</option>
-                  <option value="environment">环境变量</option>
-                </select>
-              </div>
-              <div class="field field-wide">
-                <label for="standardAiApiBaseUrl">API 地址</label>
-                <input id="standardAiApiBaseUrl" name="standard.apiBaseUrl" type="url" placeholder="Gemini 基础地址，或 OpenAI 兼容基础地址 / chat/completions 地址" />
-              </div>
-              <div class="field">
-                <label for="standardAiApiKey">API Key</label>
-                <input id="standardAiApiKey" name="standard.apiKey" type="password" autocomplete="new-password" placeholder="已保存时可留空不改" />
-              </div>
-              <div class="field">
-                <label for="standardAiModel">模型名</label>
+                <label for="standardAiModel">当前模型</label>
                 <input id="standardAiModel" name="standard.model" type="text" placeholder="填写快速模型名" />
               </div>
-              <div class="field field-wide proxy-setting">
-                <label for="standardAiProxyUrl">自定义代理地址（留空自动识别）</label>
-                <input id="standardAiProxyUrl" name="standard.proxyUrl" type="url" placeholder="默认自动读取 Windows / FlClash；仅特殊网络时填写" />
-              </div>
+              <p class="ai-profile-meta">协议 <strong data-ai-profile-protocol="standard">Gemini</strong><span aria-hidden="true">·</span> Key <strong data-ai-profile-key-source="standard">本地设置</strong></p>
             </div>
+            <details class="ai-advanced-settings">
+              <summary><span>高级连接设置</span><small>协议、Key、地址与代理</small></summary>
+              <div class="settings-fields ai-advanced-fields">
+                <div class="field">
+                  <label for="standardAiProtocol">接入协议</label>
+                  <select id="standardAiProtocol" name="standard.protocol">
+                    <option value="gemini">Gemini</option>
+                    <option value="openai">OpenAI 兼容</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="standardAiKeySource">Key 来源</label>
+                  <select id="standardAiKeySource" name="standard.keySource">
+                    <option value="local">本地设置</option>
+                    <option value="environment">环境变量</option>
+                  </select>
+                </div>
+                <div class="field field-wide">
+                  <label for="standardAiApiBaseUrl">API 地址</label>
+                  <input id="standardAiApiBaseUrl" name="standard.apiBaseUrl" type="url" placeholder="Gemini 基础地址，或 OpenAI 兼容基础地址 / chat/completions 地址" />
+                </div>
+                <div class="field">
+                  <label for="standardAiApiKey">API Key</label>
+                  <input id="standardAiApiKey" name="standard.apiKey" type="password" autocomplete="new-password" placeholder="已保存时可留空不改" />
+                </div>
+                <div class="field field-wide proxy-setting">
+                  <label for="standardAiProxyUrl">自定义代理地址（留空自动识别）</label>
+                  <input id="standardAiProxyUrl" name="standard.proxyUrl" type="url" placeholder="默认自动读取 Windows / FlClash；仅特殊网络时填写" />
+                </div>
+              </div>
+            </details>
           </section>
-          <section class="ai-profile">
+          <section class="ai-profile" data-ai-profile="advanced">
             <div class="ai-profile-head">
-              <h3>高能力 AI</h3>
-              <p>适合达人完整补全、需要更强推理或检索的任务。</p>
+              <div>
+                <h3>高能力 AI</h3>
+                <p>适合达人完整补全、需要更强推理或检索的任务。</p>
+              </div>
+              <span class="ai-profile-status" data-ai-profile-status="advanced">未配置</span>
             </div>
-            <div class="settings-fields">
+            <div class="ai-profile-defaults">
               <div class="field">
-                <label for="advancedAiProtocol">接入协议</label>
-                <select id="advancedAiProtocol" name="advanced.protocol">
-                  <option value="gemini">Gemini</option>
-                  <option value="openai">OpenAI 兼容</option>
-                </select>
-              </div>
-              <div class="field">
-                <label for="advancedAiKeySource">Key 来源</label>
-                <select id="advancedAiKeySource" name="advanced.keySource">
-                  <option value="local">本地设置</option>
-                  <option value="environment">环境变量</option>
-                </select>
-              </div>
-              <div class="field field-wide">
-                <label for="advancedAiApiBaseUrl">API 地址</label>
-                <input id="advancedAiApiBaseUrl" name="advanced.apiBaseUrl" type="url" placeholder="Gemini 基础地址，或 OpenAI 兼容基础地址 / chat/completions 地址" />
-              </div>
-              <div class="field">
-                <label for="advancedAiApiKey">API Key</label>
-                <input id="advancedAiApiKey" name="advanced.apiKey" type="password" autocomplete="new-password" placeholder="已保存时可留空不改" />
-              </div>
-              <div class="field">
-                <label for="advancedAiModel">模型名</label>
+                <label for="advancedAiModel">当前模型</label>
                 <input id="advancedAiModel" name="advanced.model" type="text" placeholder="填写高能力模型名" />
               </div>
-              <div class="field field-wide proxy-setting">
-                <label for="advancedAiProxyUrl">自定义代理地址（留空自动识别）</label>
-                <input id="advancedAiProxyUrl" name="advanced.proxyUrl" type="url" placeholder="默认自动读取 Windows / FlClash；仅特殊网络时填写" />
-              </div>
+              <p class="ai-profile-meta">协议 <strong data-ai-profile-protocol="advanced">Gemini</strong><span aria-hidden="true">·</span> Key <strong data-ai-profile-key-source="advanced">本地设置</strong></p>
             </div>
+            <details class="ai-advanced-settings">
+              <summary><span>高级连接设置</span><small>协议、Key、地址与代理</small></summary>
+              <div class="settings-fields ai-advanced-fields">
+                <div class="field">
+                  <label for="advancedAiProtocol">接入协议</label>
+                  <select id="advancedAiProtocol" name="advanced.protocol">
+                    <option value="gemini">Gemini</option>
+                    <option value="openai">OpenAI 兼容</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="advancedAiKeySource">Key 来源</label>
+                  <select id="advancedAiKeySource" name="advanced.keySource">
+                    <option value="local">本地设置</option>
+                    <option value="environment">环境变量</option>
+                  </select>
+                </div>
+                <div class="field field-wide">
+                  <label for="advancedAiApiBaseUrl">API 地址</label>
+                  <input id="advancedAiApiBaseUrl" name="advanced.apiBaseUrl" type="url" placeholder="Gemini 基础地址，或 OpenAI 兼容基础地址 / chat/completions 地址" />
+                </div>
+                <div class="field">
+                  <label for="advancedAiApiKey">API Key</label>
+                  <input id="advancedAiApiKey" name="advanced.apiKey" type="password" autocomplete="new-password" placeholder="已保存时可留空不改" />
+                </div>
+                <div class="field field-wide proxy-setting">
+                  <label for="advancedAiProxyUrl">自定义代理地址（留空自动识别）</label>
+                  <input id="advancedAiProxyUrl" name="advanced.proxyUrl" type="url" placeholder="默认自动读取 Windows / FlClash；仅特殊网络时填写" />
+                </div>
+              </div>
+            </details>
           </section>
-          <section class="ai-profile">
+          <section class="ai-profile" data-ai-profile="special">
             <div class="ai-profile-head">
-              <h3>特殊 AI</h3>
-              <p>适合邮件写作或接入有特殊能力、特殊协议的模型。</p>
+              <div>
+                <h3>特殊 AI</h3>
+                <p>适合邮件写作或接入有特殊能力、特殊协议的模型。</p>
+              </div>
+              <span class="ai-profile-status" data-ai-profile-status="special">未配置</span>
             </div>
-            <div class="settings-fields">
+            <div class="ai-profile-defaults">
               <div class="field">
-                <label for="specialAiProtocol">接入协议</label>
-                <select id="specialAiProtocol" name="special.protocol">
-                  <option value="gemini">Gemini</option>
-                  <option value="openai">OpenAI 兼容</option>
-                </select>
-              </div>
-              <div class="field">
-                <label for="specialAiKeySource">Key 来源</label>
-                <select id="specialAiKeySource" name="special.keySource">
-                  <option value="local">本地设置</option>
-                  <option value="environment">环境变量</option>
-                </select>
-              </div>
-              <div class="field field-wide">
-                <label for="specialAiApiBaseUrl">API 地址</label>
-                <input id="specialAiApiBaseUrl" name="special.apiBaseUrl" type="url" placeholder="Gemini 基础地址，或 OpenAI 兼容基础地址 / chat/completions 地址" />
-              </div>
-              <div class="field">
-                <label for="specialAiApiKey">API Key</label>
-                <input id="specialAiApiKey" name="special.apiKey" type="password" autocomplete="new-password" placeholder="已保存时可留空不改" />
-              </div>
-              <div class="field">
-                <label for="specialAiModel">模型名</label>
+                <label for="specialAiModel">当前模型</label>
                 <input id="specialAiModel" name="special.model" type="text" placeholder="填写特殊模型名" />
               </div>
-              <div class="field field-wide proxy-setting">
-                <label for="specialAiProxyUrl">自定义代理地址（留空自动识别）</label>
-                <input id="specialAiProxyUrl" name="special.proxyUrl" type="url" placeholder="默认自动读取 Windows / FlClash；仅特殊网络时填写" />
-              </div>
+              <p class="ai-profile-meta">协议 <strong data-ai-profile-protocol="special">Gemini</strong><span aria-hidden="true">·</span> Key <strong data-ai-profile-key-source="special">本地设置</strong></p>
             </div>
+            <details class="ai-advanced-settings">
+              <summary><span>高级连接设置</span><small>协议、Key、地址与代理</small></summary>
+              <div class="settings-fields ai-advanced-fields">
+                <div class="field">
+                  <label for="specialAiProtocol">接入协议</label>
+                  <select id="specialAiProtocol" name="special.protocol">
+                    <option value="gemini">Gemini</option>
+                    <option value="openai">OpenAI 兼容</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="specialAiKeySource">Key 来源</label>
+                  <select id="specialAiKeySource" name="special.keySource">
+                    <option value="local">本地设置</option>
+                    <option value="environment">环境变量</option>
+                  </select>
+                </div>
+                <div class="field field-wide">
+                  <label for="specialAiApiBaseUrl">API 地址</label>
+                  <input id="specialAiApiBaseUrl" name="special.apiBaseUrl" type="url" placeholder="Gemini 基础地址，或 OpenAI 兼容基础地址 / chat/completions 地址" />
+                </div>
+                <div class="field">
+                  <label for="specialAiApiKey">API Key</label>
+                  <input id="specialAiApiKey" name="special.apiKey" type="password" autocomplete="new-password" placeholder="已保存时可留空不改" />
+                </div>
+                <div class="field field-wide proxy-setting">
+                  <label for="specialAiProxyUrl">自定义代理地址（留空自动识别）</label>
+                  <input id="specialAiProxyUrl" name="special.proxyUrl" type="url" placeholder="默认自动读取 Windows / FlClash；仅特殊网络时填写" />
+                </div>
+              </div>
+            </details>
           </section>
           <section class="ai-assignment" aria-labelledby="aiAssignmentTitle">
             <div class="ai-profile-head">

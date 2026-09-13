@@ -796,6 +796,93 @@ h1 {
   line-height: 1.4;
 }
 
+.ai-profile-status {
+  flex: none;
+  border: 1px solid #455364;
+  border-radius: 999px;
+  padding: 3px 7px;
+  color: #aeb9c8;
+  background: #18212c;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+
+.ai-profile-status.is-configured {
+  border-color: #31735a;
+  color: #93e3bd;
+  background: #12291f;
+}
+
+.ai-profile-defaults {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.8fr) minmax(0, 1.2fr);
+  gap: 10px 18px;
+  align-items: end;
+}
+
+.ai-profile-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 8px;
+  color: var(--muted);
+  font-size: 0.78rem;
+}
+
+.ai-profile-meta strong {
+  color: #dce7f2;
+  font-weight: 700;
+}
+
+.ai-advanced-settings {
+  margin-top: 10px;
+  border-top: 1px solid #2b3949;
+}
+
+.ai-advanced-settings summary {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 0 0;
+  color: #aebfd1;
+  cursor: pointer;
+  font-size: 0.8rem;
+  list-style: none;
+}
+
+.ai-advanced-settings summary::-webkit-details-marker {
+  display: none;
+}
+
+.ai-advanced-settings summary::before {
+  content: "+";
+  display: inline-grid;
+  width: 14px;
+  place-items: center;
+  color: #8da5bd;
+  font-size: 0.95rem;
+}
+
+.ai-advanced-settings[open] summary::before {
+  content: "-";
+}
+
+.ai-advanced-settings summary span {
+  margin-right: auto;
+}
+
+.ai-advanced-settings summary small {
+  color: var(--muted);
+  font-size: 0.72rem;
+}
+
+.ai-advanced-fields {
+  margin-top: 10px;
+}
+
 .settings-fields {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2556,6 +2643,25 @@ tbody tr:hover {
   .ai-profile-head {
     flex-direction: column;
     gap: 4px;
+  }
+
+  .ai-profile-defaults {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+
+  .ai-profile-meta {
+    margin-bottom: 2px;
+  }
+
+  .ai-advanced-settings summary {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .ai-advanced-settings summary small {
+    width: 100%;
+    padding-left: 20px;
   }
 
   .matching-head,
