@@ -311,7 +311,20 @@
             </div>
             <button type="button" class="ghost" id="mailNewAccountBtn">新增邮箱账户</button>
           </div>
-          <section class="mail-account-list" id="mailAccountList" data-settings-panel="mail" aria-label="已保存官方邮箱账户"></section>
+          <div class="mail-wizard" data-settings-panel="mail">
+            <div class="mail-wizard-head">
+              <div>
+                <strong>邮箱配置向导</strong>
+                <small id="mailWizardStepHint">第 1 步，共 4 步</small>
+              </div>
+              <nav class="mail-wizard-nav" id="mailWizardNav" aria-label="官方邮箱配置步骤"></nav>
+            </div>
+            <div class="mail-wizard-actions">
+              <button type="button" class="ghost hidden" id="mailWizardPrevBtn">上一步</button>
+              <button type="button" class="primary" id="mailWizardNextBtn">下一步：IMAP 收取</button>
+            </div>
+          </div>
+          <section class="mail-account-list" id="mailAccountList" data-settings-panel="mail" data-mail-wizard-step="1" aria-label="已保存官方邮箱账户"></section>
           <section class="mail-content-policy" data-settings-panel="safety" aria-labelledby="mailContentPolicyTitle">
             <div>
               <strong id="mailContentPolicyTitle">邮件正文与 AI 上下文</strong>
@@ -397,7 +410,7 @@
             <div class="mail-automation-history" id="mailAutomationHistory"></div>
           </section>
           <section class="mail-account-editor" id="mailAccountEditor" data-settings-panel="mail">
-            <div class="mail-account-editor-head">
+            <div class="mail-account-editor-head" data-mail-wizard-step="1">
               <div>
                 <strong id="mailEditorTitle">新增官方邮箱账户</strong>
                 <small>授权码只在填写或变更时提交，保存后不会回显。</small>
@@ -405,7 +418,7 @@
               <button type="button" class="ghost hidden" id="mailCancelEditBtn">取消编辑</button>
             </div>
             <input id="mailAccountId" name="id" type="hidden" />
-            <div class="settings-fields">
+            <div class="settings-fields" data-mail-wizard-step="1">
               <div class="field">
                 <label for="mailBrandId">可服务品牌</label>
                 <select id="mailBrandId" name="brand_ids" multiple size="4"></select>
@@ -439,8 +452,8 @@
                 <span><input id="mailEnabled" name="enabled" type="checkbox" checked /> 启用该账户的手动同步</span>
               </label>
             </div>
-            <div class="mail-protocol-title">IMAP 收取与归档</div>
-            <div class="settings-fields">
+            <div class="mail-protocol-title" data-mail-wizard-step="2">IMAP 收取与归档</div>
+            <div class="settings-fields" data-mail-wizard-step="2">
               <div class="field field-wide">
                 <label for="mailHost">IMAP 服务器</label>
                 <input id="mailHost" name="imap.host" type="text" autocomplete="off" placeholder="例如：imap.qiye.aliyun.com 或 c2.icoremail 服务器地址" />
@@ -474,8 +487,8 @@
                 <input id="mailSyncDays" name="imap.syncDays" type="number" min="1" max="90" value="30" />
               </div>
             </div>
-            <div class="mail-protocol-title">SMTP 网页发信</div>
-            <div class="settings-fields">
+            <div class="mail-protocol-title" data-mail-wizard-step="3">SMTP 网页发信</div>
+            <div class="settings-fields" data-mail-wizard-step="3">
               <label class="field checkbox-field" for="mailSmtpEnabled">
                 <span>SMTP 发信</span>
                 <span><input id="mailSmtpEnabled" name="smtp.enabled" type="checkbox" checked /> 启用人工确认发信</span>
@@ -505,8 +518,20 @@
                 <input id="mailSmtpPassword" name="smtp.password" type="password" autocomplete="new-password" placeholder="复用 IMAP 授权码时无需填写" />
               </div>
             </div>
+            <section class="mail-wizard-complete" data-mail-wizard-step="4" aria-labelledby="mailWizardCompleteTitle">
+              <div>
+                <strong id="mailWizardCompleteTitle">完成并测试</strong>
+                <small>保存后才会使用授权信息测试连接。测试只验证服务器连接，不会发送开发邮件或同步正式资料。</small>
+              </div>
+              <div class="mail-wizard-complete-status" id="mailWizardCompleteStatus"></div>
+              <ul class="mail-wizard-checklist">
+                <li>保存当前账户后可分别测试 IMAP 与 SMTP。</li>
+                <li>手动同步只读取近期邮件，归属不明确的内容仍进入人工分诊。</li>
+                <li>任何连接、同步、发信和阶段推进都保持人工确认。</li>
+              </ul>
+            </section>
           </section>
-          <div class="settings-actions" data-settings-panel="mail">
+          <div class="settings-actions" data-settings-panel="mail" data-mail-wizard-step="4">
             <button type="submit" class="primary">保存当前账户</button>
             <button type="button" id="mailTestBtn" class="ghost">测试 IMAP</button>
             <button type="button" id="mailSmtpTestBtn" class="ghost">测试 SMTP</button>

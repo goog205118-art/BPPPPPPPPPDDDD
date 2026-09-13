@@ -52,6 +52,12 @@ const SETTINGS_SECTIONS = [
     hint: "维护顶部时区，以及品牌、国家地区和内容垂类等录入候选项。",
   },
 ];
+const MAIL_WIZARD_STEPS = [
+  { key: 1, title: "账户与品牌", next: "下一步：IMAP 收取" },
+  { key: 2, title: "IMAP 收取", next: "下一步：SMTP 发信" },
+  { key: 3, title: "SMTP 发信", next: "下一步：完成与测试" },
+  { key: 4, title: "完成与测试", next: "" },
+];
 const ACTION_TASK_TYPE_LABELS = {
   new_reply: "新回信",
   mail_triage: "邮件归档",
@@ -633,6 +639,7 @@ const state = {
   aiSettings: clone(defaultAiSettings),
   mailSettings: clone(defaultMailSettings),
   mailAccountEditingId: null,
+  mailWizardStep: 1,
   brandEditingId: null,
   activeBrandId: "",
   followUpInboxNotice: { tone: "", text: "" },
@@ -723,8 +730,14 @@ const elements = {
   aiSettingsReloadBtn: document.getElementById("aiSettingsReloadBtn"),
   mailSettingsForm: document.getElementById("mailSettingsForm"),
   mailAccountList: document.getElementById("mailAccountList"),
+  mailAccountEditor: document.getElementById("mailAccountEditor"),
   mailNewAccountBtn: document.getElementById("mailNewAccountBtn"),
   mailCancelEditBtn: document.getElementById("mailCancelEditBtn"),
+  mailWizardNav: document.getElementById("mailWizardNav"),
+  mailWizardStepHint: document.getElementById("mailWizardStepHint"),
+  mailWizardPrevBtn: document.getElementById("mailWizardPrevBtn"),
+  mailWizardNextBtn: document.getElementById("mailWizardNextBtn"),
+  mailWizardCompleteStatus: document.getElementById("mailWizardCompleteStatus"),
   mailEditorTitle: document.getElementById("mailEditorTitle"),
   mailAccountId: document.getElementById("mailAccountId"),
   mailBrandId: document.getElementById("mailBrandId"),
@@ -2398,6 +2411,58 @@ function renderMailAutomationSettings() {
     : `<span class="mail-automation-history-empty">尚无定时同步记录。</span>`;
 }
 
+function normalizedMailWizardStep(value = state.mailWizardStep) {
+  const step = Number(value);
+  return MAIL_WIZARD_STEPS.some((item) => item.key === step) ? step : 1;
+}
+
+function renderMailWizardCompletionStatus() {
+  const current = (state.mailSettings.accounts || []).find((account) => text(account.id) === text(elements.mailAccountId.value));
+  const selectedBrands = [...elements.mailBrandId.selectedOptions].map((option) => text(option.textContent)).filter(Boolean);
+  const imapReady = Boolean(text(elements.mailHost.value) && text(elements.mailUser.value));
+  const imapPasswordReady = Boolean(text(elements.mailPassword.value) || current?.imap?.hasPassword);
+  const smtpReady = elements.mailSmtpEnabled.checked
+    && Boolean(text(elements.mailSmtpHost.value) || text(elements.mailHost.value))
+    && Boolean(text(elements.mailSmtpUser.value) || text(elements.mailUser.value));
+  const smtpPasswordReady = elements.mailSmtpUseImapPassword.checked
+    ? imapPasswordReady
+    : Boolean(text(elements.mailSmtpPassword.value) || current?.smtp?.hasPassword);
+  const items = [
+    { label: selectedBrands.length ? `服务品牌：${selectedBrands.join(" / ")}` : "服务品牌：待选择", ready: selectedBrands.length > 0 },
+    { label: imapReady ? "IMAP 服务器：已填写" : "IMAP 服务器：待填写", ready: imapReady },
+    { label: imapPasswordReady ? "IMAP 授权码：已准备" : "IMAP 授权码：待填写", ready: imapPasswordReady },
+    { label: !elements.mailSmtpEnabled.checked ? "SMTP：已关闭" : smtpReady && smtpPasswordReady ? "SMTP：已准备" : "SMTP：待完成", ready: !elements.mailSmtpEnabled.checked || (smtpReady && smtpPasswordReady) },
+  ];
+  elements.mailWizardCompleteStatus.innerHTML = items.map((item) => (
+    `<span class="${item.ready ? "is-ready" : "is-pending"}">${escapeHtml(item.label)}</span>`
+  )).join("");
+}
+
+function renderMailWizard() {
+  const step = normalizedMailWizardStep();
+  const current = MAIL_WIZARD_STEPS.find((item) => item.key === step);
+  state.mailWizardStep = step;
+  elements.mailWizardNav.innerHTML = MAIL_WIZARD_STEPS.map((item) => `
+    <button
+      type="button"
+      class="mail-wizard-step ${item.key === step ? "is-active" : ""} ${item.key < step ? "is-complete" : ""}"
+      data-mail-wizard-step-target="${item.key}"
+      aria-current="${item.key === step ? "step" : "false"}"
+    >
+      <span>${item.key}</span>${escapeHtml(item.title)}
+    </button>
+  `).join("");
+  elements.mailWizardStepHint.textContent = `第 ${step} 步，共 ${MAIL_WIZARD_STEPS.length} 步 · ${current.title}`;
+  elements.mailWizardPrevBtn.classList.toggle("hidden", step === 1);
+  elements.mailWizardNextBtn.classList.toggle("hidden", step === MAIL_WIZARD_STEPS.length);
+  elements.mailWizardNextBtn.textContent = current.next;
+  elements.mailSettingsForm.querySelectorAll("[data-mail-wizard-step]").forEach((panel) => {
+    panel.classList.toggle("hidden", Number(panel.dataset.mailWizardStep) !== step);
+  });
+  elements.mailAccountEditor.classList.toggle("hidden", step === MAIL_WIZARD_STEPS.length);
+  if (step === MAIL_WIZARD_STEPS.length) renderMailWizardCompletionStatus();
+}
+
 function renderMailSettings() {
   const allAccounts = state.mailSettings.accounts || [];
   const editingAccount = allAccounts.find((item) => text(item.id) === text(state.mailAccountEditingId));
@@ -2472,6 +2537,7 @@ function renderMailSettings() {
   elements.mailBodyRetentionDays.value = String(contentPolicy.retentionDays);
   renderMailAutomationSettings();
   elements.mailSettingsStatus.textContent = formatMailSyncStatus();
+  renderMailWizard();
 }
 
 function sanitizeSignatureUrl(value, image = false) {
@@ -4116,7 +4182,7 @@ function renderSettingsNavigation() {
   `).join("");
   elements.mailSettingsForm.classList.toggle("hidden", !["mail", "safety"].includes(current.key));
   elements.settingsPage.querySelectorAll("[data-settings-panel]").forEach((panel) => {
-    panel.classList.toggle("hidden", panel.dataset.settingsPanel !== current.key);
+    panel.classList.toggle("settings-panel-hidden", panel.dataset.settingsPanel !== current.key);
   });
 }
 
@@ -9839,12 +9905,28 @@ function bindEvents() {
   elements.mailTestBtn.addEventListener("click", testMailSettings);
   elements.mailSmtpTestBtn.addEventListener("click", testSmtpSettings);
   elements.mailSyncBtn.addEventListener("click", syncMailbox);
+  elements.mailWizardPrevBtn.addEventListener("click", () => {
+    state.mailWizardStep = Math.max(1, normalizedMailWizardStep() - 1);
+    renderMailWizard();
+  });
+  elements.mailWizardNextBtn.addEventListener("click", () => {
+    state.mailWizardStep = Math.min(MAIL_WIZARD_STEPS.length, normalizedMailWizardStep() + 1);
+    renderMailWizard();
+  });
+  elements.mailWizardNav.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-mail-wizard-step-target]");
+    if (!button) return;
+    state.mailWizardStep = normalizedMailWizardStep(button.dataset.mailWizardStepTarget);
+    renderMailWizard();
+  });
   elements.mailNewAccountBtn.addEventListener("click", () => {
     state.mailAccountEditingId = null;
+    state.mailWizardStep = 1;
     renderMailSettings();
   });
   elements.mailCancelEditBtn.addEventListener("click", () => {
     state.mailAccountEditingId = null;
+    state.mailWizardStep = 1;
     renderMailSettings();
   });
   elements.mailAccountList.addEventListener("click", (event) => {
@@ -9854,6 +9936,7 @@ function bindEvents() {
     const action = button.dataset.mailAccountAction;
     if (action === "edit") {
       state.mailAccountEditingId = accountId;
+      state.mailWizardStep = 1;
       renderMailSettings();
       elements.mailAccountEditor.scrollIntoView({ behavior: "smooth", block: "start" });
       return;
