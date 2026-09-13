@@ -112,14 +112,32 @@ const AI_HIGH_RISK_STAGE_APPLICATIONS = new Set([
   "已结案",
   "未谈妥",
 ]);
-const FOLLOW_UP_BOARD_COLUMNS = [
-  { title: "待回复", stages: ["已联系待回复", "待回复"] },
-  { title: "初步沟通", stages: ["初步沟通", "已回复"] },
-  { title: "合作协商", stages: ["谈合作方式 / 报价", "条款确认"] },
-  { title: "寄样", stages: ["待寄样"] },
-  { title: "物流", stages: ["运输中", "已签收"] },
-  { title: "待发布", stages: ["待发布"] },
-  { title: "发布与回收", stages: ["已发布", "数据回收"] },
+const FOLLOW_UP_BOARD_GROUPS = [
+  {
+    title: "沟通",
+    hint: "等待回复、初步沟通与合作协商",
+    columns: [
+      { title: "待回复", stages: ["已联系待回复", "待回复"] },
+      { title: "初步沟通", stages: ["初步沟通", "已回复"] },
+      { title: "合作协商", stages: ["谈合作方式 / 报价", "条款确认"] },
+    ],
+  },
+  {
+    title: "履约",
+    hint: "寄样与物流进度",
+    columns: [
+      { title: "寄样", stages: ["待寄样"] },
+      { title: "物流", stages: ["运输中", "已签收"] },
+    ],
+  },
+  {
+    title: "内容",
+    hint: "内容发布与效果回收",
+    columns: [
+      { title: "待发布", stages: ["待发布"] },
+      { title: "发布与回收", stages: ["已发布", "数据回收"] },
+    ],
+  },
 ];
 const defaultAiProfile = {
   protocol: "gemini",
@@ -7743,14 +7761,26 @@ function renderFollowUpPage() {
         ${terminalRows.length ? `<details class="followup-action-terminal"><summary>已结束 / 暂停 ${terminalRows.length} 条</summary><div class="followup-closed-list">${terminalRows.map(followUpCardMarkup).join("")}</div></details>` : ""}
       </section>
     ` : `
-      <div class="followup-board">
-        ${FOLLOW_UP_BOARD_COLUMNS.map((column) => {
-          const columnRows = activeRows.filter((row) => column.stages.includes(text(row.stage)));
+      <div class="followup-board" aria-label="合作跟进全漏斗看板">
+        ${FOLLOW_UP_BOARD_GROUPS.map((group) => {
+          const groupCount = group.columns.reduce((count, column) => count + activeRows.filter((row) => column.stages.includes(text(followUpDisplayModel(row).stage))).length, 0);
           return `
-            <section class="followup-column">
-              <header class="followup-column-head"><strong>${escapeHtml(column.title)}</strong><span>${columnRows.length}</span></header>
-              <div class="followup-column-body">${columnRows.length ? columnRows.map(followUpCardMarkup).join("") : `<p class="followup-column-empty">暂无跟进</p>`}</div>
-            </section>`;
+            <details class="followup-board-group" open>
+              <summary>
+                <span class="followup-board-group-copy"><strong>${escapeHtml(group.title)}</strong><small>${escapeHtml(group.hint)}</small></span>
+                <span class="followup-board-group-count">${groupCount}</span>
+              </summary>
+              <div class="followup-board-group-columns">
+                ${group.columns.map((column) => {
+                  const columnRows = activeRows.filter((row) => column.stages.includes(text(followUpDisplayModel(row).stage)));
+                  return `
+                    <section class="followup-column">
+                      <header class="followup-column-head"><strong>${escapeHtml(column.title)}</strong><span>${columnRows.length}</span></header>
+                      <div class="followup-column-body">${columnRows.length ? columnRows.map(followUpCardMarkup).join("") : `<p class="followup-column-empty">暂无跟进</p>`}</div>
+                    </section>`;
+                }).join("")}
+              </div>
+            </details>`;
         }).join("")}
       </div>
       <section class="followup-closed">

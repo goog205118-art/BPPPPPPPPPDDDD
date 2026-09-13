@@ -198,6 +198,10 @@ function testFollowUpActionListContracts() {
     'followUpView: "list"',
     "function followUpActionRowMarkup",
     "function compareFollowUpActionRows",
+    "const FOLLOW_UP_BOARD_GROUPS",
+    'title: "沟通"',
+    'title: "履约"',
+    'title: "内容"',
     'data-followup-view="list"',
     'data-followup-view="board"',
     "data-followup-action-row",
@@ -220,6 +224,8 @@ function testFollowUpActionListContracts() {
     ".followup-action-next",
     ".followup-action-due",
     ".followup-action-actions",
+    ".followup-board-group",
+    ".followup-board-group-columns",
   ]) {
     assert.match(stylesSource, new RegExp(selector.replace(".", "\\.")));
   }

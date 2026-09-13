@@ -5320,11 +5320,71 @@ body.access-locked .app-shell {
 
 .followup-board {
   display: grid;
-  grid-auto-columns: minmax(220px, 1fr);
-  grid-auto-flow: column;
   gap: 7px;
-  overflow-x: auto;
-  padding-bottom: 3px;
+}
+
+.followup-board-group {
+  overflow: hidden;
+  border: 1px solid #2c3a4b;
+  border-radius: 5px;
+  background: #141e29;
+}
+
+.followup-board-group > summary {
+  display: flex;
+  min-height: 39px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  cursor: pointer;
+  list-style: none;
+  padding: 7px 9px;
+  border-bottom: 1px solid #2c3a4b;
+  background: #172330;
+}
+
+.followup-board-group > summary::-webkit-details-marker {
+  display: none;
+}
+
+.followup-board-group-copy {
+  display: grid;
+  min-width: 0;
+  gap: 1px;
+}
+
+.followup-board-group-copy strong {
+  color: #e8f1fa;
+  font-size: 0.75rem;
+}
+
+.followup-board-group-copy small {
+  overflow: hidden;
+  color: #8da6ba;
+  font-size: 0.62rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.followup-board-group-count {
+  display: inline-grid;
+  flex: 0 0 auto;
+  min-width: 22px;
+  height: 20px;
+  place-items: center;
+  border: 1px solid #416079;
+  border-radius: 10px;
+  color: #c0d8ea;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.67rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.followup-board-group-columns {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 7px;
+  padding: 7px;
 }
 
 .followup-column,
@@ -6222,7 +6282,11 @@ body.access-locked .app-shell {
   }
 
   .followup-board {
-    grid-auto-columns: minmax(235px, 74vw);
+    gap: 7px;
+  }
+
+  .followup-board-group-columns {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .followup-viewbar {
@@ -8042,6 +8106,18 @@ body.access-locked .app-shell {
 
   .followup-action-actions select {
     width: 90px;
+  }
+
+  .followup-board-group > summary {
+    min-height: 38px;
+  }
+
+  .followup-board-group-copy small {
+    white-space: normal;
+  }
+
+  .followup-board-group-columns {
+    grid-template-columns: 1fr;
   }
 
   .followup-waiting-time,
