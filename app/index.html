@@ -66,10 +66,22 @@
           <span>工作区</span>
           <select id="brandWorkspaceSelect" aria-label="切换品牌工作区"></select>
         </label>
-        <button class="ghost brand-manage-trigger" id="brandManageBtn" type="button" title="新增、编辑或删除品牌工作区">管理品牌</button>
+        <button class="topbar-today-queue" id="todayQueueBtn" type="button" title="查看当前工作区待处理事项">
+          <span>今日待处理</span>
+          <strong>0</strong>
+        </button>
         <div class="topbar-actions">
-          <button class="ghost" id="refreshBtn">刷新</button>
           <button class="ghost" id="settingsBtn">设置</button>
+          <div class="topbar-more-wrap">
+            <button class="ghost topbar-more-trigger" id="topbarMoreBtn" type="button" aria-haspopup="menu" aria-expanded="false" title="更多工作台操作">更多</button>
+            <div class="topbar-menu hidden" id="topbarMoreMenu" role="menu" aria-label="更多工作台操作">
+              <button class="topbar-menu-item" id="refreshBtn" type="button" role="menuitem">刷新资料</button>
+              <button class="topbar-menu-item" id="brandManageBtn" type="button" role="menuitem">管理品牌</button>
+              <button class="topbar-menu-item" type="button" role="menuitem" data-topbar-settings-section="preferences">管理时区</button>
+              <button class="topbar-menu-item" type="button" role="menuitem" data-topbar-export-state>导出 JSON</button>
+              <button class="topbar-menu-item" type="button" role="menuitem" data-topbar-import-state>导入 JSON</button>
+            </div>
+          </div>
         </div>
       </header>
 

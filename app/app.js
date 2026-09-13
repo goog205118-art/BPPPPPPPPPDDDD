@@ -698,6 +698,8 @@ const state = {
   },
   todayActionFilter: { brand: "", owner: "", priority: "", due: "", type: "", status: "待处理" },
   todayActionNotice: "",
+  topbarMoreOpen: false,
+  timeZonePopoverOpen: false,
 };
 
 let timeZoneTickerId = null;
@@ -815,6 +817,9 @@ const elements = {
   timezoneBar: document.getElementById("timezoneBar"),
   brandWorkspaceSelect: document.getElementById("brandWorkspaceSelect"),
   brandManageBtn: document.getElementById("brandManageBtn"),
+  todayQueueBtn: document.getElementById("todayQueueBtn"),
+  topbarMoreBtn: document.getElementById("topbarMoreBtn"),
+  topbarMoreMenu: document.getElementById("topbarMoreMenu"),
   brandNewBtn: document.getElementById("brandNewBtn"),
   brandList: document.getElementById("brandList"),
   brandForm: document.getElementById("brandForm"),
@@ -1258,6 +1263,27 @@ function renderBrandWorkspace() {
     : "当前查看全部品牌";
 }
 
+function pendingActionTaskCount() {
+  return (state.data.actionTasks || []).filter((task) => {
+    if (text(task.status) !== "待处理") return false;
+    return !state.activeBrandId || text(task.brand_id) === state.activeBrandId;
+  }).length;
+}
+
+function renderTopbarQueue() {
+  const count = pendingActionTaskCount();
+  elements.todayQueueBtn.innerHTML = `<span>今日待处理</span><strong>${count}</strong>`;
+  elements.todayQueueBtn.title = state.activeBrandId
+    ? `${currentBrand()?.name || "当前品牌"}：${count} 项待处理事项`
+    : `全部品牌：${count} 项待处理事项`;
+  elements.todayQueueBtn.classList.toggle("has-pending", count > 0);
+}
+
+function renderTopbarMoreMenu() {
+  elements.topbarMoreBtn.setAttribute("aria-expanded", String(state.topbarMoreOpen));
+  elements.topbarMoreMenu.classList.toggle("hidden", !state.topbarMoreOpen);
+}
+
 const BRAND_USAGE_COLLECTIONS = [
   ["creators", "达人"],
   ["leads", "待开发达人"],
@@ -1489,9 +1515,7 @@ async function deleteBrand(brandId) {
 }
 
 function openBrandManager({ create = false } = {}) {
-  state.activeTab = SETTINGS_TAB.key;
-  state.settingsSection = "workspace";
-  state.matchingEditingId = null;
+  openSettingsSection("workspace");
   if (create) state.brandEditingId = null;
   render();
   window.requestAnimationFrame(() => {
@@ -4213,6 +4237,14 @@ function settingsSectionByKey(key) {
   return SETTINGS_SECTIONS.find((item) => item.key === key) || SETTINGS_SECTIONS[0];
 }
 
+function openSettingsSection(sectionKey) {
+  state.activeTab = SETTINGS_TAB.key;
+  state.settingsSection = settingsSectionByKey(sectionKey).key;
+  state.topbarMoreOpen = false;
+  resetEditorState();
+  state.matchingEditingId = null;
+}
+
 function settingsSectionStatus(sectionKey) {
   if (sectionKey === "workspace") {
     const count = (state.data.brands || []).length;
@@ -4289,17 +4321,44 @@ function formatTimeInZone(timeZone) {
   }).format(new Date());
 }
 
+function timeZoneClockMarkup(timeZone) {
+  return `
+    <div class="timezone-clock" title="${escapeHtml(timeZone)}">
+      <span>${escapeHtml(getTimeZoneLabel(timeZone))}</span>
+      <strong>${escapeHtml(formatTimeInZone(timeZone))}</strong>
+    </div>`;
+}
+
 function renderTimeZoneBar() {
-  const zones = normalizeTimeZones(state.data.meta?.timeZones);
-  elements.timezoneBar.innerHTML = zones
-    .map(
-      (timeZone) => `
-        <div class="timezone-clock" title="${escapeHtml(timeZone)}">
-          <span>${escapeHtml(getTimeZoneLabel(timeZone))}</span>
-          <strong>${escapeHtml(formatTimeInZone(timeZone))}</strong>
-        </div>`,
-    )
-    .join("");
+  const configuredZones = normalizeTimeZones(state.data.meta?.timeZones);
+  const allowedZones = new Set(timeZoneOptions.map((item) => item.value));
+  const preferredZones = [
+    currentBrand()?.timezone,
+    Intl.DateTimeFormat().resolvedOptions().timeZone,
+    ...configuredZones,
+  ].filter((timeZone) => allowedZones.has(timeZone));
+  const visibleZones = [...new Set(preferredZones)].slice(0, 2);
+  const extraZones = configuredZones.filter((timeZone) => !visibleZones.includes(timeZone));
+  const extraMarkup = extraZones.length
+    ? `
+      <div class="timezone-more-wrap">
+        <button
+          type="button"
+          class="timezone-more-trigger"
+          data-timezone-popover-toggle
+          aria-controls="timezoneMorePopover"
+          aria-expanded="${state.timeZonePopoverOpen ? "true" : "false"}"
+          title="查看另外 ${extraZones.length} 个时区"
+        >+${extraZones.length}</button>
+        <div class="timezone-popover ${state.timeZonePopoverOpen ? "" : "hidden"}" id="timezoneMorePopover" role="status">
+          ${extraZones.map(timeZoneClockMarkup).join("")}
+        </div>
+      </div>`
+    : "";
+  elements.timezoneBar.innerHTML = `
+    <div class="timezone-main">${visibleZones.map(timeZoneClockMarkup).join("")}</div>
+    ${extraMarkup}
+  `;
 }
 
 function renderTimeZoneSettings() {
@@ -8713,6 +8772,8 @@ function renderEntityPage() {
 
 function render() {
   renderBrandWorkspace();
+  renderTopbarQueue();
+  renderTopbarMoreMenu();
   renderTimeZoneBar();
   renderTabs();
   if (state.activeTab === SETTINGS_TAB.key) {
@@ -9977,6 +10038,45 @@ function bindEvents() {
   });
   elements.brandForm.addEventListener("submit", saveBrand);
   elements.brandManageBtn.addEventListener("click", () => openBrandManager());
+  elements.todayQueueBtn.addEventListener("click", () => {
+    state.activeTab = TODAY_ACTION_TAB.key;
+    state.todayActionFilter = {
+      ...state.todayActionFilter,
+      brand: state.activeBrandId,
+      status: "待处理",
+    };
+    state.todayActionNotice = "";
+    resetEditorState();
+    render();
+  });
+  elements.topbarMoreBtn.addEventListener("click", () => {
+    state.topbarMoreOpen = !state.topbarMoreOpen;
+    renderTopbarMoreMenu();
+  });
+  elements.topbarMoreMenu.addEventListener("click", (event) => {
+    const settingsButton = event.target.closest("[data-topbar-settings-section]");
+    if (settingsButton) {
+      openSettingsSection(settingsButton.dataset.topbarSettingsSection);
+      render();
+      return;
+    }
+    if (event.target.closest("[data-topbar-export-state]")) {
+      state.topbarMoreOpen = false;
+      renderTopbarMoreMenu();
+      exportJson();
+      return;
+    }
+    if (event.target.closest("[data-topbar-import-state]")) {
+      state.topbarMoreOpen = false;
+      renderTopbarMoreMenu();
+      elements.importStateInput.click();
+    }
+  });
+  elements.timezoneBar.addEventListener("click", (event) => {
+    if (!event.target.closest("[data-timezone-popover-toggle]")) return;
+    state.timeZonePopoverOpen = !state.timeZonePopoverOpen;
+    renderTimeZoneBar();
+  });
   elements.brandNewBtn.addEventListener("click", () => openBrandManager({ create: true }));
   elements.brandCancelEditBtn.addEventListener("click", () => {
     state.brandEditingId = null;
@@ -10169,6 +10269,7 @@ function bindEvents() {
     renderMatchingPage();
   });
   elements.refreshBtn.addEventListener("click", async () => {
+    state.topbarMoreOpen = false;
     await loadState();
     await loadAiSettings();
     await loadMailSettings();
@@ -10201,6 +10302,14 @@ function bindEvents() {
       return;
     }
     if (event.key !== "Escape") return;
+    if (state.topbarMoreOpen || state.timeZonePopoverOpen) {
+      event.preventDefault();
+      state.topbarMoreOpen = false;
+      state.timeZonePopoverOpen = false;
+      renderTopbarMoreMenu();
+      renderTimeZoneBar();
+      return;
+    }
     if (state.globalSearch.open) {
       event.preventDefault();
       closeGlobalSearch();
@@ -10341,9 +10450,7 @@ function bindEvents() {
   elements.exportStateBtn.addEventListener("click", exportJson);
   elements.exportCsvBtn.addEventListener("click", exportCsv);
   elements.settingsBtn.addEventListener("click", () => {
-    state.activeTab = SETTINGS_TAB.key;
-    resetEditorState();
-    state.matchingEditingId = null;
+    openSettingsSection(state.settingsSection);
     render();
   });
   elements.importStateInput.addEventListener("change", async (event) => {
@@ -10359,6 +10466,16 @@ function bindEvents() {
       elements.importStatus.textContent = error.message || "导入失败";
     } finally {
       event.target.value = "";
+    }
+  });
+  document.addEventListener("click", (event) => {
+    if (state.topbarMoreOpen && !event.target.closest(".topbar-more-wrap")) {
+      state.topbarMoreOpen = false;
+      renderTopbarMoreMenu();
+    }
+    if (state.timeZonePopoverOpen && !event.target.closest("#timezoneBar")) {
+      state.timeZonePopoverOpen = false;
+      renderTimeZoneBar();
     }
   });
 }

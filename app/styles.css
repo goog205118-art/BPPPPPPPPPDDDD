@@ -7891,3 +7891,162 @@ body.access-locked .app-shell {
     justify-content: flex-start;
   }
 }
+
+/* Keep the header focused on work, with lower-frequency administration in a compact menu. */
+.topbar {
+  gap: 8px;
+}
+
+.topbar-today-queue {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 7px 4px 9px;
+  border: 1px solid #354a60;
+  border-radius: 5px;
+  background: #14202c;
+  color: #abc0d4;
+  font-size: 0.69rem;
+  white-space: nowrap;
+}
+
+.topbar-today-queue:hover {
+  border-color: #52779f;
+  background: #1a2a39;
+  color: #dceafa;
+}
+
+.topbar-today-queue strong {
+  display: inline-grid;
+  min-width: 19px;
+  min-height: 19px;
+  place-items: center;
+  padding: 0 4px;
+  border-radius: 4px;
+  background: #26384a;
+  color: #dbeaf8;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.7rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.topbar-today-queue.has-pending strong {
+  background: #254c45;
+  color: #adf0d1;
+}
+
+.topbar-more-wrap,
+.timezone-more-wrap {
+  position: relative;
+}
+
+.topbar-more-trigger {
+  min-width: 42px;
+}
+
+.topbar-menu {
+  position: absolute;
+  z-index: 24;
+  top: calc(100% + 6px);
+  right: 0;
+  display: grid;
+  min-width: 148px;
+  overflow: hidden;
+  padding: 4px;
+  border: 1px solid #3b5269;
+  border-radius: 6px;
+  background: #15202c;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.34);
+}
+
+.topbar-menu-item {
+  min-height: 30px;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: #c8d8e8;
+  font-size: 0.74rem;
+  text-align: left;
+}
+
+.topbar-menu-item:hover,
+.topbar-menu-item:focus-visible {
+  background: #243548;
+  color: #f0f7ff;
+}
+
+.timezone-bar {
+  display: flex;
+  min-width: 0;
+  overflow: visible;
+}
+
+.timezone-main {
+  display: grid;
+  grid-auto-columns: minmax(82px, auto);
+  grid-auto-flow: column;
+  min-width: 0;
+}
+
+.timezone-more-trigger {
+  min-width: 31px;
+  min-height: 100%;
+  border: 0;
+  border-left: 1px solid #2b3b4c;
+  border-radius: 0;
+  background: #172330;
+  color: #9bb1c7;
+  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-size: 0.68rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.timezone-more-trigger:hover,
+.timezone-more-trigger:focus-visible {
+  background: #223246;
+  color: #e3effb;
+}
+
+.timezone-popover {
+  position: absolute;
+  z-index: 24;
+  top: calc(100% + 6px);
+  right: 0;
+  min-width: 144px;
+  overflow: hidden;
+  border: 1px solid #3b5269;
+  border-radius: 6px;
+  background: #15202c;
+  box-shadow: 0 14px 30px rgba(0, 0, 0, 0.34);
+}
+
+.timezone-popover .timezone-clock {
+  border-right: 0;
+  border-bottom: 1px solid #2b3b4c;
+}
+
+.timezone-popover .timezone-clock:last-child {
+  border-bottom: 0;
+}
+
+@media (max-width: 760px) {
+  .topbar-actions {
+    width: 100%;
+    justify-content: flex-end;
+  }
+
+  .topbar-today-queue {
+    width: 100%;
+    justify-content: space-between;
+  }
+
+  .timezone-main {
+    width: 100%;
+    grid-auto-columns: minmax(0, 1fr);
+  }
+
+  .timezone-bar {
+    width: 100%;
+  }
+}

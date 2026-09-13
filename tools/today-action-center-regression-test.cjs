@@ -154,6 +154,45 @@ function testGroupedNavigationContracts() {
   }
 }
 
+function testCompactTopbarContracts() {
+  for (const marker of [
+    "function pendingActionTaskCount",
+    "function renderTopbarQueue",
+    "function renderTopbarMoreMenu",
+    "function openSettingsSection",
+    "function timeZoneClockMarkup",
+    "data-timezone-popover-toggle",
+    "data-topbar-settings-section",
+    "data-topbar-export-state",
+    "data-topbar-import-state",
+    "elements.importStateInput.click()",
+    "state.topbarMoreOpen",
+    "state.timeZonePopoverOpen",
+  ]) {
+    assert.match(appSource, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  for (const marker of [
+    'id="todayQueueBtn"',
+    'id="topbarMoreBtn"',
+    'id="topbarMoreMenu"',
+    'id="refreshBtn"',
+    'id="brandManageBtn"',
+    'id="settingsBtn"',
+  ]) {
+    assert.match(htmlSource, new RegExp(marker.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")));
+  }
+  for (const selector of [
+    ".topbar-today-queue",
+    ".topbar-more-wrap",
+    ".topbar-menu",
+    ".timezone-main",
+    ".timezone-more-trigger",
+    ".timezone-popover",
+  ]) {
+    assert.match(stylesSource, new RegExp(selector.replace(".", "\\.")));
+  }
+}
+
 function testEmptyWorkspaceFixture() {
   for (const key of [
     "brands",
@@ -178,5 +217,6 @@ testCompleteDoesNotAdvanceCase();
 testUiContracts();
 testWorkspaceEntryContracts();
 testGroupedNavigationContracts();
+testCompactTopbarContracts();
 testEmptyWorkspaceFixture();
-console.log("PASS today action center regression: task lifecycle, no stage automation, UI contracts, workspace entry, and grouped navigation.");
+console.log("PASS today action center regression: task lifecycle, no stage automation, UI contracts, workspace entry, grouped navigation, and compact topbar.");
