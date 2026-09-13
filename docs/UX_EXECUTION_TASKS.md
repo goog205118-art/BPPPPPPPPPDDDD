@@ -30,11 +30,11 @@
 | 项目 | 当前值 |
 | --- | --- |
 | 当前任务 | `UX-50-01` |
-| 当前状态 | `active` |
+| 当前状态 | `done` |
 | 当前目标 | 精简达人库默认列，优先呈现身份、归属、联系与下一步信息；扩展字段继续保留在列设置和详情抽屉。 |
 | 已完成前序 | `UX-00-01` 基线与执行治理；`UX-10` 设置页信息架构；`UX-20` 日常入口、导航与顶部工具栏；`UX-30` 合作跟进视图；`UX-40-01` 今日推进优先行动视图。 |
 | 禁止提前启动 | 不改变邮件/AI/存储业务契约；不自动发送、自动推进高风险阶段或更改正式数据。 |
-| 最近已验证基线 | 隔离存储、端口 `4201` 的桌面和 `480×900` 窄屏预览已核验今日推进优先任务、全部待处理和行动入口；未读取真实资料或连接外部服务。 |
+| 最近已验证基线 | 隔离存储、端口 `4203` 的桌面与 `480×900` 窄屏预览已核验设置页、合作跟进、今日推进和达人库；未读取真实资料或连接外部服务。 |
 
 ## 固定任务表
 
@@ -78,7 +78,7 @@
 
 | ID | 优先级 | 状态 | 工作项 | 前置 | 验收标准 |
 | --- | --- | --- | --- | --- | --- |
-| `UX-50-01` | P1 | `active` | 针对桌面与窄视口检查深色界面对比、布局层级、文本溢出、弹层、导航和关键空状态，并运行全量适用回归。 | `UX-10` 至 `UX-40` | 所有任务均有行为和视觉证据；不引入白底、不可读文字或关键入口丢失。 |
+| `UX-50-01` | P1 | `done` | 针对桌面与窄视口检查深色界面对比、布局层级、文本溢出、弹层、导航和关键空状态，并运行全量适用回归。 | `UX-10` 至 `UX-40` | 所有任务均有行为和视觉证据；不引入白底、不可读文字或关键入口丢失。 |
 
 ## 本阶段不启动
 
@@ -112,6 +112,8 @@
 | 2026-09-13（America/Los_Angeles） | `UX-40-01` | `active -> done` | `app/app.js`、`app/styles.css`、`tools/today-action-center-regression-test.cjs`、`tools/fixtures/today-action-focus-state.json` | 默认范围改为“优先处理”，只显示新回复、待人工归档、已逾期和今天到期；增加“全部待处理”切换、收起的更多筛选、按任务类型命名的主操作、处理原因和可行动空状态。隔离预览 `http://localhost:4201/` 以专用 HSU 样例验证：默认仅显示 `new_reply` 与 `reply_overdue` 两项，切换全部待处理后显示未来 `publish_pending`；桌面与 `480×900` 截图均无白底、重叠或溢出，主操作保持进入既有 Case。`npm.cmd run check`、`npm.cmd run test:today-action-center`、`npm.cmd run test:case-display` 与 `git diff --check` 均通过。未读取、修改或同步正式资料，未连接 AI、IMAP、SMTP 或线上存储。 | 待提交 | 已全览完整任务表，未重复既有 CRM 行为；`UX-40-01` 验收完成。仅激活 `UX-40-02`，下一步才可处理达人库默认列与详情信息密度。 |
 
 | 2026-09-13（Asia/Shanghai） | `UX-40-02` | `active -> done` | `app/app.js`、`app/index.html`、`app/styles.css`、`tools/creator-columns-regression-test.cjs`、`package.json`、`docs/UX_EXECUTION_TASKS.md` | 达人库默认列固定为达人、平台、品牌、邮箱、阶段/状态、优先级、最近联系、下一步；列设置支持扩展字段勾选、恢复默认、持久化，并保留单击详情抽屉、双击编辑和社媒链接入口。已通过 `npm.cmd run check`、`npm.cmd run test:creator-columns`、`npm.cmd run test:today-action-center`、`npm.cmd run test:case-display` 与 `git diff --check`；隔离预览作为 `UX-50-01` 的最终视觉门槛，未连接真实 AI、IMAP、SMTP 或正式数据。 | 待提交 | 已全览固定任务表，未重复 CRM、合作跟进、今日推进或顶部导航改造；仅激活 `UX-50-01`，下一步执行最终桌面/窄屏 UX 回归与适用测试。 |
+
+| 2026-09-13（Asia/Shanghai） | `UX-50-01` | `active -> done` | `docs/UX_EXECUTION_TASKS.md` | 隔离预览 `http://localhost:4203/` 完成桌面核验，并结合 `480×900` 窄屏证据核对设置页、合作跟进、今日推进和达人库：深色 Slate 背景、分组导航、紧凑表格、空状态、列设置/详情弹层、按钮与文字均保持可读，窄屏按单列或双列降级，未发现横向溢出、遮挡或白底残留。`npm.cmd run check`、`npm.cmd run test:creator-columns`、`npm.cmd run test:today-action-center`、`npm.cmd run test:case-display` 与 `git diff --check` 全部通过。隔离预览未连接真实 AI、IMAP、SMTP、Vercel，也未触碰正式业务数据。 | 待提交（引用功能检查点 `76e1b15`） | 已重新全览固定任务表：`UX-00` 至 `UX-50` 均为 `done`，没有其他 `active` 任务，也未重复 CRM/UX 前序实现；本轮 UX 台账可提交并推送，后续新需求须登记新编号。 |
 
 ## 阶段完成记录模板
 
