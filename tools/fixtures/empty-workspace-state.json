@@ -1,0 +1,24 @@
+{
+  "meta": {
+    "version": 1,
+    "updatedAt": "2026-09-13T00:00:00.000Z"
+  },
+  "brands": [],
+  "creators": [],
+  "resources": [],
+  "leads": [],
+  "products": [],
+  "cooperations": [],
+  "matches": [],
+  "followUps": [],
+  "cases": [],
+  "actionTasks": [],
+  "actionTaskEvents": [],
+  "followUpAiSuggestions": [],
+  "followUpEvents": [],
+  "contacts": [],
+  "contactTracks": [],
+  "mailInbox": [],
+  "importHistory": [],
+  "complianceAudit": []
+}

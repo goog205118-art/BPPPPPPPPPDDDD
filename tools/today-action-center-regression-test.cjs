@@ -7,6 +7,7 @@ const domain = require(path.join(rootDir, "tools", "crm-domain.cjs"));
 const appSource = fs.readFileSync(path.join(rootDir, "app", "app.js"), "utf8");
 const htmlSource = fs.readFileSync(path.join(rootDir, "app", "index.html"), "utf8");
 const stylesSource = fs.readFileSync(path.join(rootDir, "app", "styles.css"), "utf8");
+const emptyWorkspaceFixture = JSON.parse(fs.readFileSync(path.join(rootDir, "tools", "fixtures", "empty-workspace-state.json"), "utf8"));
 
 function fixture() {
   return {
@@ -124,9 +125,28 @@ function testWorkspaceEntryContracts() {
   }
 }
 
+function testEmptyWorkspaceFixture() {
+  for (const key of [
+    "brands",
+    "creators",
+    "resources",
+    "leads",
+    "products",
+    "cooperations",
+    "matches",
+    "followUps",
+    "cases",
+    "actionTasks",
+    "mailInbox",
+  ]) {
+    assert.deepEqual(emptyWorkspaceFixture[key], [], `empty workspace fixture must not contain ${key}`);
+  }
+}
+
 testSkipAndReconcile();
 testDeferValidation();
 testCompleteDoesNotAdvanceCase();
 testUiContracts();
 testWorkspaceEntryContracts();
+testEmptyWorkspaceFixture();
 console.log("PASS today action center regression: task lifecycle, no stage automation, UI contracts, and workspace entry.");
