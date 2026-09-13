@@ -69,11 +69,6 @@
         <button class="ghost brand-manage-trigger" id="brandManageBtn" type="button" title="新增、编辑或删除品牌工作区">管理品牌</button>
         <div class="topbar-actions">
           <button class="ghost" id="refreshBtn">刷新</button>
-          <button class="ghost" id="exportStateBtn">导出 JSON</button>
-          <label class="ghost file-btn">
-            导入 JSON
-            <input id="importStateInput" type="file" accept=".json,application/json" hidden />
-          </label>
           <button class="ghost" id="settingsBtn">设置</button>
         </div>
       </header>
@@ -85,12 +80,15 @@
       <section class="settings-page panel hidden" id="settingsPage">
         <div class="settings-head">
           <div>
-            <h2>AI 参数设置</h2>
-            <p class="panel-hint">配置三套可复用 AI，再为每项功能选择调用哪一套。支持 Gemini 和 OpenAI 兼容接口。</p>
+            <h2 id="settingsPageTitle">设置</h2>
+            <p class="panel-hint" id="settingsPageHint">集中管理工作区、AI、邮箱与个人偏好。</p>
           </div>
-          <button type="button" id="aiSettingsReloadBtn" class="ghost">重新读取</button>
+          <button type="button" id="aiSettingsReloadBtn" class="ghost" data-settings-panel="ai">重新读取</button>
         </div>
-        <form id="aiSettingsForm" class="settings-form">
+        <div class="settings-layout">
+          <nav class="settings-nav" id="settingsNav" aria-label="设置分类"></nav>
+          <div class="settings-content">
+        <form id="aiSettingsForm" class="settings-form" data-settings-panel="ai">
           <section class="ai-profile">
             <div class="ai-profile-head">
               <h3>普通 AI</h3>
@@ -259,7 +257,7 @@
           </div>
           <p class="settings-status" id="aiSettingsStatus"></p>
         </form>
-        <section class="brand-settings" aria-labelledby="brandSettingsTitle">
+        <section class="brand-settings" data-settings-panel="workspace" aria-labelledby="brandSettingsTitle">
           <div class="option-settings-head">
             <div>
               <h3 id="brandSettingsTitle">品牌工作区</h3>
@@ -306,15 +304,15 @@
           </form>
         </section>
         <form id="mailSettingsForm" class="mail-settings" aria-labelledby="mailSettingsTitle">
-          <div class="option-settings-head">
+          <div class="option-settings-head" data-settings-panel="mail">
             <div>
               <h3 id="mailSettingsTitle">品牌官方邮箱</h3>
               <p>一个官方邮箱可服务多个品牌。同步时会优先依据会话和联系记录归属；无法唯一判断的邮件会留待人工确认，不会猜测品牌或自动推进阶段。</p>
             </div>
             <button type="button" class="ghost" id="mailNewAccountBtn">新增邮箱账户</button>
           </div>
-          <section class="mail-account-list" id="mailAccountList" aria-label="已保存官方邮箱账户"></section>
-          <section class="mail-content-policy" aria-labelledby="mailContentPolicyTitle">
+          <section class="mail-account-list" id="mailAccountList" data-settings-panel="mail" aria-label="已保存官方邮箱账户"></section>
+          <section class="mail-content-policy" data-settings-panel="safety" aria-labelledby="mailContentPolicyTitle">
             <div>
               <strong id="mailContentPolicyTitle">邮件正文与 AI 上下文</strong>
               <small>不保存附件、图片或原始 MIME 文件；只处理当前品牌、当前合作跟进且未过期的纯文本正文。</small>
@@ -343,7 +341,7 @@
             </div>
             <p>关闭正文缓存会立即清除已缓存正文。未授权 AI 时，沟通研判只使用邮件摘要。</p>
           </section>
-          <section class="mail-automation-settings" aria-labelledby="mailAutomationTitle">
+          <section class="mail-automation-settings" data-settings-panel="safety" aria-labelledby="mailAutomationTitle">
             <div>
               <strong id="mailAutomationTitle">受控定时同步</strong>
               <small>默认关闭。仅同步选定账户的近期邮件；不自动发信、不自动推进合作阶段，无法唯一归属的邮件仍进入人工分诊。</small>
@@ -398,7 +396,7 @@
             <p class="mail-automation-status" id="mailAutomationStatus"></p>
             <div class="mail-automation-history" id="mailAutomationHistory"></div>
           </section>
-          <section class="mail-account-editor" id="mailAccountEditor">
+          <section class="mail-account-editor" id="mailAccountEditor" data-settings-panel="mail">
             <div class="mail-account-editor-head">
               <div>
                 <strong id="mailEditorTitle">新增官方邮箱账户</strong>
@@ -508,15 +506,31 @@
               </div>
             </div>
           </section>
-          <div class="settings-actions">
+          <div class="settings-actions" data-settings-panel="mail">
             <button type="submit" class="primary">保存当前账户</button>
             <button type="button" id="mailTestBtn" class="ghost">测试 IMAP</button>
             <button type="button" id="mailSmtpTestBtn" class="ghost">测试 SMTP</button>
             <button type="button" id="mailSyncBtn" class="ghost">立即同步此账户</button>
           </div>
-          <p class="settings-status" id="mailSettingsStatus"></p>
+          <p class="settings-status" id="mailSettingsStatus" data-settings-panel="mail"></p>
         </form>
-        <section class="timezone-settings" aria-labelledby="timezoneSettingsTitle">
+        <section class="settings-data-panel" data-settings-panel="data" aria-labelledby="dataSettingsTitle">
+          <div class="option-settings-head">
+            <div>
+              <h3 id="dataSettingsTitle">数据导入导出</h3>
+              <p>导出当前工作台的 JSON 备份，或导入一份此前导出的完整状态文件。</p>
+            </div>
+          </div>
+          <div class="settings-actions">
+            <button type="button" class="primary" id="exportStateBtn">导出 JSON</button>
+            <label class="ghost file-btn">
+              导入 JSON
+              <input id="importStateInput" type="file" accept=".json,application/json" hidden />
+            </label>
+          </div>
+          <p class="settings-status">导入会替换当前工作台资料。请先导出一份备份，再执行导入。</p>
+        </section>
+        <section class="timezone-settings" data-settings-panel="preferences" aria-labelledby="timezoneSettingsTitle">
           <div class="option-settings-head">
             <div>
               <h3 id="timezoneSettingsTitle">全局时区时间</h3>
@@ -529,7 +543,7 @@
           </div>
           <p class="settings-status" id="timezoneSettingsStatus"></p>
         </section>
-        <section class="option-settings" aria-labelledby="optionSettingsTitle">
+        <section class="option-settings" data-settings-panel="preferences" aria-labelledby="optionSettingsTitle">
           <div class="option-settings-head">
             <div>
               <h3 id="optionSettingsTitle">录入选项</h3>
@@ -556,6 +570,8 @@
           <div class="option-tags" id="optionTags"></div>
           <p class="option-settings-status" id="optionSettingsStatus"></p>
         </section>
+          </div>
+        </div>
       </section>
 
       <section class="matching-page panel hidden" id="matchingPage">

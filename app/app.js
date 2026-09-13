@@ -20,6 +20,38 @@ const STORAGE_ACCESS_PASSWORD = "resource-workbench-access-password";
 const SETTINGS_TAB = { key: "settings", title: "设置" };
 const MATCHING_TAB = { key: "matches", title: "本周资源匹配" };
 const TODAY_ACTION_TAB = { key: "today", title: "今日推进" };
+const SETTINGS_SECTIONS = [
+  {
+    key: "workspace",
+    title: "工作区与品牌",
+    hint: "管理品牌工作区，以及各品牌资料的默认市场、语言、币种和时区。",
+  },
+  {
+    key: "ai",
+    title: "AI 与自动化",
+    hint: "配置三套可复用 AI，并为每项功能分配合适的模型能力。",
+  },
+  {
+    key: "mail",
+    title: "官方邮箱",
+    hint: "为品牌绑定官方邮箱，完成 IMAP 收取、SMTP 发信和签名配置。",
+  },
+  {
+    key: "safety",
+    title: "邮件安全与留存",
+    hint: "控制正文缓存、AI 上下文授权和受控定时同步，不会自动发信或推进阶段。",
+  },
+  {
+    key: "data",
+    title: "数据导入导出",
+    hint: "导出工作台备份，或导入此前导出的完整 JSON 状态文件。",
+  },
+  {
+    key: "preferences",
+    title: "偏好设置",
+    hint: "维护顶部时区，以及品牌、国家地区和内容垂类等录入候选项。",
+  },
+];
 const ACTION_TASK_TYPE_LABELS = {
   new_reply: "新回信",
   mail_triage: "邮件归档",
@@ -586,6 +618,7 @@ const emptyState = {
 const state = {
   data: clone(emptyState),
   activeTab: "creators",
+  settingsSection: "workspace",
   editingId: null,
   editorDraft: null,
   editorBaseline: "",
@@ -648,6 +681,9 @@ const elements = {
   summary: document.getElementById("summary"),
   workspace: document.querySelector(".workspace"),
   settingsPage: document.getElementById("settingsPage"),
+  settingsNav: document.getElementById("settingsNav"),
+  settingsPageTitle: document.getElementById("settingsPageTitle"),
+  settingsPageHint: document.getElementById("settingsPageHint"),
   matchingPage: document.getElementById("matchingPage"),
   productPage: document.getElementById("productPage"),
   followUpPage: document.getElementById("followUpPage"),
@@ -1413,6 +1449,7 @@ async function deleteBrand(brandId) {
 
 function openBrandManager({ create = false } = {}) {
   state.activeTab = SETTINGS_TAB.key;
+  state.settingsSection = "workspace";
   state.matchingEditingId = null;
   if (create) state.brandEditingId = null;
   render();
@@ -4030,6 +4067,59 @@ async function removeCustomOption(fieldKey, value) {
   }
 }
 
+function settingsSectionByKey(key) {
+  return SETTINGS_SECTIONS.find((item) => item.key === key) || SETTINGS_SECTIONS[0];
+}
+
+function settingsSectionStatus(sectionKey) {
+  if (sectionKey === "workspace") {
+    const count = (state.data.brands || []).length;
+    return count ? `${count} 个品牌工作区` : "尚未创建品牌";
+  }
+  if (sectionKey === "ai") {
+    const configured = Object.values(state.aiSettings?.profiles || {})
+      .filter((profile) => profile?.hasApiKey || profile?.keySource === "environment")
+      .length;
+    return `${configured} / 3 个配置可用`;
+  }
+  if (sectionKey === "mail") {
+    const accounts = state.mailSettings?.accounts || [];
+    const configured = accounts.filter((account) => account.imap?.host && account.imap?.user && account.imap?.hasPassword).length;
+    return configured ? `${configured} 个账户已就绪` : accounts.length ? "账户待完成配置" : "未配置";
+  }
+  if (sectionKey === "safety") {
+    const policy = normalizedMailContentPolicy(state.mailSettings);
+    const automation = normalizedMailAutomation();
+    const bodyMode = policy.cacheBodies ? `正文缓存 ${policy.retentionDays} 天` : "仅使用邮件摘要";
+    return automation.enabled ? `${bodyMode} · 定时同步开启` : `${bodyMode} · 定时同步关闭`;
+  }
+  if (sectionKey === "data") return "可导入 / 导出";
+  const zones = normalizeTimeZones(state.data.meta?.timeZones);
+  return `${zones.length} 个时区已展示`;
+}
+
+function renderSettingsNavigation() {
+  const current = settingsSectionByKey(state.settingsSection);
+  state.settingsSection = current.key;
+  elements.settingsPageTitle.textContent = current.title;
+  elements.settingsPageHint.textContent = current.hint;
+  elements.settingsNav.innerHTML = SETTINGS_SECTIONS.map((item) => `
+    <button
+      type="button"
+      class="settings-nav-item ${item.key === current.key ? "is-active" : ""}"
+      data-settings-section="${escapeHtml(item.key)}"
+      aria-current="${item.key === current.key ? "page" : "false"}"
+    >
+      <span>${escapeHtml(item.title)}</span>
+      <small>${escapeHtml(settingsSectionStatus(item.key))}</small>
+    </button>
+  `).join("");
+  elements.mailSettingsForm.classList.toggle("hidden", !["mail", "safety"].includes(current.key));
+  elements.settingsPage.querySelectorAll("[data-settings-panel]").forEach((panel) => {
+    panel.classList.toggle("hidden", panel.dataset.settingsPanel !== current.key);
+  });
+}
+
 function renderSettingsPage() {
   setEntityUiVisible(false);
   elements.matchingPage.classList.add("hidden");
@@ -4040,6 +4130,7 @@ function renderSettingsPage() {
   renderMailSettings();
   renderTimeZoneSettings();
   renderOptionSettings();
+  renderSettingsNavigation();
 }
 
 function getTimeZoneLabel(timeZone) {
@@ -9676,6 +9767,14 @@ function bindEvents() {
   elements.form.addEventListener("submit", handleSubmit);
   elements.matchForm.addEventListener("submit", handleMatchSubmit);
   elements.applyAssistantBtn.addEventListener("click", applyAssistantUpdates);
+  elements.settingsNav.addEventListener("click", (event) => {
+    const button = event.target.closest("[data-settings-section]");
+    if (!button) return;
+    const next = settingsSectionByKey(button.dataset.settingsSection);
+    if (next.key === state.settingsSection) return;
+    state.settingsSection = next.key;
+    renderSettingsNavigation();
+  });
   elements.aiSettingsForm.addEventListener("submit", saveAiSettings);
   elements.aiSettingsStatusBtn.addEventListener("click", checkAiStatus);
   elements.aiSettingsReloadBtn.addEventListener("click", async () => {
