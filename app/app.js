@@ -17,6 +17,8 @@ const API_MAIL_SEND = "/api/mail/send";
 const API_FOLLOWUP_ANALYZE = "/api/ai/followup-analyze";
 const API_FOLLOWUP_DRAFT = "/api/ai/followup-draft";
 const STORAGE_ACCESS_PASSWORD = "resource-workbench-access-password";
+const STORAGE_THEME = "resource-workbench-theme";
+const THEMES = new Set(["dark", "light"]);
 const SETTINGS_TAB = { key: "settings", title: "设置" };
 const MATCHING_TAB = { key: "matches", title: "本周资源匹配" };
 const TODAY_ACTION_TAB = { key: "today", title: "今日推进" };
@@ -705,6 +707,7 @@ const state = {
   data: clone(emptyState),
   activeTab: TODAY_ACTION_TAB.key,
   settingsSection: "workspace",
+  theme: "dark",
   editingId: null,
   editorDraft: null,
   editorBaseline: "",
@@ -874,6 +877,7 @@ const elements = {
   todayQueueBtn: document.getElementById("todayQueueBtn"),
   topbarMoreBtn: document.getElementById("topbarMoreBtn"),
   topbarMoreMenu: document.getElementById("topbarMoreMenu"),
+  themeToggleBtn: document.getElementById("themeToggleBtn"),
   brandNewBtn: document.getElementById("brandNewBtn"),
   brandList: document.getElementById("brandList"),
   brandForm: document.getElementById("brandForm"),
@@ -889,6 +893,8 @@ const elements = {
   timezoneSettingsFields: document.getElementById("timezoneSettingsFields"),
   saveTimezonesBtn: document.getElementById("saveTimezonesBtn"),
   timezoneSettingsStatus: document.getElementById("timezoneSettingsStatus"),
+  themeSettingsOptions: document.getElementById("themeSettingsOptions"),
+  themeSettingsStatus: document.getElementById("themeSettingsStatus"),
   formTitle: document.getElementById("formTitle"),
   formHint: document.getElementById("formHint"),
   form: document.getElementById("recordForm"),
@@ -999,6 +1005,57 @@ const formFocusFields = {
 
 function clone(value) {
   return JSON.parse(JSON.stringify(value));
+}
+
+function normalizeTheme(value) {
+  return THEMES.has(String(value)) ? String(value) : "dark";
+}
+
+function applyTheme(value, { persist = true } = {}) {
+  const theme = normalizeTheme(value);
+  state.theme = theme;
+  document.documentElement.dataset.theme = theme;
+  document.documentElement.style.colorScheme = theme;
+  if (persist) {
+    try {
+      localStorage.setItem(STORAGE_THEME, theme);
+    } catch (error) {
+      // Theme preference is optional; keep the current session usable when storage is blocked.
+    }
+  }
+  renderThemeToggle();
+  renderThemeSettings();
+}
+
+function initializeTheme() {
+  let saved = "";
+  try {
+    saved = localStorage.getItem(STORAGE_THEME) || "";
+  } catch (error) {
+    // Private browsing or an embedded preview may deny localStorage access.
+  }
+  applyTheme(saved || document.documentElement.dataset.theme || "dark", { persist: false });
+}
+
+function renderThemeToggle() {
+  if (!elements.themeToggleBtn) return;
+  const light = state.theme === "light";
+  elements.themeToggleBtn.setAttribute("aria-label", light ? "切换为深色主题" : "切换为浅色主题");
+  elements.themeToggleBtn.title = light ? "切换为深色主题" : "切换为浅色主题";
+  elements.themeToggleBtn.innerHTML = `
+    <span class="theme-toggle-icon" aria-hidden="true">${light ? "◐" : "☼"}</span>
+    <span class="theme-toggle-label">${light ? "深色" : "浅色"}</span>
+  `;
+}
+
+function renderThemeSettings() {
+  if (!elements.themeSettingsOptions) return;
+  elements.themeSettingsOptions.querySelectorAll("[data-theme-choice]").forEach((input) => {
+    input.checked = input.value === state.theme;
+  });
+  if (elements.themeSettingsStatus) {
+    elements.themeSettingsStatus.textContent = `当前主题：${state.theme === "light" ? "浅色" : "深色 Slate"}。`;
+  }
 }
 
 function normalizeTimeZones(raw = []) {
@@ -4516,6 +4573,7 @@ function renderSettingsPage() {
   renderBrandManager();
   renderMailSettings();
   renderTimeZoneSettings();
+  renderThemeSettings();
   renderOptionSettings();
   renderSettingsNavigation();
 }
@@ -10513,6 +10571,14 @@ function bindEvents() {
     state.topbarMoreOpen = !state.topbarMoreOpen;
     renderTopbarMoreMenu();
   });
+  elements.themeToggleBtn.addEventListener("click", () => {
+    applyTheme(state.theme === "light" ? "dark" : "light");
+  });
+  elements.themeSettingsOptions.addEventListener("change", (event) => {
+    const input = event.target.closest("[data-theme-choice]");
+    if (!input) return;
+    applyTheme(input.value);
+  });
   elements.topbarMoreMenu.addEventListener("click", (event) => {
     const settingsButton = event.target.closest("[data-topbar-settings-section]");
     if (settingsButton) {
@@ -10993,6 +11059,7 @@ function bindEvents() {
 }
 
 async function init() {
+  initializeTheme();
   bindEvents();
   loadDuplicateIgnores();
   await loadState();
