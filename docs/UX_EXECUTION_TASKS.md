@@ -29,12 +29,12 @@
 
 | 项目 | 当前值 |
 | --- | --- |
-| 当前任务 | `UX-50-01` |
+| 当前任务 | `UX-60-01` |
 | 当前状态 | `done` |
-| 当前目标 | 精简达人库默认列，优先呈现身份、归属、联系与下一步信息；扩展字段继续保留在列设置和详情抽屉。 |
+| 当前目标 | 已完成深色/浅色主题切换，并为浅色主题重新建立完整的颜色分级、控件对比和弹层可读性。 |
 | 已完成前序 | `UX-00-01` 基线与执行治理；`UX-10` 设置页信息架构；`UX-20` 日常入口、导航与顶部工具栏；`UX-30` 合作跟进视图；`UX-40-01` 今日推进优先行动视图。 |
-| 禁止提前启动 | 不改变邮件/AI/存储业务契约；不自动发送、自动推进高风险阶段或更改正式数据。 |
-| 最近已验证基线 | 隔离存储、端口 `4203` 的桌面与 `480×900` 窄屏预览已核验设置页、合作跟进、今日推进和达人库；未读取真实资料或连接外部服务。 |
+| 禁止提前启动 | 后续新需求须登记新的最小可验证工作项；不改变邮件/AI/存储业务契约，不自动发送、自动推进高风险阶段或更改正式数据。 |
+| 最近已验证基线 | 隔离预览 `http://localhost:4173/` 已核验浅色/深色切换、刷新持久化、设置页同步、达人库、产品库、今日推进和筛选抽屉；未读取真实资料或连接外部服务。 |
 
 ## 固定任务表
 
@@ -79,6 +79,7 @@
 | ID | 优先级 | 状态 | 工作项 | 前置 | 验收标准 |
 | --- | --- | --- | --- | --- | --- |
 | `UX-50-01` | P1 | `done` | 针对桌面与窄视口检查深色界面对比、布局层级、文本溢出、弹层、导航和关键空状态，并运行全量适用回归。 | `UX-10` 至 `UX-40` | 所有任务均有行为和视觉证据；不引入白底、不可读文字或关键入口丢失。 |
+| `UX-60-01` | P1 | `done` | 增加深色/浅色主题切换；浅色主题重新处理页面、面板、表格、表单、按钮、状态标签、链接、菜单和弹层的颜色分级与对比度；偏好设置与顶部快捷入口保持同步并持久化。 | `UX-50-01` | 默认仍为 Modern Dark；用户可在顶部快捷切换或偏好设置选择浅色；刷新后选择保持；浅色下关键文字、按钮、状态、表格、输入框和弹层均清晰，无白底残留或低对比入口。 |
 
 ## 本阶段不启动
 
@@ -114,6 +115,8 @@
 | 2026-09-13（Asia/Shanghai） | `UX-40-02` | `active -> done` | `app/app.js`、`app/index.html`、`app/styles.css`、`tools/creator-columns-regression-test.cjs`、`package.json`、`docs/UX_EXECUTION_TASKS.md` | 达人库默认列固定为达人、平台、品牌、邮箱、阶段/状态、优先级、最近联系、下一步；列设置支持扩展字段勾选、恢复默认、持久化，并保留单击详情抽屉、双击编辑和社媒链接入口。已通过 `npm.cmd run check`、`npm.cmd run test:creator-columns`、`npm.cmd run test:today-action-center`、`npm.cmd run test:case-display` 与 `git diff --check`；隔离预览作为 `UX-50-01` 的最终视觉门槛，未连接真实 AI、IMAP、SMTP 或正式数据。 | 待提交 | 已全览固定任务表，未重复 CRM、合作跟进、今日推进或顶部导航改造；仅激活 `UX-50-01`，下一步执行最终桌面/窄屏 UX 回归与适用测试。 |
 
 | 2026-09-13（Asia/Shanghai） | `UX-50-01` | `active -> done` | `docs/UX_EXECUTION_TASKS.md` | 隔离预览 `http://localhost:4203/` 完成桌面核验，并结合 `480×900` 窄屏证据核对设置页、合作跟进、今日推进和达人库：深色 Slate 背景、分组导航、紧凑表格、空状态、列设置/详情弹层、按钮与文字均保持可读，窄屏按单列或双列降级，未发现横向溢出、遮挡或白底残留。`npm.cmd run check`、`npm.cmd run test:creator-columns`、`npm.cmd run test:today-action-center`、`npm.cmd run test:case-display` 与 `git diff --check` 全部通过。隔离预览未连接真实 AI、IMAP、SMTP、Vercel，也未触碰正式业务数据。 | 待提交（引用功能检查点 `76e1b15`） | 已重新全览固定任务表：`UX-00` 至 `UX-50` 均为 `done`，没有其他 `active` 任务，也未重复 CRM/UX 前序实现；本轮 UX 台账可提交并推送，后续新需求须登记新编号。 |
+| 2026-09-14（Asia/Tokyo） | `UX-60-01` | `planned -> active` | `docs/UX_EXECUTION_TASKS.md` | 已重新全览固定任务表：`UX-00` 至 `UX-50` 均为 `done`，没有其他活动任务；确认现有 CSS 同时包含早期浅色基础层和 Modern Dark 覆盖层，主题切换必须补齐语义 token 与关键组件覆盖。 | 待提交 | 先实现主题状态、顶部快捷入口、偏好设置选择和无闪烁初始化，再完成浅色组件适配与视觉回归；不改变既有业务接口或正式数据。 |
+| 2026-09-14（Asia/Tokyo） | `UX-60-01` | `active -> done` | `app/index.html`、`app/app.js`、`app/styles.css`、`tools/theme-regression-test.cjs`、`package.json`、`docs/UX_EXECUTION_TASKS.md` | 增加首屏无闪烁主题读取、顶部快捷切换和偏好设置单选；主题仅保存在浏览器 `localStorage`，并增加存储不可用时的容错回退。浅色主题覆盖顶部栏、时区、导航、表格、表单、状态标签、产品/邮件/AI 面板、筛选抽屉、编辑弹窗、详情抽屉、加载提示和主题选择卡片，保持按钮与状态语义对比。已在 `http://localhost:4173/` 实测浅色切换、切回深色、刷新持久化、设置页选中态同步；桌面与窄屏页面均无明显白底残留、低对比、文字遮挡或入口丢失。`npm.cmd run check`、`npm.cmd run test:theme`、`npm.cmd run test:creator-columns`、`npm.cmd run test:today-action-center`、`npm.cmd run test:case-display`、`git diff --check` 全部通过；未连接真实 AI、IMAP、SMTP、Vercel，也未触碰正式业务数据。 | `3cb0ba2` | 已全览固定任务表：`UX-00` 至 `UX-60-01` 均为 `done`，没有重复或遗留的 UX 活动任务；功能提交后补入提交号并单独提交本台账。 |
 
 ## 阶段完成记录模板
 
