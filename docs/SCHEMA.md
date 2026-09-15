@@ -40,6 +40,21 @@
 
 每条线上操作日志还保留 `audit.actorId`、`audit.actorName`、`audit.source`、`audit.reason`、`createdAt`，这些字段只用于审计和冲突提示，不会进入业务状态补丁。发生同记录冲突时，`/api/state` 返回结构化 `conflicts`，前端默认保留服务端版本，并允许人工逐条选择“保留服务端”或“保留当前页面”后，以最新服务端版本为基线再次保存；未选择的其他记录不会被静默覆盖。线上可通过 `POST /api/state/restore-entity` 在携带当前 `expectedVersion` 的前提下，将单个实体恢复到可用历史版本；不允许恢复 `meta`，目标版本不存在或版本已变化时拒绝操作。
 
+### 可选线上 Postgres 主存储
+
+线上默认存储驱动仍是 `blob`。仅在同时设置 `WORKBENCH_ONLINE_STORAGE_DRIVER=postgres` 与 `DATABASE_URL` 时，服务端才会创建 Postgres 工作区网关；缺少连接字符串或填写未知驱动会直接报错，绝不静默回退到 Blob。
+
+Postgres 兼容层把现有业务集合按“`workspace_key + collection + id`”拆成 JSONB 实体行，保留现有字段形状，避免在迁移窗口对所有达人、产品、Case、邮件和任务字段做一次高风险强类型重写：
+
+- `resource_workbench_workspaces`：工作区全局版本、非版本元数据与更新时间。
+- `resource_workbench_records`：实体 JSONB、`brand_id`、行版本与更新时间；按工作区、集合、品牌和时间建立索引。
+- `resource_workbench_record_history`：每次实体 upsert/remove 的可恢复历史快照。
+- `resource_workbench_operations`：每次提交的操作者、来源、理由和结构化变更审计。
+
+一次保存由单条带 `expectedVersion` 比较的 SQL CTE 原子完成：先更新工作区版本，只有版本匹配时才继续新增/更新/删除实体、写入实体历史和审计。首次创建工作区只接受 `expectedVersion=1`。因此同步邮件与人工保存不会出现无版本保护的整份状态覆盖；如果客户端版本陈旧，接口返回 `409 version_conflict`。
+
+当前 `/api/state` 为兼容现有浏览器，仍提交完整状态快照；服务端只写入实际变化的实体行。Postgres 模式已提供 `PATCH /api/records/:collection/:id` 与 `DELETE /api/records/:collection/:id`：两者都必须携带 `expectedVersion`，并继续走同一原子提交和审计路径；Blob 模式会明确拒绝这两个接口。后续高频筛选、报表和更低延迟编辑可逐步把界面切换到这些实体接口，并增加强类型表，而无需再次迁移 Blob 数据。Postgres 导入只接受用户先导出的本地 JSON，默认拒绝覆盖非空工作区；Blob 旧状态保留为可回滚来源，Blob 仍可用于图片、附件、导出、备份和归档。
+
 本地保存成功后会尽力追加一行 `<storageDir>/storage-audit.jsonl`，记录操作者、来源、原因和版本。该文件是审计旁车，不参与业务状态读取、版本冲突或恢复；本地当前只提供 SQLite `.bak` 的整体恢复，不把旁车日志伪装成任意历史实体版本。
 
 ## resources

@@ -144,6 +144,69 @@ h1 {
   flex-wrap: wrap;
 }
 
+.save-status {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 6px;
+  border: 1px solid #38516b;
+  border-radius: 5px;
+  background: #111d29;
+  color: #aebfd0;
+  padding: 0 9px;
+  font-size: 0.74rem;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.save-status:not(:disabled):hover {
+  border-color: #5f87ad;
+  background: #17283a;
+  color: #e3effb;
+}
+
+.save-status:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.save-status-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #57c98c;
+  box-shadow: 0 0 0 3px rgba(87, 201, 140, 0.12);
+}
+
+.save-status[data-status="saving"] .save-status-dot {
+  background: #72a8e8;
+  box-shadow: 0 0 0 3px rgba(114, 168, 232, 0.16);
+  animation: save-status-pulse 950ms ease-in-out infinite;
+}
+
+.save-status[data-status="error"] {
+  border-color: #a35a56;
+  background: #2a191b;
+  color: #ffc4c1;
+}
+
+.save-status[data-status="error"] .save-status-dot {
+  background: #ef7772;
+  box-shadow: 0 0 0 3px rgba(239, 119, 114, 0.15);
+}
+
+@keyframes save-status-pulse {
+  0%,
+  100% {
+    opacity: 0.55;
+    transform: scale(0.82);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
 .timezone-bar {
   display: grid;
   grid-auto-columns: minmax(82px, auto);
@@ -4573,6 +4636,10 @@ body.access-locked .app-shell {
   .activity-mark span {
     animation: none;
   }
+
+  .save-status[data-status="saving"] .save-status-dot {
+    animation: none;
+  }
 }
 
 /* Cooperation product picker */
@@ -8853,6 +8920,24 @@ body.access-locked .app-shell {
 :root[data-theme="light"] .topbar-today-queue.has-pending strong {
   background: #d7f1e3;
   color: #075e37;
+}
+
+:root[data-theme="light"] .save-status {
+  border-color: #b8c6d4;
+  background: #ffffff;
+  color: #435467;
+}
+
+:root[data-theme="light"] .save-status:not(:disabled):hover {
+  border-color: #7b9bc1;
+  background: #f2f6fb;
+  color: #183f77;
+}
+
+:root[data-theme="light"] .save-status[data-status="error"] {
+  border-color: #d89a9a;
+  background: #ffeaed;
+  color: #9e302f;
 }
 
 :root[data-theme="light"] button.primary,

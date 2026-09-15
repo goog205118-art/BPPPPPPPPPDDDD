@@ -3,6 +3,10 @@ import { createRequire } from "node:module";
 
 const STATE_BLOB = "resource-workbench/state.json";
 const STATE_OPERATION_PREFIX = "resource-workbench/state-operations/";
+const BLOB_OPERATION_READ_CONCURRENCY = Math.min(
+  16,
+  Math.max(1, Number(process.env.WORKBENCH_BLOB_OPERATION_READ_CONCURRENCY || 8)),
+);
 const SETTINGS_BLOB = "resource-workbench/private-ai-settings.json";
 const MAIL_SETTINGS_BLOB = "resource-workbench/private-mail-settings.json";
 const MAIL_SYNC_LOCK_PREFIX = "resource-workbench/mail-sync-locks/";
@@ -35,9 +39,12 @@ const {
   applyRetention,
 } = require("../tools/compliance-retention-domain.cjs");
 const {
+  COLLECTIONS,
   createOnlineRecordStore,
   restoreEntityAtVersion,
 } = require("../tools/online-record-store.cjs");
+const { createPostgresRecordStore } = require("../tools/postgres-record-store.cjs");
+const { createNeonWorkspaceGateway } = require("../tools/postgres-neon-store.cjs");
 
 const defaultState = {
   meta: { version: 1, updatedAt: new Date().toISOString() },
@@ -545,10 +552,9 @@ async function listAllBlobs(prefix) {
   return blobs;
 }
 
-async function readBlobJson(pathname, fallback) {
+async function readBlobJsonFromBlob(blob, fallback) {
   const token = requireBlobToken();
-  const blob = await findBlob(pathname);
-  if (!blob) return fallback;
+  if (!blob?.url) return fallback;
   const response = await fetch(blob.url, {
     headers: { Authorization: `Bearer ${token}` },
   });
@@ -556,6 +562,29 @@ async function readBlobJson(pathname, fallback) {
     throw new Error(`无法读取线上数据（HTTP ${response.status}）。`);
   }
   return response.json();
+}
+
+async function readBlobJson(pathname, fallback) {
+  const blob = await findBlob(pathname);
+  return readBlobJsonFromBlob(blob, fallback);
+}
+
+async function mapBlobReadsWithConcurrency(items, limit, callback) {
+  const rows = Array.isArray(items) ? items : [];
+  const results = new Array(rows.length);
+  let nextIndex = 0;
+  const workerCount = Math.min(rows.length, Math.max(1, Number(limit) || 1));
+
+  async function worker() {
+    while (nextIndex < rows.length) {
+      const index = nextIndex;
+      nextIndex += 1;
+      results[index] = await callback(rows[index], index);
+    }
+  }
+
+  await Promise.all(Array.from({ length: workerCount }, () => worker()));
+  return results;
 }
 
 async function writeBlobJson(pathname, data) {
@@ -648,23 +677,64 @@ async function releaseOnlineMailSyncLock(lock) {
 
 let onlineStateStore;
 
+function onlineStorageDriver() {
+  const driver = textValue(process.env.WORKBENCH_ONLINE_STORAGE_DRIVER || "blob").toLowerCase();
+  if (driver === "blob" || driver === "postgres") return driver;
+  throw new Error(`WORKBENCH_ONLINE_STORAGE_DRIVER 仅支持 blob 或 postgres，当前值为 ${driver || "(空)"}。`);
+}
+
+function usesPostgresOnlineStorage() {
+  return onlineStorageDriver() === "postgres";
+}
+
+function onlineEntityRoute(pathname) {
+  const match = /^\/api\/records\/([^/]+)\/([^/]+)$/.exec(pathname);
+  if (!match) return null;
+  try {
+    const collection = decodeURIComponent(match[1]);
+    const id = decodeURIComponent(match[2]);
+    return COLLECTIONS.includes(collection) && textValue(id)
+      ? { collection, id: textValue(id) }
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 function getOnlineStateStore() {
   if (onlineStateStore) return onlineStateStore;
+  if (usesPostgresOnlineStorage()) {
+    onlineStateStore = createPostgresRecordStore({
+      defaultState,
+      normalizeState: normalizeBusinessState,
+      workspaceKey: textValue(process.env.WORKBENCH_POSTGRES_WORKSPACE) || "default",
+      gateway: createNeonWorkspaceGateway({
+        databaseUrl: process.env.DATABASE_URL,
+      }),
+    });
+    return onlineStateStore;
+  }
   onlineStateStore = createOnlineRecordStore({
     defaultState,
     normalizeState: normalizeBusinessState,
     readLegacy: (fallback) => readBlobJson(STATE_BLOB, fallback),
     listOperations: async () => {
       const blobs = await listAllBlobs(STATE_OPERATION_PREFIX);
-      const operations = [];
-      for (const blob of blobs) {
-        try {
-          operations.push(await readBlobJson(blob.pathname, null));
-        } catch {
-          // Ignore a partially uploaded or deleted operation; other records remain readable.
-        }
-      }
-      return operations;
+      const operations = await mapBlobReadsWithConcurrency(
+        blobs,
+        BLOB_OPERATION_READ_CONCURRENCY,
+        async (blob) => {
+          try {
+            // listAllBlobs already returned the signed Blob URL. Do not spend
+            // another list request per operation before reading its JSON body.
+            return await readBlobJsonFromBlob(blob, null);
+          } catch {
+            // Ignore a partially uploaded or deleted operation; other records remain readable.
+            return null;
+          }
+        },
+      );
+      return operations.filter(Boolean);
     },
     appendOperation: (operation) => writeBlobJson(
       `${STATE_OPERATION_PREFIX}${operation.id}.json`,
@@ -675,7 +745,8 @@ function getOnlineStateStore() {
 }
 
 async function loadState() {
-  return (await getOnlineStateStore().load()).state;
+  const loaded = await getOnlineStateStore().load();
+  return loaded.state || loaded;
 }
 
 async function saveState(nextState, expectedVersion = nextState?.expectedVersion) {
@@ -2589,6 +2660,93 @@ export default async function handler(req, res) {
       return;
     }
 
+    const entityRoute = onlineEntityRoute(pathname);
+    if (entityRoute && (req.method === "PATCH" || req.method === "DELETE")) {
+      try {
+        if (!usesPostgresOnlineStorage()) {
+          json(res, 409, {
+            ok: false,
+            code: "postgres_storage_required",
+            error: "记录级 PATCH / DELETE 仅在 WORKBENCH_ONLINE_STORAGE_DRIVER=postgres 时可用。",
+          });
+          return;
+        }
+        const body = JSON.parse((await readBody(req)) || "{}");
+        const expectedVersion = Number(body.expectedVersion);
+        if (!Number.isInteger(expectedVersion)) {
+          json(res, 400, {
+            ok: false,
+            code: "invalid_expected_version",
+            error: "记录级保存需要有效的 expectedVersion，请先重新读取状态。",
+          });
+          return;
+        }
+        const current = await loadState();
+        if (expectedVersion !== Number(current.meta?.version)) {
+          json(res, 409, {
+            ok: false,
+            code: "version_conflict",
+            error: "线上版本已变化，请重新读取后再编辑。",
+            actualVersion: current.meta?.version,
+            current,
+            conflicts: [],
+          });
+          return;
+        }
+        const existing = (current[entityRoute.collection] || [])
+          .find((row) => textValue(row?.id) === entityRoute.id);
+        if (!existing) {
+          json(res, 404, {
+            ok: false,
+            code: "record_not_found",
+            error: "未找到需要修改的记录。",
+          });
+          return;
+        }
+        const audit = body.audit && typeof body.audit === "object"
+          ? { ...body.audit, source: body.audit.source || "postgres_entity_api" }
+          : { source: "postgres_entity_api", reason: `更新 ${entityRoute.collection}/${entityRoute.id}` };
+        const next = { ...current };
+        if (req.method === "PATCH") {
+          const patch = body.patch && typeof body.patch === "object"
+            ? body.patch
+            : (body.record && typeof body.record === "object" ? body.record : null);
+          if (!patch || (textValue(patch.id) && textValue(patch.id) !== entityRoute.id)) {
+            json(res, 400, {
+              ok: false,
+              code: "invalid_record_patch",
+              error: "PATCH 需要对象 patch，且不得修改记录 ID。",
+            });
+            return;
+          }
+          next[entityRoute.collection] = current[entityRoute.collection].map((row) => (
+            textValue(row?.id) === entityRoute.id
+              ? { ...row, ...patch, id: entityRoute.id }
+              : row
+          ));
+        } else {
+          next[entityRoute.collection] = current[entityRoute.collection]
+            .filter((row) => textValue(row?.id) !== entityRoute.id);
+        }
+        const state = await saveState({ ...next, _saveAudit: audit }, expectedVersion);
+        json(res, 200, {
+          ok: true,
+          state,
+          mutation: { method: req.method, ...entityRoute },
+        });
+      } catch (error) {
+        json(res, Number(error.statusCode) || 400, {
+          ok: false,
+          code: error.code || "record_mutation_failed",
+          error: error.message,
+          actualVersion: error.actualVersion,
+          current: error.current,
+          conflicts: error.conflicts || [],
+        });
+      }
+      return;
+    }
+
     if (req.method === "POST" && pathname === "/api/state/restore-entity") {
       try {
         const body = JSON.parse((await readBody(req)) || "{}");
@@ -2596,11 +2754,24 @@ export default async function handler(req, res) {
         const id = String(body.id || "").trim();
         const targetVersion = Number(body.targetVersion);
         const expectedVersion = Number(body.expectedVersion);
-        const bundle = await getOnlineStateStore().load();
         if (!table || !id || !Number.isInteger(targetVersion) || !Number.isInteger(expectedVersion)) {
           json(res, 400, { ok: false, code: "invalid_restore_request", error: "恢复请求缺少有效的表、记录 ID、目标版本或当前版本。" });
           return;
         }
+        const audit = body.audit && typeof body.audit === "object"
+          ? { ...body.audit, source: body.audit.source || "manual_restore" }
+          : { source: "manual_restore", reason: `从版本 ${targetVersion} 恢复 ${table}/${id}` };
+        const store = getOnlineStateStore();
+        if (usesPostgresOnlineStorage()) {
+          const state = await store.restoreEntity(table, id, targetVersion, expectedVersion, audit);
+          if (!state) {
+            json(res, 400, { ok: false, code: "restore_unavailable", error: "目标历史版本不存在，或该实体不允许按记录恢复。" });
+            return;
+          }
+          json(res, 200, { ok: true, state, restored: { table, id, targetVersion } });
+          return;
+        }
+        const bundle = await store.load();
         if (expectedVersion !== Number(bundle.state?.meta?.version)) {
           json(res, 409, {
             ok: false,
@@ -2623,9 +2794,6 @@ export default async function handler(req, res) {
           json(res, 400, { ok: false, code: "restore_unavailable", error: "目标历史版本不存在，或该实体不允许按记录恢复。" });
           return;
         }
-        const audit = body.audit && typeof body.audit === "object"
-          ? { ...body.audit, source: body.audit.source || "manual_restore" }
-          : { source: "manual_restore", reason: `从版本 ${targetVersion} 恢复 ${table}/${id}` };
         const state = await saveState({ ...restored, _saveAudit: audit }, expectedVersion);
         json(res, 200, { ok: true, state, restored: { table, id, targetVersion } });
       } catch (error) {

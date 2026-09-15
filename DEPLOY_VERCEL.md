@@ -4,7 +4,8 @@ This project can be deployed as a private online workbench. The online version d
 
 ## What Is Stored Online
 
-- Business records are stored in Vercel Blob.
+- By default, business records are stored in Vercel Blob. After the Postgres migration window is completed, they can be stored in a managed Postgres database instead.
+- Vercel Blob remains suitable for product/signature images, attachments, JSON exports, backups, and retained audit snapshots. It is not required to remain the primary business-record database.
 - AI settings are stored in a separate private Vercel Blob file.
 - IMAP mailbox settings are stored in a separate private Vercel Blob file. The saved authorization code is encrypted and never returns to the browser.
 - API keys never return to the browser after saving.
@@ -21,6 +22,9 @@ This project can be deployed as a private online workbench. The online version d
 | --- | --- | --- |
 | `WORKBENCH_ACCESS_PASSWORD` | A strong private password for this workbench | Yes |
 | `BLOB_READ_WRITE_TOKEN` | Automatically added after connecting Vercel Blob | Yes |
+| `WORKBENCH_ONLINE_STORAGE_DRIVER` | `blob` (default) or `postgres` | No |
+| `DATABASE_URL` | Managed Postgres connection string; required only when driver is `postgres` | No |
+| `WORKBENCH_POSTGRES_WORKSPACE` | Optional isolated workspace key; defaults to `default` | No |
 | `WORKBENCH_CREDENTIAL_ENCRYPTION_KEY` | A separate long random secret used to encrypt saved IMAP authorization codes | Required when enabling IMAP |
 | `CRON_SECRET` | Long random secret used only by `GET /api/cron/mail-sync` | Required only when enabling scheduled IMAP sync |
 | `RESOURCE_WORKBENCH_CREATOR_AI_KEY` | Optional creator-profile API key fallback | No |
@@ -28,6 +32,35 @@ This project can be deployed as a private online workbench. The online version d
 
 5. Deploy. Open the Vercel domain and enter `WORKBENCH_ACCESS_PASSWORD`.
 6. Use the top-right JSON import button to move a backup from the local version into the new online workbench.
+
+## Optional Postgres Primary Storage
+
+Keep `WORKBENCH_ONLINE_STORAGE_DRIVER=blob` for the initial deployment. The Postgres path is deliberately opt-in: a missing or invalid `DATABASE_URL` fails clearly instead of silently writing back to Blob.
+
+Use a dedicated test database or a disposable database branch for the first rehearsal. Do not point the commands below at production until the source JSON, import result, and exported backup have all been checked.
+
+1. Export a JSON backup from the workbench UI. The migration utility only accepts this local JSON file; it never reads a production Blob store on its own.
+2. Configure `DATABASE_URL` locally for the test database. Optionally set `WORKBENCH_POSTGRES_WORKSPACE=test-migration`.
+3. Initialize the schema:
+
+   ```powershell
+   npm.cmd run db:postgres:migrate
+   ```
+
+4. Import and verify the exported JSON:
+
+   ```powershell
+   npm.cmd run db:postgres:import -- path\to\resource-workbench-export.json
+   npm.cmd run db:postgres:verify -- path\to\resource-workbench-export.json
+   npm.cmd run db:postgres:export -- path\to\postgres-rehearsal-backup.json
+   ```
+
+   The import refuses to overwrite a non-empty Postgres workspace. The verify command compares a stable data digest and ignores only volatile state version and update timestamps.
+
+5. Set the same `DATABASE_URL` in Vercel's environment variables, set `WORKBENCH_ONLINE_STORAGE_DRIVER=postgres`, and optionally set a production workspace key. Redeploy, then perform one controlled read/write smoke test with non-production data.
+6. Keep the Blob export and the old Blob state untouched during the migration window. To roll back the application, set `WORKBENCH_ONLINE_STORAGE_DRIVER=blob` and redeploy. No database deletion is required for rollback.
+
+The initial Postgres schema uses indexed JSONB entity rows for compatibility with the current workbench fields. Each save uses one optimistic-version guarded SQL statement to atomically update the workspace version, changed records, record history, and operation audit. The server also exposes guarded record `PATCH` / `DELETE` endpoints in Postgres mode; the existing browser remains on the compatible state-save path until a separate UI migration is approved. Strongly typed reporting tables can be added later without forcing a field-by-field migration now.
 
 ## AI Settings
 
@@ -77,7 +110,7 @@ After the secrets are present, every push to `main` builds and publishes a produ
 
 ## Important Limits
 
-- The online version is designed for one owner or a small trusted team. The current whole-state save model is not intended for simultaneous editing by many people.
+- Blob mode is designed for one owner or a small trusted team. Postgres mode records only changed entities and has optimistic version control, record history, and audit rows, but the current compatibility endpoint still submits a complete client snapshot. It remains important to resolve a displayed conflict before continuing edits. Direct entity `PATCH` endpoints are a later performance step.
 - XLSX imports should be kept below 3 MB per upload because Vercel serverless requests have size limits.
 - Mailbox sync is manual by default. Controlled scheduled sync requires the explicit `CRON_SECRET`, a deployer-added Cron schedule and a saved opt-in strategy; Vercel Function connectivity to a mailbox server can be limited by the mailbox provider's firewall or allowlist rules, so always test connection from the Settings page first.
 - Export JSON regularly. It is the quickest independent backup and migration format.

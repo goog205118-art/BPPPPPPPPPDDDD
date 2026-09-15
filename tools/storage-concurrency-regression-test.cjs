@@ -141,7 +141,11 @@ function testSourceContracts() {
   assert.match(onlineStoreSource, /version_conflict/);
   assert.match(onlineStoreSource, /actualVersion/);
   assert.match(onlineStoreSource, /conflictForPatches/);
-  assert.match(browserSource, /const expectedVersion = Math\.max\(1, Number\(state\.data\.meta\?\.version\) \|\| 1\)/);
+  assert.match(browserSource, /let persistQueue = Promise\.resolve\(\)/);
+  assert.match(browserSource, /let persistKnownServerVersion = 1/);
+  assert.match(browserSource, /const stateSnapshot = clone\(state\.data\)/);
+  assert.match(browserSource, /const queued = persistQueue\.catch\(\(\) => undefined\)\.then\(run\)/);
+  assert.match(browserSource, /if \(requestId === latestPersistRequestId && savedState\)/);
   assert.match(browserSource, /error\.current = errorPayload\.current/);
   assert.doesNotMatch(browserSource, /localStorage\.setItem\(STORAGE_FALLBACK, payload\)/);
 }

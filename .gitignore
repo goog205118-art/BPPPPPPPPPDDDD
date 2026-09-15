@@ -16,3 +16,6 @@ data/state.json
 output/
 .playwright-cli/
 .codex-run/
+
+.vercel
+.env*

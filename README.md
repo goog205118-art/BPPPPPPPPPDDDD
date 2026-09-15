@@ -5,7 +5,7 @@
 当前同时保留两种运行方式：
 
 - 本地版：Node + SQLite，适合离线使用。
-- 线上版：Vercel Serverless + Vercel Blob，适合从浏览器访问，不依赖本地端口、VPN、Python 或 SQLite。
+- 线上版：Vercel Serverless，默认使用 Vercel Blob；可在完成隔离迁移演练后切换到托管 Postgres 作为业务主存储，适合从浏览器访问，不依赖本地端口、VPN、Python 或 SQLite。
 
 线上部署的完整操作见 [DEPLOY_VERCEL.md](DEPLOY_VERCEL.md)。
 
@@ -38,6 +38,21 @@ AI 设置随本地 SQLite 数据库保存；旧版 `data/storage/ai-settings.jso
 未在设置页保存 API Key 时，程序仍可正常新增、保存、导入和导出；点击“从链接补全”会提示先配置 API Key。环境变量 `GEMINI_API_KEY` / `GOOGLE_API_KEY`、`GEMINI_MODEL` 和 `HTTPS_PROXY` / `HTTP_PROXY` 仍可作为兜底。若 API 域名被本地代理软件解析为 `198.18.x.x` 或 `198.19.x.x`，请在设置页填入该代理软件提供的 HTTP 代理地址。
 
 线上版使用同一套设置界面，但 AI 请求由 Vercel 云端直接发出，因此不需要、也不支持用户电脑上的本地代理端口。线上 AI Key 保存在私有 Blob 文件中，保存后不会回显。
+
+### 线上存储迁移
+
+线上初始配置仍使用 Blob，避免已有部署被隐式切换。设置 `WORKBENCH_ONLINE_STORAGE_DRIVER=postgres` 和 `DATABASE_URL` 后，可让 Postgres 作为业务实体主存储；Blob 则继续承担图片、附件、导出快照、备份和归档用途。
+
+迁移必须先从界面导出一份 JSON，在隔离 Postgres 数据库中依次执行 Schema 初始化、导入、摘要校验和导出回读。迁移命令不会主动读取 Vercel Blob，更不会覆盖非空工作区：
+
+```powershell
+npm.cmd run db:postgres:migrate
+npm.cmd run db:postgres:import -- path\to\resource-workbench-export.json
+npm.cmd run db:postgres:verify -- path\to\resource-workbench-export.json
+npm.cmd run db:postgres:export -- path\to\postgres-rehearsal-backup.json
+```
+
+完整上线、回滚和环境变量说明见 [DEPLOY_VERCEL.md](DEPLOY_VERCEL.md)。
 
 ## 官邮 IMAP 半自动跟进
 

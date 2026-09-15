@@ -28,6 +28,11 @@
     "test:storage-concurrency": "node tools/storage-concurrency-regression-test.cjs",
     "test:storage-record-transaction": "node tools/storage-record-transaction-regression-test.cjs",
     "test:online-record-store": "node tools/online-record-store-regression-test.cjs",
+    "test:online-storage-read": "node tools/online-storage-read-regression-test.cjs",
+    "test:save-queue": "node tools/save-queue-regression-test.cjs",
+    "test:postgres-record-store": "node tools/postgres-record-store-regression-test.cjs",
+    "test:postgres-migration": "node tools/postgres-migration-regression-test.cjs",
+    "test:blob-rollback": "node tools/blob-rollback-regression-test.cjs",
     "test:storage-audit-conflict": "node tools/storage-audit-conflict-regression-test.cjs",
     "test:contact-identity": "node tools/contact-identity-regression-test.cjs",
     "test:delivery-governance": "node tools/delivery-governance-regression-test.cjs",
@@ -37,9 +42,14 @@
     "test:mail-ai-suggestions": "node tools/mail-ai-suggestion-regression-test.cjs",
     "test:mail-ai-suggestions-runtime": "node tools/mail-ai-suggestion-runtime-regression-test.cjs",
     "test:mail-ai-suggestions-ui": "node tools/mail-ai-suggestion-ui-regression-test.cjs",
-    "test:theme": "node tools/theme-regression-test.cjs"
+    "test:theme": "node tools/theme-regression-test.cjs",
+    "db:postgres:migrate": "node tools/postgres-migrate.cjs migrate",
+    "db:postgres:import": "node tools/postgres-migrate.cjs import",
+    "db:postgres:verify": "node tools/postgres-migrate.cjs verify",
+    "db:postgres:export": "node tools/postgres-migrate.cjs export"
   },
   "dependencies": {
+    "@neondatabase/serverless": "^1.1.0",
     "@vercel/blob": "^2.8.0",
     "exceljs": "^4.4.0",
     "imapflow": "^1.7.2",

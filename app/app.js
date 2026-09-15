@@ -738,6 +738,7 @@ const state = {
   globalSearch: { open: false, query: "" },
   creatorDrawer: { open: false, creatorId: null },
   storageConflict: null,
+  saveState: { status: "saved", pending: 0, error: "", lastSavedAt: "" },
   mailImport: { open: false, followUpId: null, messages: [], status: "" },
   followUpBoardFilter: { query: "", stage: "", priority: "", overdueOnly: false },
   followUpView: "list",
@@ -762,6 +763,9 @@ const state = {
 let timeZoneTickerId = null;
 let activityDepth = 0;
 let productPickerAbortController = null;
+let persistQueue = Promise.resolve();
+let persistKnownServerVersion = 1;
+let latestPersistRequestId = 0;
 
 const elements = {
   accessGate: document.getElementById("accessGate"),
@@ -877,6 +881,8 @@ const elements = {
   todayQueueBtn: document.getElementById("todayQueueBtn"),
   topbarMoreBtn: document.getElementById("topbarMoreBtn"),
   topbarMoreMenu: document.getElementById("topbarMoreMenu"),
+  saveStatusBtn: document.getElementById("saveStatusBtn"),
+  saveStatusText: document.getElementById("saveStatusText"),
   themeToggleBtn: document.getElementById("themeToggleBtn"),
   brandNewBtn: document.getElementById("brandNewBtn"),
   brandList: document.getElementById("brandList"),
@@ -1118,6 +1124,59 @@ async function withActivity(title, message, action) {
   } finally {
     hideActivity();
   }
+}
+
+function renderSaveStatus() {
+  const save = state.saveState;
+  const status = save.status === "error"
+    ? "error"
+    : save.pending > 0
+      ? "saving"
+      : "saved";
+  const textValue = status === "saving"
+    ? `正在保存${save.pending > 1 ? `（${save.pending}）` : ""}`
+    : status === "error"
+      ? "保存失败，点击重试"
+      : "已保存";
+  const title = status === "saving"
+    ? "资料正在安全写入服务器；可以继续浏览和操作。"
+    : status === "error"
+      ? `${save.error || "最近一次保存未成功"} 点击后会再次提交当前资料。`
+      : save.lastSavedAt
+        ? `资料已保存。最近完成：${new Date(save.lastSavedAt).toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit", second: "2-digit" })}`
+        : "资料已保存到当前工作区";
+  elements.saveStatusBtn.dataset.status = status;
+  elements.saveStatusBtn.title = title;
+  elements.saveStatusBtn.disabled = status === "saving";
+  elements.saveStatusText.textContent = textValue;
+}
+
+function setSaveState(next = {}) {
+  state.saveState = { ...state.saveState, ...next };
+  renderSaveStatus();
+}
+
+function buildPersistPayload(source, expectedVersion) {
+  const snapshot = clone(source);
+  snapshot.meta = {
+    ...snapshot.meta,
+    version: expectedVersion,
+    updatedAt: new Date().toISOString(),
+    optionSets: { ...(snapshot.meta?.optionSets || {}) },
+    filterPreferences: normalizeFilterPreferences(snapshot.meta?.filterPreferences),
+    columnPreferences: normalizeColumnPreferences(snapshot.meta?.columnPreferences),
+    timeZones: normalizeTimeZones(snapshot.meta?.timeZones),
+  };
+  return {
+    ...snapshot,
+    expectedVersion,
+    _saveAudit: {
+      actorId: text(sessionStorage.getItem("workbench-actor-id")),
+      actorName: text(sessionStorage.getItem("workbench-actor-name")) || "当前用户",
+      source: `web:${state.activeTab}`,
+      reason: `保存${state.activeTab === SETTINGS_TAB.key ? "设置" : "业务资料"}`,
+    },
+  };
 }
 
 async function apiFetch(resource, options = {}) {
@@ -2036,6 +2095,8 @@ async function loadState() {
     const raw = localStorage.getItem(STORAGE_FALLBACK);
     state.data = raw ? ensureStateShape(JSON.parse(raw)) : clone(emptyState);
   }
+  persistKnownServerVersion = Math.max(1, Number(state.data.meta?.version) || 1);
+  setSaveState({ status: "saved", pending: 0, error: "" });
 }
 
 function hasBusinessData(source = state.data) {
@@ -2062,57 +2123,88 @@ function resolveInitialWorkspaceTab() {
 }
 
 async function persist() {
-  const expectedVersion = Math.max(1, Number(state.data.meta?.version) || 1);
-  state.data.meta = {
-    ...state.data.meta,
-    version: expectedVersion,
-    updatedAt: new Date().toISOString(),
-    optionSets: { ...(state.data.meta.optionSets || {}) },
-    filterPreferences: normalizeFilterPreferences(state.data.meta.filterPreferences),
-    columnPreferences: normalizeColumnPreferences(state.data.meta.columnPreferences),
-    timeZones: normalizeTimeZones(state.data.meta.timeZones),
-  };
-  const payloadState = {
-    ...state.data,
-    expectedVersion,
-    _saveAudit: {
-      actorId: text(sessionStorage.getItem("workbench-actor-id")),
-      actorName: text(sessionStorage.getItem("workbench-actor-name")) || "当前用户",
-      source: `web:${state.activeTab}`,
-      reason: `保存${state.activeTab === SETTINGS_TAB.key ? "设置" : "业务资料"}`,
-    },
-  };
-  const payload = JSON.stringify(payloadState, null, 2);
-  const response = await apiFetch(API_STATE, {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: payload,
+  const requestId = ++latestPersistRequestId;
+  const stateSnapshot = clone(state.data);
+  setSaveState({
+    status: "saving",
+    pending: state.saveState.pending + 1,
+    error: "",
   });
-  if (!response.ok) {
-    const errorPayload = await response.json().catch(() => ({}));
-    const error = new Error(errorPayload.error || "保存失败");
-    error.code = errorPayload.code || "save_failed";
-    error.actualVersion = errorPayload.actualVersion;
-    error.current = errorPayload.current;
-    error.conflicts = Array.isArray(errorPayload.conflicts) ? errorPayload.conflicts : [];
-    if (response.status === 409 || error.code === "version_conflict") {
-      state.storageConflict = {
-        message: error.message,
-        actualVersion: error.actualVersion,
-        current: error.current ? clone(error.current) : null,
-        local: clone(state.data),
-        conflicts: error.conflicts,
-      };
-      renderStorageConflict();
-      error.message = `${error.message} 当前编辑内容未自动覆盖服务端数据，请先重新读取后再合并保存。`;
+
+  const run = async () => {
+    const expectedVersion = Math.max(
+      1,
+      Number(persistKnownServerVersion) || 1,
+      Number(stateSnapshot.meta?.version) || 1,
+    );
+    const payloadState = buildPersistPayload(stateSnapshot, expectedVersion);
+    const response = await apiFetch(API_STATE, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payloadState, null, 2),
+    });
+    if (!response.ok) {
+      const errorPayload = await response.json().catch(() => ({}));
+      const error = new Error(errorPayload.error || "保存失败");
+      error.code = errorPayload.code || "save_failed";
+      error.actualVersion = errorPayload.actualVersion;
+      error.current = errorPayload.current;
+      error.conflicts = Array.isArray(errorPayload.conflicts) ? errorPayload.conflicts : [];
+      if (response.status === 409 || error.code === "version_conflict") {
+        state.storageConflict = {
+          message: error.message,
+          actualVersion: error.actualVersion,
+          current: error.current ? clone(error.current) : null,
+          local: clone(state.data),
+          conflicts: error.conflicts,
+        };
+        renderStorageConflict();
+        error.message = `${error.message} 当前编辑内容未自动覆盖服务端数据，请先重新读取后再合并保存。`;
+      }
+      throw error;
     }
+
+    const result = await response.json().catch(() => ({}));
+    const savedState = result.state && typeof result.state === "object"
+      ? ensureStateShape(result.state)
+      : null;
+    const savedVersion = Math.max(1, Number(savedState?.meta?.version) || expectedVersion);
+    persistKnownServerVersion = savedVersion;
+
+    // A newer local edit may already be queued. Preserve that local edit and
+    // only advance its base version; the newer snapshot is saved next.
+    if (requestId === latestPersistRequestId && savedState) {
+      state.data = savedState;
+    } else {
+      state.data.meta = {
+        ...state.data.meta,
+        version: savedVersion,
+      };
+    }
+    localStorage.setItem(STORAGE_FALLBACK, JSON.stringify(state.data, null, 2));
+    return savedState || state.data;
+  };
+
+  const queued = persistQueue.catch(() => undefined).then(run);
+  persistQueue = queued.catch(() => undefined);
+  try {
+    const result = await queued;
+    const pending = Math.max(0, state.saveState.pending - 1);
+    setSaveState({
+      status: pending ? "saving" : "saved",
+      pending,
+      lastSavedAt: new Date().toISOString(),
+      error: "",
+    });
+    return result;
+  } catch (error) {
+    setSaveState({
+      status: "error",
+      pending: Math.max(0, state.saveState.pending - 1),
+      error: error.message || "保存失败",
+    });
     throw error;
   }
-  const result = await response.json().catch(() => ({}));
-  if (result.state && typeof result.state === "object") {
-    state.data = ensureStateShape(result.state);
-  }
-  localStorage.setItem(STORAGE_FALLBACK, JSON.stringify(state.data, null, 2));
 }
 
 function storageConflictEntity(conflict, source) {
@@ -5355,28 +5447,31 @@ async function deleteFollowUpRecord(followUpId) {
   const now = new Date().toISOString();
   state.followUpDeleteBusyId = id;
   try {
-    await withActivity("正在删除合作跟进", "正在清理跟进时间线和关联引用，请稍候...", async () => {
-      state.data.followUps = (state.data.followUps || []).filter((row) => text(row.id) !== id);
-      state.data.followUpEvents = (state.data.followUpEvents || []).filter((event) => text(event.follow_up_id) !== id);
-      state.data.contactTracks = (state.data.contactTracks || []).map((track) =>
-        text(track.follow_up_id) === id
-          ? { ...track, follow_up_id: "", updatedAt: now }
-          : track,
-      );
-      state.data.mailInbox = (state.data.mailInbox || []).map((message) => {
-        const candidateIds = Array.isArray(message.candidate_follow_up_ids)
-          ? message.candidate_follow_up_ids.map(text).filter((candidateId) => candidateId && candidateId !== id)
-          : null;
-        const next = { ...message };
-        if (candidateIds) next.candidate_follow_up_ids = candidateIds;
-        if (text(next.follow_up_id) === id) next.follow_up_id = "";
-        return next;
-      });
-      state.followUpSelectedIds.delete(id);
-      if (state.editingId && text(state.editingId) === id) state.editingId = null;
-      if (state.followUpDetail.open && text(state.followUpDetail.followUpId) === id) closeFollowUpDetail();
-      await persist();
+    state.data.followUps = (state.data.followUps || []).filter((row) => text(row.id) !== id);
+    state.data.followUpEvents = (state.data.followUpEvents || []).filter((event) => text(event.follow_up_id) !== id);
+    state.data.contactTracks = (state.data.contactTracks || []).map((track) =>
+      text(track.follow_up_id) === id
+        ? { ...track, follow_up_id: "", updatedAt: now }
+        : track,
+    );
+    state.data.mailInbox = (state.data.mailInbox || []).map((message) => {
+      const candidateIds = Array.isArray(message.candidate_follow_up_ids)
+        ? message.candidate_follow_up_ids.map(text).filter((candidateId) => candidateId && candidateId !== id)
+        : null;
+      const next = { ...message };
+      if (candidateIds) next.candidate_follow_up_ids = candidateIds;
+      if (text(next.follow_up_id) === id) next.follow_up_id = "";
+      return next;
     });
+    state.followUpSelectedIds.delete(id);
+    if (state.editingId && text(state.editingId) === id) state.editingId = null;
+    if (state.followUpDetail.open && text(state.followUpDetail.followUpId) === id) closeFollowUpDetail();
+    if (state.activeTab === "followups") render();
+    else {
+      renderFollowUpPage();
+      renderCreatorDrawer();
+    }
+    await persist();
     setFollowUpInboxNotice(`已删除「${followUp.creator_name || "该达人"}」的合作跟进，并清理关联引用。`, "success");
     return true;
   } catch (error) {
@@ -9759,9 +9854,10 @@ async function commitEditor({ close = false, showError = false } = {}) {
 
   state.editorSaving = true;
   const title = state.editingId ? "正在保存资料" : "正在新增资料";
-  const message = close ? "正在同步资料并更新工作台..." : "正在自动保存本次更改...";
+  const message = close ? "正在保存到服务器，可继续等待完成提示..." : "正在自动保存本次更改...";
   try {
-    await withActivity(title, message, persist);
+    elements.editorStatus.textContent = message;
+    await persist();
     if (close) {
       resetEditorState();
       render();
@@ -10534,6 +10630,11 @@ function resetForm() {
 }
 
 function bindEvents() {
+  window.addEventListener("beforeunload", (event) => {
+    if (!state.saveState.pending) return;
+    event.preventDefault();
+    event.returnValue = "";
+  });
   elements.form.addEventListener("submit", handleSubmit);
   elements.matchForm.addEventListener("submit", handleMatchSubmit);
   elements.applyAssistantBtn.addEventListener("click", applyAssistantUpdates);
@@ -10573,6 +10674,12 @@ function bindEvents() {
   });
   elements.themeToggleBtn.addEventListener("click", () => {
     applyTheme(state.theme === "light" ? "dark" : "light");
+  });
+  elements.saveStatusBtn.addEventListener("click", () => {
+    if (state.saveState.status !== "error" || state.saveState.pending) return;
+    void persist().catch((error) => {
+      elements.importStatus.textContent = error.message || "重试保存失败，请检查网络后再试。";
+    });
   });
   elements.themeSettingsOptions.addEventListener("change", (event) => {
     const input = event.target.closest("[data-theme-choice]");
