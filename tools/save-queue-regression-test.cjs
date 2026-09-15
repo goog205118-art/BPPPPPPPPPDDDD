@@ -21,6 +21,8 @@ function sectionAfter(source, marker, endMarker) {
 function run() {
   const persistSection = sectionAfter(appSource, "async function persist()", "function storageConflictEntity");
   const deleteSection = sectionAfter(appSource, "async function deleteFollowUpRecord");
+  const manualTrackSection = sectionAfter(appSource, "async function saveManualContactTrack", "async function toggleContactTrack");
+  const toggleTrackSection = sectionAfter(appSource, "async function toggleContactTrack", "async function manuallyUpdateFollowUpStage");
 
   for (const marker of [
     "let persistQueue = Promise.resolve()",
@@ -59,9 +61,15 @@ function run() {
   assert.doesNotMatch(deleteSection, /withActivity\("正在删除合作跟进"/);
   assert.match(deleteSection, /if \(state\.activeTab === "followups"\) render\(\);/);
   assert.match(deleteSection, /await persist\(\);/);
+  assert.doesNotMatch(manualTrackSection, /withActivity\(/);
+  assert.match(manualTrackSection, /renderFollowUpPage\(\);\s*await persist\(\);/s);
+  assert.match(manualTrackSection, /state\.data = snapshot;\s*renderFollowUpPage\(\);/s);
+  assert.doesNotMatch(toggleTrackSection, /withActivity\(/);
+  assert.match(toggleTrackSection, /track\.status = nextStatus;\s*track\.updatedAt = new Date\(\)\.toISOString\(\);\s*renderFollowUpPage\(\);\s*await persist\(\);/s);
+  assert.match(toggleTrackSection, /state\.data = snapshot;\s*renderFollowUpPage\(\);/s);
 
   console.log(
-    "PASS save queue regression: writes are serialized, newer local edits survive older responses, save state is visible/retryable, and follow-up deletion saves without a blocking activity overlay.",
+    "PASS save queue regression: writes are serialized, newer local edits survive older responses, save state is visible/retryable, and regular follow-up saves avoid a blocking activity overlay.",
   );
 }
 

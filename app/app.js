@@ -8012,40 +8012,39 @@ async function saveManualContactTrack(form) {
   );
   const snapshot = clone(state.data);
   try {
-    await withActivity("正在记录联系状态", "正在保存为已联系待回复；这不会代替实际邮件发送...", async () => {
-      const next = {
-        id: existing?.id || uid("CT"),
-        brand_id: state.activeBrandId,
-        brand: currentBrand()?.name || person.brand,
-        person_type: personType,
-        person_id: person.id,
-        person_name: person.name || person.handle,
-        email: text(person.email).toLowerCase(),
-        mailbox_account_id: mailboxAccountId,
-        last_outbound_at: now,
-        last_outbound_subject: subject,
-        status: "waiting_reply",
-        follow_up_id: existing?.follow_up_id || "",
-        source: "manual",
-        createdAt: existing?.createdAt || now,
+    const next = {
+      id: existing?.id || uid("CT"),
+      brand_id: state.activeBrandId,
+      brand: currentBrand()?.name || person.brand,
+      person_type: personType,
+      person_id: person.id,
+      person_name: person.name || person.handle,
+      email: text(person.email).toLowerCase(),
+      mailbox_account_id: mailboxAccountId,
+      last_outbound_at: now,
+      last_outbound_subject: subject,
+      status: "waiting_reply",
+      follow_up_id: existing?.follow_up_id || "",
+      source: "manual",
+      createdAt: existing?.createdAt || now,
+      updatedAt: now,
+    };
+    if (existing) Object.assign(existing, next);
+    else state.data.contactTracks = [next, ...(state.data.contactTracks || [])];
+    const personIndex = state.data[collection].findIndex((row) => text(row.id) === text(person.id));
+    if (personIndex >= 0) {
+      const storedPerson = state.data[collection][personIndex];
+      state.data[collection][personIndex] = {
+        ...storedPerson,
+        last_outreach_at: now,
         updatedAt: now,
       };
-      if (existing) Object.assign(existing, next);
-      else state.data.contactTracks = [next, ...(state.data.contactTracks || [])];
-      const personIndex = state.data[collection].findIndex((row) => text(row.id) === text(person.id));
-      if (personIndex >= 0) {
-        const storedPerson = state.data[collection][personIndex];
-        state.data[collection][personIndex] = {
-          ...storedPerson,
-          last_outreach_at: now,
-          updatedAt: now,
-        };
-      }
-      await persist();
-    });
+    }
     renderFollowUpPage();
+    await persist();
   } catch (error) {
     state.data = snapshot;
+    renderFollowUpPage();
     window.alert(error.message || "记录待回复状态失败。");
   }
 }
@@ -8056,14 +8055,13 @@ async function toggleContactTrack(trackId) {
   const snapshot = clone(state.data);
   const nextStatus = text(track.status) === "paused" ? "waiting_reply" : "paused";
   try {
-    await withActivity("正在更新待回复状态", nextStatus === "paused" ? "正在暂停等待回复..." : "正在恢复等待回复...", async () => {
-      track.status = nextStatus;
-      track.updatedAt = new Date().toISOString();
-      await persist();
-    });
+    track.status = nextStatus;
+    track.updatedAt = new Date().toISOString();
     renderFollowUpPage();
+    await persist();
   } catch (error) {
     state.data = snapshot;
+    renderFollowUpPage();
     window.alert(error.message || "更新待回复状态失败。");
   }
 }
