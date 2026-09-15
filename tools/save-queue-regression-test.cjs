@@ -28,6 +28,8 @@ function run() {
     "let latestPersistRequestId = 0",
     "function renderSaveStatus",
     "function buildPersistPayload",
+    "function buildCompactPersistPayload",
+    "function canUseCompactPostgresPersist",
     "const stateSnapshot = clone(state.data)",
     "const queued = persistQueue.catch(() => undefined).then(run)",
     "persistQueue = queued.catch(() => undefined)",
@@ -41,6 +43,8 @@ function run() {
   assert.match(persistSection, /setSaveState\(\{\s*status: "saving"/s);
   assert.match(persistSection, /status: pending \? "saving" : "saved"/);
   assert.match(persistSection, /status: "error"/);
+  assert.match(persistSection, /apiFetch\(API_RECORDS_BATCH,/);
+  assert.match(persistSection, /buildPersistPayload\(stateSnapshot, expectedVersion\)/);
 
   assert.match(htmlSource, /id="saveStatusBtn"/);
   assert.match(htmlSource, /id="saveStatusText"/);

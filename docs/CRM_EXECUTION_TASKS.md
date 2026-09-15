@@ -6,8 +6,8 @@
 
 - 建立日期：2026-09-11
 - 当前里程碑：线上 Postgres 主存储迁移演练
-- 总体状态：`blocked`
-- 本轮范围：Postgres 存储代码、迁移工具和隔离回归已完成；已收到用户从线上导出的 JSON 快照，等待隔离 `DATABASE_URL`。完成真实数据库导入/校验/回滚演练后才可切换线上主存储。
+- 总体状态：`active`
+- 本轮范围：Postgres 存储代码、迁移工具与受控 Preview 读写已完成；当前进入紧凑增量保存性能子阶段。Blob 保持为可回退存储，真实 Preview Blob 回滚演练仍是最终门槛。
 - 数据原则：不改动正式业务资料、不暴露邮箱授权码或 AI Key。
 - 自动化原则：AI 只摘要、建议和起草；发信、价格/条款确认、寄样、签收、发布和结案等高风险动作必须人工确认。
 
@@ -38,8 +38,8 @@
 | 项目 | 当前值 |
 | --- | --- |
 | 当前任务 | `CRM-80-03` |
-| 当前状态 | 阻塞：隔离 Postgres 导入、校验、导出回读和 Preview 读写已通过；Blob 回滚仅完成不触碰生产数据的源码/隔离回归，真实 Preview 回滚仍需部署环境人工验证。 |
-| 当前目标 | 保留现有 Blob 与 Postgres rehearsal workspace，先在 Preview 使用 `WORKBENCH_ONLINE_STORAGE_DRIVER=postgres` 做受控读写，再切回 `blob` 验证旧数据可读且不被覆盖；两道门槛通过后才允许生产切换。 |
+| 当前状态 | 进行中：隔离 Postgres 导入、校验、导出回读和 Preview 读写已通过；用户已反馈资料可保存但速度仍慢，正在实现仅传输/提交本次记录变更的 Postgres 紧凑保存路径。Blob 回滚仅完成不触碰生产数据的源码/隔离回归，真实 Preview 回滚仍需部署环境人工验证。 |
+| 当前目标 | 在 Preview 的 Postgres 驱动下，让常规资料编辑不再上传、解析或对比完整工作区快照；保留 `/api/state` 和 Blob 路径作为兼容/回滚保障。紧凑保存回归及 Preview 人工性能验证后，再切回 `blob` 验证旧数据可读且不被覆盖。 |
 | 已完成前序 | `CRM-00` 基线与执行治理；`CRM-10` Case 模型、兼容迁移、Case 中心展示与阶段审计；`CRM-20` 今日推进与任务生命周期；`CRM-30` 邮件分诊与可靠归档；`CRM-40-01` 至 `CRM-40-04` 人工主导的 AI 跟进工作台；`CRM-50` 多人协作与存储并发；`CRM-60-01` 受控定时同步；`CRM-60-02` 受控定时 AI 建议；`CRM-70` 联系人身份、投递治理与保留控制。 |
 | 禁止提前启动 | 自动发送、AI 自动推进高风险阶段、全量历史邮箱迁移、附件抓取、HTML/MIME 原文保存。 |
 | 最近已验证基线 | `npm.cmd run check`、`npm.cmd run test:mail-ai-suggestions`、`npm.cmd run test:mail-ai-suggestions-runtime`、`npm.cmd run test:mail-ai-suggestions-ui`、`npm.cmd run test:mail-scheduler`、`npm.cmd run test:mail-scheduler-executor`、`npm.cmd run test:compliance-retention`、`npm.cmd run test:delivery-governance`、`npm.cmd run test:contact-identity`、`npm.cmd run test:storage-concurrency`、`npm.cmd run test:storage-record-transaction`、`npm.cmd run test:online-record-store`、`npm.cmd run test:storage-audit-conflict`、`npm.cmd run test:followup-ai-context`、`npm.cmd run test:followup-ai-analysis`、`npm.cmd run test:followup-ai-draft-send`、`npm.cmd run test:followup-ai-stage-application`、`npm.cmd run test:followup-isolation`、`npm.cmd run test:crm-regression`、`npm.cmd run test:case-display`、`npm.cmd run test:action-task-storage`、`npm.cmd run test:today-action-center`、`npm.cmd run test:task-collaboration`、`npm.cmd run test:mail-routing-score`、`npm.cmd run test:mail-triage-console`、`npm.cmd run test:mail-triage-case-actions`、`npm.cmd run test:mail-triage-lead`、Python AST 解析与 `git diff --check` 均通过；隔离空存储下的 `/api/mail/scheduler/check` 返回 `skipped`、零账户且未启动 IMAP。 |
@@ -129,7 +129,7 @@
 | --- | --- | --- | --- | --- | --- |
 | `CRM-80-01` | P1 | `done` | 优化 Vercel Blob 操作日志读取：消除已列举对象的重复列表查询，使用受控并发读取，并为下一阶段保留可观测耗时边界。 | `CRM-50-04` | 单次线上状态加载对每个已列举操作日志最多请求一次正文；不再为每条日志额外调用 Blob `list`；回归继续保证不同记录合并、同记录冲突与实体恢复。 |
 | `CRM-80-02` | P1 | `done` | 建立前端显式保存队列与非阻塞保存状态：界面先局部反馈，失败时准确恢复或提示重试，绝不允许新编辑被旧保存响应覆盖。 | `CRM-80-01` | 新增/编辑/删除不再默认使用全屏遮罩等待；连续保存按顺序写入；离开或刷新前会提示未同步变更；冲突、失败与回滚可解释。 |
-| `CRM-80-03` | P1 | `blocked` | 将线上业务主存储迁移到托管 Postgres，Vercel Blob 仅承担图片、附件、导出快照、备份和审计归档。 | `CRM-80-01`, `CRM-80-02` | 用户于 2026-09-14 已重新启动真实迁移，并提供线上导出的 JSON 快照；等待在本机安全配置独立 `DATABASE_URL` 后执行 Schema 初始化、导入、摘要校验、Postgres 导出回读、Preview 读写和 Blob 回滚演练。 |
+| `CRM-80-03` | P1 | `active` | 将线上业务主存储迁移到托管 Postgres，Vercel Blob 仅承担图片、附件、导出快照、备份和审计归档；补齐 Postgres 紧凑增量保存路径。 | `CRM-80-01`, `CRM-80-02` | 用户已完成 Preview Postgres 读写验证；常规资料编辑仅上传并提交改动记录，保留 Blob 兼容路径，完成隔离回归与 Preview 性能/Blob 回滚人工验证后方可标记完成。 |
 | `CRM-80-04` | P2 | `planned` | 在 Postgres 主库稳定前建立 Blob 快照压缩与迁移过渡策略，限制历史操作日志的读取成本。 | `CRM-80-01` | 快照版本、操作日志截断、恢复与并发窗口均有隔离回归；不会覆盖或丢失现有线上数据。 |
 
 ## 本阶段不启动
@@ -220,6 +220,8 @@
 | 2026-09-14（America/New_York） | `CRM-80-03` | `deferred -> blocked` | `docs/CRM_EXECUTION_TASKS.md`、`resource-workbench-2026-09-14.json` | 用户已重新批准迁移，并提供当前线上导出快照。已在本地只读核验快照结构：5 个品牌、6 位达人、21 条待开发达人、20 个产品、1 条合作记录、1 个 Case、190 条邮件索引；`meta.updatedAt=2026-09-02T07:56:47.418Z`。未输出或记录邮件正文、邮箱、密钥等敏感内容。本机检测到 `DATABASE_URL` 尚未配置，因此未执行 Schema 初始化、导入或任何远程写入。 | 待提交 | 恢复条件：部署者以本机环境变量或未提交的 `.env.local` 配置隔离 `DATABASE_URL`，并指定专用 `WORKBENCH_POSTGRES_WORKSPACE`。之后严格执行 `migrate -> import -> verify -> export -> digest 比对 -> Preview 读写 -> Blob 回滚演练`；Blob、IMAP、SMTP、AI 与生产驱动均保持未触碰。 |
 | 2026-09-15（Asia/Tokyo） | `CRM-80-03` | `blocked -> blocked`：隔离迁移与回滚边界验收完成 | `tools/blob-rollback-regression-test.cjs`、`package.json`、`docs/CRM_EXECUTION_TASKS.md` | 已重新全览 `CRM-00` 至 `CRM-80-04`、当前执行指针和最后三条日志。`npm.cmd run test:blob-rollback`、`npm.cmd run check`、`npm.cmd run test:postgres-migration`、`npm.cmd run test:postgres-record-store`、`git diff --check` 全部通过。回归确认：Blob 为默认驱动；Postgres 仅在显式 `WORKBENCH_ONLINE_STORAGE_DRIVER=postgres` 时懒初始化；Blob 继续读取旧 `state.json`、追加操作日志；切回 Blob 不包含删除 Postgres 工作区的路径。此前已完成的隔离 `migrate -> import -> verify -> export`、摘要比对和 Preview `GET/PATCH/restore` 结果保持有效。 | 待提交 | 数据影响：未读取、写入、覆盖或删除正式 Vercel Blob；未删除 Postgres rehearsal workspace、原始 JSON 快照或导出备份；未连接 IMAP、SMTP、AI。新增 `test:blob-rollback` 仅固定回滚边界。回滚：删除本次测试文件和脚本注册，或后续以独立提交回退；不删除已建 Postgres 表。核对：已确认未重复 `CRM-80-01/02`、Case、邮件、AI、联系人、投递治理或定时任务；`CRM-80-04` 仍未启动。下一门槛：在 Vercel Preview 完成一次 Postgres 读写后切回 Blob 的人工验证，并确认旧 Blob 数据未被覆盖；通过后才可将 `CRM-80-03` 标记 `done`。 |
 | 2026-09-15（Asia/Tokyo） | `CRM-80-03` | 保持 `blocked`：提交检查点已回填 | `docs/CRM_EXECUTION_TASKS.md` | 上一条隔离回归与迁移实现已形成提交 `7e16786`；提交前再次确认 `git diff --check` 通过，未跟踪文件仅为用户提供的本地 JSON 快照，未进入提交。 | `7e16786`（功能与台账提交） | 本次不改变数据和运行驱动。真实 Preview 回滚仍是唯一未完成门槛；生产继续保持 Blob，不执行切换。下一门槛：部署者在 Preview 配置 Postgres 后完成受控读写，再切回 Blob 验证旧数据可读且未被覆盖。 |
+| 2026-09-14（America/Los_Angeles） | `CRM-80-03` | `blocked -> active`：紧凑增量保存性能子阶段 | `docs/CRM_EXECUTION_TASKS.md`、`app/app.js`、`api/[...route].mjs`、`tools/postgres-record-store.cjs`、专项回归（待新增） | 用户已完成 Preview Postgres 受控读写并反馈“可以存储但仍然很慢”。源码确认浏览器仍完整克隆并上传 `state.data` 到 `/api/state`，服务端也会完整加载后再比对，因此尚未发挥记录级 Postgres 的性能优势。 | 待提交 | 本小阶段只在显式 Postgres 驱动下增加 `/api/records/batch` 紧凑保存：浏览器以最近服务端快照计算变更，上传变更行/删除 ID/必要元数据；服务端以 CAS 直接提交，不全量读取工作区。`/api/state` 与 Blob 行为保持不变。复杂派生工作流在本阶段可继续使用兼容保存路径。下一门槛：专项回归、全套存储回归和 Preview 人工请求体/延迟验证。 |
+| 2026-09-14（America/Los_Angeles） | `CRM-80-03` | 保持 `active`：紧凑增量保存实现与隔离回归完成 | `app/app.js`、`api/[...route].mjs`、`tools/postgres-record-store.cjs`、`tools/postgres-neon-store.cjs`、`tools/postgres-record-store-regression-test.cjs`、`tools/postgres-compact-save-regression-test.cjs`、`tools/save-queue-regression-test.cjs`、`package.json`、`docs/CRM_EXECUTION_TASKS.md` | `npm.cmd run check`、`npm.cmd run test:postgres-compact-save`、`npm.cmd run test:postgres-record-store`、`npm.cmd run test:postgres-migration`、`npm.cmd run test:blob-rollback`、`npm.cmd run test:save-queue`、`npm.cmd run test:storage-concurrency`、`npm.cmd run test:online-record-store` 与 `git diff --check` 全部通过。回归确认正常紧凑保存不先完整读取工作区，CAS 冲突才回读当前状态；未携带元数据时 Postgres 保留既有元数据；Blob 兼容路径保持可用。 | 待提交 | 数据影响：未读取、写入、导入、覆盖或删除正式 Postgres、Blob、IMAP、SMTP、AI 或业务资料；用户 JSON 快照保持未跟踪。人工门槛：Preview 修改一条常规资料并在浏览器 Network 确认 `POST /api/records/batch` 的请求体仅含该行变更，刷新确认保存后再恢复原值；随后仍须完成 Preview 切回 Blob 的旧数据可读验证。核对：未重复 `CRM-80-01/02`，未改变复杂 Case/邮件/待办联动保存语义。 |
 
 ## 阶段完成记录模板
 

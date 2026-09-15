@@ -31,6 +31,7 @@
     "test:online-storage-read": "node tools/online-storage-read-regression-test.cjs",
     "test:save-queue": "node tools/save-queue-regression-test.cjs",
     "test:postgres-record-store": "node tools/postgres-record-store-regression-test.cjs",
+    "test:postgres-compact-save": "node tools/postgres-compact-save-regression-test.cjs",
     "test:postgres-migration": "node tools/postgres-migration-regression-test.cjs",
     "test:blob-rollback": "node tools/blob-rollback-regression-test.cjs",
     "test:storage-audit-conflict": "node tools/storage-audit-conflict-regression-test.cjs",

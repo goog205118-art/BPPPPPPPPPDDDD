@@ -74,12 +74,12 @@ const COMMIT_WORKSPACE_SQL = `
     SELECT
       $1,
       CASE WHEN $2 = 1 THEN 2 ELSE $2 + 1 END,
-      $3::jsonb,
+      COALESCE($3::jsonb, '{}'::jsonb),
       $8::timestamptz
     ON CONFLICT (workspace_key) DO UPDATE
     SET
       version = resource_workbench_workspaces.version + 1,
-      state_meta = EXCLUDED.state_meta,
+      state_meta = COALESCE($3::jsonb, resource_workbench_workspaces.state_meta),
       updated_at = EXCLUDED.updated_at
     WHERE resource_workbench_workspaces.version = $2
     RETURNING version, updated_at
@@ -275,7 +275,7 @@ function createNeonWorkspaceGateway({
     const rows = await execute(COMMIT_WORKSPACE_SQL, [
       workspaceKey,
       Number(expectedVersion),
-      json(meta || {}),
+      json(meta),
       json(upserts || []),
       json(removals || []),
       json(audit || {}),

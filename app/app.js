@@ -2,6 +2,7 @@ const STORAGE_FALLBACK = "resource-workbench-fallback";
 const STORAGE_DUPLICATE_IGNORES = "resource-workbench-duplicate-ignores";
 const STORAGE_OUTREACH_OPTIONS = "resource-workbench.outreach-options.v1";
 const API_STATE = "/api/state";
+const API_RECORDS_BATCH = "/api/records/batch";
 const API_IMPORT_EXCEL = "/api/import-excel";
 const API_CREATOR_ENRICH = "/api/ai/creator-enrich";
 const API_AI_SETTINGS = "/api/ai/settings";
@@ -19,6 +20,15 @@ const API_FOLLOWUP_DRAFT = "/api/ai/followup-draft";
 const STORAGE_ACCESS_PASSWORD = "resource-workbench-access-password";
 const STORAGE_THEME = "resource-workbench-theme";
 const THEMES = new Set(["dark", "light"]);
+const COMPACT_POSTGRES_COLLECTIONS = new Set([
+  "brands",
+  "creators",
+  "resources",
+  "leads",
+  "products",
+  "contacts",
+  "contactTracks",
+]);
 const SETTINGS_TAB = { key: "settings", title: "设置" };
 const MATCHING_TAB = { key: "matches", title: "本周资源匹配" };
 const TODAY_ACTION_TAB = { key: "today", title: "今日推进" };
@@ -766,6 +776,8 @@ let productPickerAbortController = null;
 let persistQueue = Promise.resolve();
 let persistKnownServerVersion = 1;
 let latestPersistRequestId = 0;
+let persistBaseServerState = null;
+let onlineStorageDriver = "";
 
 const elements = {
   accessGate: document.getElementById("accessGate"),
@@ -1177,6 +1189,106 @@ function buildPersistPayload(source, expectedVersion) {
       reason: `保存${state.activeTab === SETTINGS_TAB.key ? "设置" : "业务资料"}`,
     },
   };
+}
+
+function saveAuditPayload() {
+  return {
+    actorId: text(sessionStorage.getItem("workbench-actor-id")),
+    actorName: text(sessionStorage.getItem("workbench-actor-name")) || "当前用户",
+    source: `web:${state.activeTab}`,
+    reason: `保存${state.activeTab === SETTINGS_TAB.key ? "设置" : "业务资料"}`,
+  };
+}
+
+function persistMeta(source = {}) {
+  const meta = {
+    ...(source.meta || {}),
+    optionSets: { ...(source.meta?.optionSets || {}) },
+    filterPreferences: normalizeFilterPreferences(source.meta?.filterPreferences),
+    columnPreferences: normalizeColumnPreferences(source.meta?.columnPreferences),
+    timeZones: normalizeTimeZones(source.meta?.timeZones),
+  };
+  delete meta.version;
+  delete meta.updatedAt;
+  return meta;
+}
+
+function persistValue(value) {
+  return JSON.stringify(value === undefined ? null : value);
+}
+
+function persistedRows(source, collection) {
+  return new Map(
+    (Array.isArray(source?.[collection]) ? source[collection] : [])
+      .map((row) => [text(row?.id), row])
+      .filter(([id]) => id),
+  );
+}
+
+function buildCompactPersistPayload(source, baseline, expectedVersion) {
+  const changes = {};
+  const nextMeta = persistMeta(source);
+  if (persistValue(nextMeta) !== persistValue(persistMeta(baseline))) changes.meta = nextMeta;
+
+  const collections = Object.keys(emptyState)
+    .filter((key) => key !== "meta" && Array.isArray(emptyState[key]));
+  for (const collection of collections) {
+    const before = persistedRows(baseline, collection);
+    const after = persistedRows(source, collection);
+    const upsert = [];
+    const removeIds = [];
+
+    for (const [id, row] of after) {
+      if (!before.has(id) || persistValue(before.get(id)) !== persistValue(row)) upsert.push(row);
+    }
+    for (const id of before.keys()) {
+      if (!after.has(id)) removeIds.push(id);
+    }
+    if (!upsert.length && !removeIds.length) continue;
+    if (!COMPACT_POSTGRES_COLLECTIONS.has(collection)) {
+      return { supported: false, changes: {}, audit: saveAuditPayload() };
+    }
+    changes[collection] = { upsert, removeIds };
+  }
+
+  return {
+    supported: true,
+    changes,
+    audit: saveAuditPayload(),
+    expectedVersion,
+  };
+}
+
+function hasCompactPersistChanges(changes) {
+  if (Object.prototype.hasOwnProperty.call(changes || {}, "meta")) return true;
+  return Object.values(changes || {}).some((change) => (
+    change?.upsert?.length || change?.removeIds?.length
+  ));
+}
+
+function canUseCompactPostgresPersist() {
+  return isOnlineDeployment() && onlineStorageDriver === "postgres" && Boolean(persistBaseServerState);
+}
+
+async function readSaveFailure(response) {
+  const errorPayload = await response.json().catch(() => ({}));
+  const error = new Error(errorPayload.error || "保存失败");
+  error.code = errorPayload.code || "save_failed";
+  error.actualVersion = errorPayload.actualVersion;
+  error.current = errorPayload.current;
+  error.conflicts = Array.isArray(errorPayload.conflicts) ? errorPayload.conflicts : [];
+  if (response.status === 409 || error.code === "version_conflict") {
+    state.storageConflict = {
+      message: error.message,
+      actualVersion: error.actualVersion,
+      current: error.current ? clone(error.current) : null,
+      local: clone(state.data),
+      conflicts: error.conflicts,
+    };
+    renderStorageConflict();
+    error.message = `${error.message} 当前编辑内容未自动覆盖服务端数据，请先重新读取后再合并保存。`;
+  }
+  throw error;
 }
 
 async function apiFetch(resource, options = {}) {
@@ -2089,13 +2201,16 @@ async function loadState() {
       const payload = await response.json().catch(() => ({}));
       throw new Error(payload.error || "无法读取线上数据");
     }
+    onlineStorageDriver = text(response.headers.get("x-workbench-storage-driver")).toLowerCase();
     state.data = ensureStateShape(await response.json());
   } catch (error) {
     if (isOnlineDeployment()) throw error;
     const raw = localStorage.getItem(STORAGE_FALLBACK);
     state.data = raw ? ensureStateShape(JSON.parse(raw)) : clone(emptyState);
+    onlineStorageDriver = "";
   }
   persistKnownServerVersion = Math.max(1, Number(state.data.meta?.version) || 1);
+  persistBaseServerState = clone(state.data);
   setSaveState({ status: "saved", pending: 0, error: "" });
 }
 
@@ -2137,38 +2252,52 @@ async function persist() {
       Number(persistKnownServerVersion) || 1,
       Number(stateSnapshot.meta?.version) || 1,
     );
-    const payloadState = buildPersistPayload(stateSnapshot, expectedVersion);
-    const response = await apiFetch(API_STATE, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(payloadState, null, 2),
-    });
-    if (!response.ok) {
-      const errorPayload = await response.json().catch(() => ({}));
-      const error = new Error(errorPayload.error || "保存失败");
-      error.code = errorPayload.code || "save_failed";
-      error.actualVersion = errorPayload.actualVersion;
-      error.current = errorPayload.current;
-      error.conflicts = Array.isArray(errorPayload.conflicts) ? errorPayload.conflicts : [];
-      if (response.status === 409 || error.code === "version_conflict") {
-        state.storageConflict = {
-          message: error.message,
-          actualVersion: error.actualVersion,
-          current: error.current ? clone(error.current) : null,
-          local: clone(state.data),
-          conflicts: error.conflicts,
-        };
-        renderStorageConflict();
-        error.message = `${error.message} 当前编辑内容未自动覆盖服务端数据，请先重新读取后再合并保存。`;
-      }
-      throw error;
-    }
-
-    const result = await response.json().catch(() => ({}));
-    const savedState = result.state && typeof result.state === "object"
-      ? ensureStateShape(result.state)
+    const compact = canUseCompactPostgresPersist()
+      ? buildCompactPersistPayload(stateSnapshot, persistBaseServerState, expectedVersion)
       : null;
-    const savedVersion = Math.max(1, Number(savedState?.meta?.version) || expectedVersion);
+    let savedState = null;
+    let savedVersion = expectedVersion;
+    let savedAt = "";
+
+    if (compact?.supported) {
+      if (hasCompactPersistChanges(compact.changes)) {
+        const response = await apiFetch(API_RECORDS_BATCH, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            expectedVersion,
+            changes: compact.changes,
+            audit: compact.audit,
+          }),
+        });
+        if (!response.ok) await readSaveFailure(response);
+        const result = await response.json().catch(() => ({}));
+        savedVersion = Math.max(1, Number(result.version) || expectedVersion);
+        savedAt = text(result.updatedAt);
+      }
+      persistBaseServerState = clone(stateSnapshot);
+      persistBaseServerState.meta = {
+        ...persistBaseServerState.meta,
+        version: savedVersion,
+        ...(savedAt ? { updatedAt: savedAt } : {}),
+      };
+    } else {
+      const payloadState = buildPersistPayload(stateSnapshot, expectedVersion);
+      const response = await apiFetch(API_STATE, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payloadState, null, 2),
+      });
+      if (!response.ok) await readSaveFailure(response);
+
+      const result = await response.json().catch(() => ({}));
+      savedState = result.state && typeof result.state === "object"
+        ? ensureStateShape(result.state)
+        : null;
+      savedVersion = Math.max(1, Number(savedState?.meta?.version) || expectedVersion);
+      savedAt = text(savedState?.meta?.updatedAt);
+      if (savedState) persistBaseServerState = clone(savedState);
+    }
     persistKnownServerVersion = savedVersion;
 
     // A newer local edit may already be queued. Preserve that local edit and
@@ -2179,6 +2308,7 @@ async function persist() {
       state.data.meta = {
         ...state.data.meta,
         version: savedVersion,
+        ...(savedAt ? { updatedAt: savedAt } : {}),
       };
     }
     localStorage.setItem(STORAGE_FALLBACK, JSON.stringify(state.data, null, 2));

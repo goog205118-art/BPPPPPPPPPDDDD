@@ -1,6 +1,18 @@
 const { createHash } = require("node:crypto");
 const { COLLECTIONS, buildPatch, applyPatch } = require("./online-record-store.cjs");
 
+// These entities have no server-side derived Case/task side effects. They can
+// safely use the compact endpoint without reloading the complete workspace.
+const COMPACT_COLLECTIONS = [
+  "brands",
+  "creators",
+  "resources",
+  "leads",
+  "products",
+  "contacts",
+  "contactTracks",
+];
+
 function clone(value) {
   return value === undefined ? undefined : JSON.parse(JSON.stringify(value));
 }
@@ -63,6 +75,39 @@ function mutationRows(changes) {
     }
   }
   return { upserts, removals };
+}
+
+function hasOwn(object, key) {
+  return Object.prototype.hasOwnProperty.call(object || {}, key);
+}
+
+function compactChanges(rawChanges = {}) {
+  const source = rawChanges && typeof rawChanges === "object" ? rawChanges : {};
+  const changes = {};
+  if (hasOwn(source, "meta") && source.meta && typeof source.meta === "object" && !Array.isArray(source.meta)) {
+    changes.meta = clone(source.meta);
+    delete changes.meta.version;
+    delete changes.meta.updatedAt;
+  }
+  for (const collection of COMPACT_COLLECTIONS) {
+    const raw = source[collection];
+    if (!raw || typeof raw !== "object") continue;
+    const upsert = (Array.isArray(raw.upsert) ? raw.upsert : [])
+      .filter((row) => row && typeof row === "object" && text(row.id).trim())
+      .map(clone);
+    const removeIds = [...new Set((Array.isArray(raw.removeIds) ? raw.removeIds : [])
+      .map((id) => text(id).trim())
+      .filter(Boolean))];
+    if (upsert.length || removeIds.length) changes[collection] = { upsert, removeIds };
+  }
+  return changes;
+}
+
+function hasChanges(changes) {
+  if (hasOwn(changes, "meta")) return true;
+  return COMPACT_COLLECTIONS.some((collection) => (
+    changes?.[collection]?.upsert?.length || changes?.[collection]?.removeIds?.length
+  ));
 }
 
 function workspaceState(defaultState, normalizeState, snapshot = {}) {
@@ -155,6 +200,53 @@ function createPostgresRecordStore({
     return normalizeState(saved);
   }
 
+  async function commitChanges(rawChanges, expectedVersion, audit = {}) {
+    const requestedVersion = Number(expectedVersion);
+    if (!Number.isInteger(requestedVersion)) {
+      const current = await load();
+      const error = new Error("线上保存缺少有效版本号，请重新读取后再保存。");
+      error.code = "version_conflict";
+      error.statusCode = 409;
+      error.actualVersion = Number(current.meta?.version) || 1;
+      error.current = current;
+      error.conflicts = [];
+      throw error;
+    }
+
+    const changes = compactChanges(rawChanges);
+    if (!hasChanges(changes)) {
+      return {
+        committed: false,
+        version: requestedVersion,
+        updatedAt: "",
+        changes,
+      };
+    }
+
+    const mutation = mutationRows(changes);
+    const result = await gateway.commitWorkspace({
+      workspaceKey,
+      expectedVersion: requestedVersion,
+      meta: hasOwn(changes, "meta") ? changes.meta : undefined,
+      changes,
+      ...mutation,
+      audit: {
+        actorId: text(audit?.actorId),
+        actorName: text(audit?.actorName),
+        source: text(audit?.source) || "web",
+        reason: text(audit?.reason),
+      },
+      occurredAt: now(),
+    });
+    if (!result?.committed) throw conflictError(await load());
+    return {
+      committed: true,
+      version: Number(result.version),
+      updatedAt: text(result.updatedAt) || now(),
+      changes,
+    };
+  }
+
   async function restoreEntity(table, id, targetVersion, expectedVersion, audit = {}) {
     const collection = text(table).trim();
     const recordId = text(id).trim();
@@ -212,6 +304,7 @@ function createPostgresRecordStore({
   return {
     load,
     save,
+    commitChanges,
     restoreEntity,
     importSnapshot,
     stateDigest,
@@ -222,6 +315,9 @@ module.exports = {
   canonicalize,
   stateDigest,
   mutationRows,
+  COMPACT_COLLECTIONS,
+  compactChanges,
+  hasChanges,
   workspaceState,
   createPostgresRecordStore,
 };

@@ -35,10 +35,15 @@ function createMemoryGateway() {
     operations: [],
   };
   const commits = [];
+  let loadCalls = 0;
 
   return {
     commits,
+    get loadCalls() {
+      return loadCalls;
+    },
     async loadWorkspace() {
+      loadCalls += 1;
       return clone({
         version: workspace.version,
         meta: workspace.meta,
@@ -49,7 +54,7 @@ function createMemoryGateway() {
       commits.push(clone(request));
       if (Number(request.expectedVersion) !== workspace.version) return { committed: false };
       workspace.version += 1;
-      workspace.meta = clone(request.meta || {});
+      if (request.meta !== undefined) workspace.meta = clone(request.meta);
       const rows = new Map(workspace.rows.map((row) => [`${row.collection}/${row.id}`, row]));
       for (const row of request.upserts || []) {
         rows.set(`${row.collection}/${row.id}`, clone(row));
@@ -166,11 +171,57 @@ async function run() {
     (error) => error.code === "migration_target_not_empty",
   );
 
-  console.log("PASS postgres record store regression: record mutations, CAS conflicts, entity history restore, and guarded JSON import work in isolation.");
+  const compactGateway = createMemoryGateway();
+  const compactStore = createPostgresRecordStore({
+    defaultState: emptyState(),
+    normalizeState: normalize,
+    gateway: compactGateway,
+    now: () => "2026-09-14T04:00:00.000Z",
+  });
+  const compactFirst = await compactStore.commitChanges({
+    meta: { optionSets: { country: ["美国"] } },
+    products: {
+      upsert: [{ id: "PR-COMPACT", brand_id: "BR-1", name: "Compact Product" }],
+      removeIds: [],
+    },
+    mailInbox: {
+      upsert: [{ id: "MAIL-NOT-ALLOWED", subject: "不应写入" }],
+      removeIds: [],
+    },
+  }, 1, { actorName: "compact-tester" });
+  assert.equal(compactFirst.committed, true);
+  assert.equal(compactFirst.version, 2);
+  assert.equal(compactGateway.loadCalls, 0, "紧凑提交成功时不得先完整读取工作区。");
+  assert.deepEqual(
+    compactGateway.commits[0].upserts.map((row) => `${row.collection}/${row.id}`),
+    ["products/PR-COMPACT"],
+  );
+  assert.equal(compactGateway.commits[0].changes.mailInbox, undefined, "存在派生副作用的集合必须拒绝紧凑写入。");
+
+  const compactSecond = await compactStore.commitChanges({
+    products: {
+      upsert: [{ id: "PR-COMPACT", brand_id: "BR-1", name: "Compact Product v2" }],
+      removeIds: [],
+    },
+  }, 2);
+  assert.equal(compactSecond.version, 3);
+  assert.deepEqual(
+    (await compactStore.load()).meta.optionSets,
+    { country: ["美国"] },
+    "不改元数据的紧凑保存必须保留服务端元数据。",
+  );
+  await assert.rejects(
+    () => compactStore.commitChanges({
+      products: { upsert: [{ id: "PR-COMPACT", brand_id: "BR-1", name: "冲突版本" }], removeIds: [] },
+    }, 2),
+    (error) => error.code === "version_conflict" && error.statusCode === 409,
+  );
+  assert.equal(compactGateway.commits.length, 3, "陈旧紧凑版本可尝试 CAS，但不得形成成功提交。");
+
+  console.log("PASS postgres record store regression: record mutations, compact CAS commits without eager full reads, history restore, and guarded JSON import work in isolation.");
 }
 
 run().catch((error) => {
   console.error(error.stack || error.message);
   process.exitCode = 1;
 });
-

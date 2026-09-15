@@ -43,7 +43,10 @@ const {
   createOnlineRecordStore,
   restoreEntityAtVersion,
 } = require("../tools/online-record-store.cjs");
-const { createPostgresRecordStore } = require("../tools/postgres-record-store.cjs");
+const {
+  COMPACT_COLLECTIONS,
+  createPostgresRecordStore,
+} = require("../tools/postgres-record-store.cjs");
 const { createNeonWorkspaceGateway } = require("../tools/postgres-neon-store.cjs");
 
 const defaultState = {
@@ -699,6 +702,38 @@ function onlineEntityRoute(pathname) {
   } catch {
     return null;
   }
+}
+
+function compactRecordChanges(rawChanges) {
+  const source = rawChanges && typeof rawChanges === "object" ? rawChanges : {};
+  const changes = {};
+  if (Object.prototype.hasOwnProperty.call(source, "meta")
+    && source.meta
+    && typeof source.meta === "object"
+    && !Array.isArray(source.meta)) {
+    changes.meta = { ...source.meta };
+    delete changes.meta.version;
+    delete changes.meta.updatedAt;
+  }
+  for (const collection of COMPACT_COLLECTIONS) {
+    const raw = source[collection];
+    if (!raw || typeof raw !== "object") continue;
+    const upsert = (Array.isArray(raw.upsert) ? raw.upsert : [])
+      .filter((row) => row && typeof row === "object" && textValue(row.id))
+      .map((row) => ({ ...row }));
+    const removeIds = [...new Set((Array.isArray(raw.removeIds) ? raw.removeIds : [])
+      .map(textValue)
+      .filter(Boolean))];
+    if (upsert.length || removeIds.length) changes[collection] = { upsert, removeIds };
+  }
+  return changes;
+}
+
+function hasCompactRecordChanges(changes) {
+  if (Object.prototype.hasOwnProperty.call(changes || {}, "meta")) return true;
+  return COMPACT_COLLECTIONS.some((collection) => (
+    changes?.[collection]?.upsert?.length || changes?.[collection]?.removeIds?.length
+  ));
 }
 
 function getOnlineStateStore() {
@@ -2638,6 +2673,7 @@ export default async function handler(req, res) {
 
   try {
     if (req.method === "GET" && pathname === "/api/state") {
+      res.setHeader("x-workbench-storage-driver", onlineStorageDriver());
       json(res, 200, await loadState());
       return;
     }
@@ -2651,6 +2687,59 @@ export default async function handler(req, res) {
         json(res, Number(error.statusCode) || 400, {
           ok: false,
           code: error.code || "save_failed",
+          error: error.message,
+          actualVersion: error.actualVersion,
+          current: error.current,
+          conflicts: error.conflicts || [],
+        });
+      }
+      return;
+    }
+
+    if (req.method === "POST" && pathname === "/api/records/batch") {
+      try {
+        if (!usesPostgresOnlineStorage()) {
+          json(res, 409, {
+            ok: false,
+            code: "postgres_storage_required",
+            error: "紧凑保存仅在 WORKBENCH_ONLINE_STORAGE_DRIVER=postgres 时可用。",
+          });
+          return;
+        }
+        const body = JSON.parse((await readBody(req)) || "{}");
+        const expectedVersion = Number(body.expectedVersion);
+        if (!Number.isInteger(expectedVersion)) {
+          json(res, 400, {
+            ok: false,
+            code: "invalid_expected_version",
+            error: "紧凑保存需要有效的 expectedVersion，请先重新读取状态。",
+          });
+          return;
+        }
+        const changes = compactRecordChanges(body.changes);
+        if (!hasCompactRecordChanges(changes)) {
+          json(res, 200, {
+            ok: true,
+            committed: false,
+            version: expectedVersion,
+            updatedAt: "",
+          });
+          return;
+        }
+        const audit = body.audit && typeof body.audit === "object"
+          ? { ...body.audit, source: body.audit.source || "postgres_compact_api" }
+          : { source: "postgres_compact_api", reason: "保存业务资料" };
+        const result = await getOnlineStateStore().commitChanges(changes, expectedVersion, audit);
+        json(res, 200, {
+          ok: true,
+          committed: result.committed,
+          version: result.version,
+          updatedAt: result.updatedAt,
+        });
+      } catch (error) {
+        json(res, Number(error.statusCode) || 400, {
+          ok: false,
+          code: error.code || "compact_save_failed",
           error: error.message,
           actualVersion: error.actualVersion,
           current: error.current,
