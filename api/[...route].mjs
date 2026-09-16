@@ -487,6 +487,25 @@ function json(res, statusCode, payload) {
   res.end(JSON.stringify(payload, null, 2));
 }
 
+function elapsedMilliseconds(startedAt) {
+  return Math.max(0, Math.round((Date.now() - startedAt) * 10) / 10);
+}
+
+function setServerTiming(res, entries = []) {
+  const value = entries
+    .filter((entry) => entry && Number.isFinite(Number(entry.duration)))
+    .map((entry) => `${entry.name};dur=${Math.max(0, Number(entry.duration)).toFixed(1)}`)
+    .join(", ");
+  if (value) res.setHeader("Server-Timing", value);
+}
+
+function workspaceRecordCount(state = {}) {
+  return Object.values(state || {}).reduce(
+    (count, value) => count + (Array.isArray(value) ? value.length : 0),
+    0,
+  );
+}
+
 function constantTimeMatches(expected, supplied) {
   const expectedBuffer = Buffer.from(String(expected || ""), "utf8");
   const suppliedBuffer = Buffer.from(String(supplied || ""), "utf8");
@@ -2673,17 +2692,26 @@ export default async function handler(req, res) {
 
   try {
     if (req.method === "GET" && pathname === "/api/state") {
+      const startedAt = Date.now();
+      const state = await loadState();
       res.setHeader("x-workbench-storage-driver", onlineStorageDriver());
-      json(res, 200, await loadState());
+      res.setHeader("x-workbench-state-record-count", String(workspaceRecordCount(state)));
+      setServerTiming(res, [{ name: "workspace_read", duration: elapsedMilliseconds(startedAt) }]);
+      json(res, 200, state);
       return;
     }
 
     if (req.method === "POST" && pathname === "/api/state") {
+      const startedAt = Date.now();
       try {
         const body = JSON.parse((await readBody(req)) || "{}");
         const state = await saveState(body, body.expectedVersion);
+        res.setHeader("x-workbench-storage-driver", onlineStorageDriver());
+        setServerTiming(res, [{ name: "workspace_save", duration: elapsedMilliseconds(startedAt) }]);
         json(res, 200, { ok: true, state });
       } catch (error) {
+        res.setHeader("x-workbench-storage-driver", onlineStorageDriver());
+        setServerTiming(res, [{ name: "workspace_save", duration: elapsedMilliseconds(startedAt) }]);
         json(res, Number(error.statusCode) || 400, {
           ok: false,
           code: error.code || "save_failed",
@@ -2697,8 +2725,11 @@ export default async function handler(req, res) {
     }
 
     if (req.method === "POST" && pathname === "/api/records/batch") {
+      const startedAt = Date.now();
       try {
         if (!usesPostgresOnlineStorage()) {
+          res.setHeader("x-workbench-storage-driver", onlineStorageDriver());
+          setServerTiming(res, [{ name: "record_commit", duration: elapsedMilliseconds(startedAt) }]);
           json(res, 409, {
             ok: false,
             code: "postgres_storage_required",
@@ -2718,6 +2749,8 @@ export default async function handler(req, res) {
         }
         const changes = compactRecordChanges(body.changes);
         if (!hasCompactRecordChanges(changes)) {
+          res.setHeader("x-workbench-storage-driver", onlineStorageDriver());
+          setServerTiming(res, [{ name: "record_commit", duration: elapsedMilliseconds(startedAt) }]);
           json(res, 200, {
             ok: true,
             committed: false,
@@ -2730,6 +2763,8 @@ export default async function handler(req, res) {
           ? { ...body.audit, source: body.audit.source || "postgres_compact_api" }
           : { source: "postgres_compact_api", reason: "保存业务资料" };
         const result = await getOnlineStateStore().commitChanges(changes, expectedVersion, audit);
+        res.setHeader("x-workbench-storage-driver", onlineStorageDriver());
+        setServerTiming(res, [{ name: "record_commit", duration: elapsedMilliseconds(startedAt) }]);
         json(res, 200, {
           ok: true,
           committed: result.committed,
@@ -2737,6 +2772,8 @@ export default async function handler(req, res) {
           updatedAt: result.updatedAt,
         });
       } catch (error) {
+        res.setHeader("x-workbench-storage-driver", onlineStorageDriver());
+        setServerTiming(res, [{ name: "record_commit", duration: elapsedMilliseconds(startedAt) }]);
         json(res, Number(error.statusCode) || 400, {
           ok: false,
           code: error.code || "compact_save_failed",

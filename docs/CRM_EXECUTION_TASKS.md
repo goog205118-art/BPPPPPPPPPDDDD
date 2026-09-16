@@ -37,9 +37,9 @@
 
 | 项目 | 当前值 |
 | --- | --- |
-| 当前任务 | `CRM-80-03` |
-| 当前状态 | 进行中：隔离 Postgres 导入、校验、导出回读和 Preview 读写已通过；用户已反馈资料可保存但速度仍慢，正在实现仅传输/提交本次记录变更的 Postgres 紧凑保存路径。Blob 回滚仅完成不触碰生产数据的源码/隔离回归，真实 Preview 回滚仍需部署环境人工验证。 |
-| 当前目标 | 在 Preview 的 Postgres 驱动下，让常规资料编辑不再上传、解析或对比完整工作区快照；保留 `/api/state` 和 Blob 路径作为兼容/回滚保障。紧凑保存回归及 Preview 人工性能验证后，再切回 `blob` 验证旧数据可读且不被覆盖。 |
+| 当前任务 | `CRM-80-05` |
+| 当前状态 | 进行中：Postgres 紧凑保存已完成隔离验证，但首屏仍使用旧的完整工作区水合模型。当前优先消除重复 `/api/state` 请求、解除设置读取对首屏的阻塞，并建立线上读写耗时证据；`CRM-80-03` 的 Preview 紧凑保存和 Blob 回滚人工验证仍待完成。 |
+| 当前目标 | 在不改变正式资料和 Blob/Postgres 回滚边界的前提下，缩短 Vercel 登录后的首次可用时间：同一登录流程只读取一次业务状态，AI/邮箱设置不阻塞主界面，并通过响应头区分存储查询、函数处理与网络传输耗时。 |
 | 已完成前序 | `CRM-00` 基线与执行治理；`CRM-10` Case 模型、兼容迁移、Case 中心展示与阶段审计；`CRM-20` 今日推进与任务生命周期；`CRM-30` 邮件分诊与可靠归档；`CRM-40-01` 至 `CRM-40-04` 人工主导的 AI 跟进工作台；`CRM-50` 多人协作与存储并发；`CRM-60-01` 受控定时同步；`CRM-60-02` 受控定时 AI 建议；`CRM-70` 联系人身份、投递治理与保留控制。 |
 | 禁止提前启动 | 自动发送、AI 自动推进高风险阶段、全量历史邮箱迁移、附件抓取、HTML/MIME 原文保存。 |
 | 最近已验证基线 | `npm.cmd run check`、`npm.cmd run test:mail-ai-suggestions`、`npm.cmd run test:mail-ai-suggestions-runtime`、`npm.cmd run test:mail-ai-suggestions-ui`、`npm.cmd run test:mail-scheduler`、`npm.cmd run test:mail-scheduler-executor`、`npm.cmd run test:compliance-retention`、`npm.cmd run test:delivery-governance`、`npm.cmd run test:contact-identity`、`npm.cmd run test:storage-concurrency`、`npm.cmd run test:storage-record-transaction`、`npm.cmd run test:online-record-store`、`npm.cmd run test:storage-audit-conflict`、`npm.cmd run test:followup-ai-context`、`npm.cmd run test:followup-ai-analysis`、`npm.cmd run test:followup-ai-draft-send`、`npm.cmd run test:followup-ai-stage-application`、`npm.cmd run test:followup-isolation`、`npm.cmd run test:crm-regression`、`npm.cmd run test:case-display`、`npm.cmd run test:action-task-storage`、`npm.cmd run test:today-action-center`、`npm.cmd run test:task-collaboration`、`npm.cmd run test:mail-routing-score`、`npm.cmd run test:mail-triage-console`、`npm.cmd run test:mail-triage-case-actions`、`npm.cmd run test:mail-triage-lead`、Python AST 解析与 `git diff --check` 均通过；隔离空存储下的 `/api/mail/scheduler/check` 返回 `skipped`、零账户且未启动 IMAP。 |
@@ -129,8 +129,9 @@
 | --- | --- | --- | --- | --- | --- |
 | `CRM-80-01` | P1 | `done` | 优化 Vercel Blob 操作日志读取：消除已列举对象的重复列表查询，使用受控并发读取，并为下一阶段保留可观测耗时边界。 | `CRM-50-04` | 单次线上状态加载对每个已列举操作日志最多请求一次正文；不再为每条日志额外调用 Blob `list`；回归继续保证不同记录合并、同记录冲突与实体恢复。 |
 | `CRM-80-02` | P1 | `done` | 建立前端显式保存队列与非阻塞保存状态：界面先局部反馈，失败时准确恢复或提示重试，绝不允许新编辑被旧保存响应覆盖。 | `CRM-80-01` | 新增/编辑/删除不再默认使用全屏遮罩等待；连续保存按顺序写入；离开或刷新前会提示未同步变更；冲突、失败与回滚可解释。 |
-| `CRM-80-03` | P1 | `active` | 将线上业务主存储迁移到托管 Postgres，Vercel Blob 仅承担图片、附件、导出快照、备份和审计归档；补齐 Postgres 紧凑增量保存路径。 | `CRM-80-01`, `CRM-80-02` | 用户已完成 Preview Postgres 读写验证；常规资料编辑仅上传并提交改动记录，保留 Blob 兼容路径，完成隔离回归与 Preview 性能/Blob 回滚人工验证后方可标记完成。 |
+| `CRM-80-03` | P1 | `blocked` | 将线上业务主存储迁移到托管 Postgres，Vercel Blob 仅承担图片、附件、导出快照、备份和审计归档；补齐 Postgres 紧凑增量保存路径。 | `CRM-80-01`, `CRM-80-02` | 记录级紧凑保存已通过隔离验证，等待 Preview 人工验证常规编辑请求与 Blob 回滚演练；本阶段未完成前不再和 `CRM-80-05` 并行实施。 |
 | `CRM-80-04` | P2 | `planned` | 在 Postgres 主库稳定前建立 Blob 快照压缩与迁移过渡策略，限制历史操作日志的读取成本。 | `CRM-80-01` | 快照版本、操作日志截断、恢复与并发窗口均有隔离回归；不会覆盖或丢失现有线上数据。 |
+| `CRM-80-05` | P1 | `active` | 重构 Vercel 首屏读取体验与性能可观测性：消除登录后的重复状态请求，解除 AI/邮箱设置对首屏的串行阻塞，暴露不含敏感信息的服务端耗时证据。 | `CRM-80-02` | 登录/恢复流程对业务状态只发起一次 `/api/state`；主界面在业务状态返回后即可显示；AI/邮箱设置后台并行读取；Network 可查看存储驱动和服务端读取/保存耗时。 |
 
 ## 本阶段不启动
 
@@ -225,6 +226,9 @@
 | 2026-09-15（America/Los_Angeles） | `CRM-80-03` | 保持 `active`：性能子阶段提交检查点 | `docs/CRM_EXECUTION_TASKS.md` | 功能与隔离回归已形成提交 `237bda2`；提交后工作区只保留用户提供的未跟踪 JSON 快照和本条待提交台账更新。 | `237bda2`（功能提交） | 不改变线上数据或部署配置。下一门槛不变：部署 Preview 后，修改一条品牌/达人/资源/待开发达人/产品等常规资料，确认 Network 使用小体积 `POST /api/records/batch`，刷新后仍存在；随后执行 Preview 切回 Blob 的人工回滚验证。 |
 | 2026-09-15（America/Los_Angeles） | `CRM-80-03` | 保持 `active`：待回复状态保存无阻塞修复完成 | `app/app.js`、`tools/save-queue-regression-test.cjs`、`docs/CRM_EXECUTION_TASKS.md` | 用户截图确认“暂停/恢复等待回复”仍显示全屏“正在更新待回复状态”。源码定位该动作只改 `contactTracks` 并调用保存，不会同步 IMAP 或调用 AI，却遗漏了 `CRM-80-02` 的非阻塞保存模式。已执行 `npm.cmd run check`、`npm.cmd run test:save-queue`、`npm.cmd run test:postgres-compact-save`、`npm.cmd run test:storage-concurrency` 与 `git diff --check`，全部通过。 | 待提交 | 行为改为先立即更新列表，由顶部保存状态后台反馈；保存失败才恢复快照并提示。手动记录“已联系待回复”同步采用同一模式。数据影响：不读写正式资料、不连接 IMAP/SMTP/AI、不改变 Case/待办联动。核对：未重复紧凑记录保存，未扩展复杂工作流范围；下一门槛为部署后人工确认遮罩不再出现，并通过顶部状态观察实际写入。 |
 | 2026-09-15（America/Los_Angeles） | `CRM-80-03` | 保持 `active`：待回复无阻塞修复提交检查点 | `docs/CRM_EXECUTION_TASKS.md` | 已复跑 `npm.cmd run check`、`npm.cmd run test:save-queue`、`npm.cmd run test:postgres-compact-save`、`npm.cmd run test:storage-concurrency` 及 `git diff --check`，均通过。提交后继续保留用户本地 JSON 快照为未跟踪文件。 | `4f2cfd5`（功能与回归提交） | 不改变线上数据库驱动、Blob/Postgres 数据或邮件/AI 行为。部署后需验证暂停/恢复等待回复不再打开全屏遮罩，列表立即更新且顶部保存状态可见；若仍慢，再以浏览器 Network 的实际端点和耗时区分网络、冷启动或复杂全量保存。 |
+| 2026-09-16（Asia/Tokyo） | `CRM-80-05` | `planned -> active` | `docs/CRM_EXECUTION_TASKS.md`、`app/app.js`、`api/[...route].mjs`、首屏专项回归（待新增） | 用户要求暂停宝塔路线并重新聚焦 Vercel。源码核验确认登录与会话恢复均先 `GET /api/state` 验证访问权限，再由 `init()` 再次完整读取；同时 `init()` 在业务状态后串行等待 AI 设置和邮箱设置。用户提供的本地快照约 412 KB，含 190 条邮件索引，因此重复水合和设置串行请求会明显放大等待。 | 待提交 | 本阶段仅优化请求编排和可观测性，不改变数据结构、正式 Postgres/Blob、邮件同步、SMTP 或 AI 行为。下一门槛：代码与专项回归通过后，在 Vercel Preview 用 Network 验证一次状态读取、后台设置读取及正常编辑的实际端点/耗时。 |
+| 2026-09-16（Asia/Tokyo） | `CRM-80-05` | 保持 `active`：首屏请求编排与测量实现完成 | `app/app.js`、`api/[...route].mjs`、`tools/vercel-bootstrap-performance-regression-test.cjs`、`package.json`、`docs/CRM_EXECUTION_TASKS.md` | 登录与会话恢复复用首次 `GET /api/state` 响应，不再二次完整水合；业务状态返回后立即渲染，AI/邮箱设置在后台并行预热；`/api/state` 和 `/api/records/batch` 返回存储驱动、记录数量与服务端计时响应头。所有 AI 入口会先等待首次设置预热，避免刚进入系统即调用时误判“未配置”。 | 待验证 | 本次不改数据库结构、正式 Postgres/Blob、邮件同步、SMTP 或模型调用参数。已执行专项回归、语法检查、紧凑保存及保存队列回归。下一门槛：推送并部署 Preview 后，通过 Network 确认登录只读一次 `/api/state`、设置后台并行、普通编辑走 `/api/records/batch`，再根据 `Server-Timing` 决定是继续做分页首屏，还是处理数据库区域/冷启动。 |
+| 2026-09-16（Asia/Tokyo） | `CRM-80-03` | `active -> blocked`：等待线上验证 | `docs/CRM_EXECUTION_TASKS.md` | 为遵守“同一时间只有一个核心实现任务 active”，将已完成隔离实现但尚待 Preview 验证的 Postgres 紧凑保存任务转为 blocked；`CRM-80-05` 成为唯一 active 的首屏性能任务。 | 待验证 | 恢复条件不变：Preview 中确认常规编辑使用小体积 `/api/records/batch`，并完成一次切回 Blob 的旧数据可读验证。不会重做已完成的迁移或紧凑保存实现。 |
 
 ## 阶段完成记录模板
 

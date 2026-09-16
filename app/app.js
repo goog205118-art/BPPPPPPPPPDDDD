@@ -778,6 +778,9 @@ let persistKnownServerVersion = 1;
 let latestPersistRequestId = 0;
 let persistBaseServerState = null;
 let onlineStorageDriver = "";
+let deferredRuntimeSettingsPromise = null;
+let aiSettingsLoaded = false;
+let mailSettingsLoaded = false;
 
 const elements = {
   accessGate: document.getElementById("accessGate"),
@@ -2194,24 +2197,35 @@ function ensureStateShape(nextState) {
   return shaped;
 }
 
-async function loadState() {
+function applyLoadedState(nextState, storageDriver = "") {
+  onlineStorageDriver = text(storageDriver).toLowerCase();
+  state.data = ensureStateShape(nextState);
+  persistKnownServerVersion = Math.max(1, Number(state.data.meta?.version) || 1);
+  persistBaseServerState = clone(state.data);
+  setSaveState({ status: "saved", pending: 0, error: "" });
+}
+
+async function loadState(initialState = null) {
   try {
+    if (initialState && typeof initialState === "object") {
+      applyLoadedState(initialState.state, initialState.storageDriver);
+      return;
+    }
     const response = await apiFetch(API_STATE);
     if (!response.ok) {
       const payload = await response.json().catch(() => ({}));
       throw new Error(payload.error || "无法读取线上数据");
     }
-    onlineStorageDriver = text(response.headers.get("x-workbench-storage-driver")).toLowerCase();
-    state.data = ensureStateShape(await response.json());
+    applyLoadedState(await response.json(), response.headers.get("x-workbench-storage-driver"));
   } catch (error) {
     if (isOnlineDeployment()) throw error;
     const raw = localStorage.getItem(STORAGE_FALLBACK);
     state.data = raw ? ensureStateShape(JSON.parse(raw)) : clone(emptyState);
     onlineStorageDriver = "";
+    persistKnownServerVersion = Math.max(1, Number(state.data.meta?.version) || 1);
+    persistBaseServerState = clone(state.data);
+    setSaveState({ status: "saved", pending: 0, error: "" });
   }
-  persistKnownServerVersion = Math.max(1, Number(state.data.meta?.version) || 1);
-  persistBaseServerState = clone(state.data);
-  setSaveState({ status: "saved", pending: 0, error: "" });
 }
 
 function hasBusinessData(source = state.data) {
@@ -2432,9 +2446,11 @@ async function loadAiSettings() {
     }
     const payload = await response.json();
     state.aiSettings = normalizeAiSettingsPayload(payload);
+    aiSettingsLoaded = true;
   } catch (error) {
     if (isOnlineDeployment()) throw error;
     state.aiSettings = clone(defaultAiSettings);
+    aiSettingsLoaded = true;
   }
 }
 
@@ -2557,10 +2573,38 @@ async function loadMailSettings() {
     const payload = await response.json().catch(() => ({}));
     if (!response.ok || payload.ok === false) throw new Error(payload.error || "无法读取邮箱同步设置");
     state.mailSettings = normalizeMailSettingsPayload(payload);
+    mailSettingsLoaded = true;
   } catch (error) {
     if (isOnlineDeployment()) throw error;
     state.mailSettings = clone(defaultMailSettings);
+    mailSettingsLoaded = true;
   }
+}
+
+function warmRuntimeSettings() {
+  if (aiSettingsLoaded && mailSettingsLoaded) return Promise.resolve();
+  if (deferredRuntimeSettingsPromise) return deferredRuntimeSettingsPromise;
+
+  const loaders = [];
+  if (!aiSettingsLoaded) loaders.push(loadAiSettings());
+  if (!mailSettingsLoaded) loaders.push(loadMailSettings());
+  deferredRuntimeSettingsPromise = Promise.allSettled(loaders)
+    .then((results) => {
+      const rejected = results.find((result) => result.status === "rejected");
+      if (rejected && state.activeTab === SETTINGS_TAB.key) {
+        elements.aiSettingsStatus.textContent = "部分设置暂时无法读取，请使用右上角刷新后重试。";
+      }
+    })
+    .finally(() => {
+      deferredRuntimeSettingsPromise = null;
+      if (state.activeTab === SETTINGS_TAB.key) render();
+    });
+  return deferredRuntimeSettingsPromise;
+}
+
+async function ensureAiRuntimeSettingsLoaded() {
+  if (aiSettingsLoaded) return;
+  await warmRuntimeSettings();
 }
 
 function normalizeAiSettingsPayload(payload = {}) {
@@ -3498,6 +3542,7 @@ function renderTabs() {
       elements.searchInput.value = "";
       elements.importStatus.textContent = "";
       render();
+      if (state.activeTab === SETTINGS_TAB.key) void warmRuntimeSettings();
     });
   });
 }
@@ -4014,13 +4059,14 @@ async function handleCreatorAiEnrich() {
   const current = readFormRecord({ applyRecommendations: false });
   const sourceUrl = text(current.social_url);
   const purpose = state.activeTab === "leads" ? "lead" : "creator";
-  const profileKey = assignedAiProfileKey(purpose);
-  const profile = state.aiSettings?.profiles?.[profileKey];
 
   if (!sourceUrl) {
     if (status) status.textContent = "请先填写达人社媒地址。";
     return;
   }
+  await ensureAiRuntimeSettingsLoaded();
+  const profileKey = assignedAiProfileKey(purpose);
+  const profile = state.aiSettings?.profiles?.[profileKey];
   if (!profile?.hasApiKey) {
     const purposeLabel = state.activeTab === "leads" ? "待开发达人快速录入" : "达人库完整补全";
     if (status) status.textContent = `${purposeLabel}当前分配的是${aiProfileLabel(profileKey)}，但该档位尚未配置 API Key，请先在设置页完成配置。`;
@@ -7615,6 +7661,7 @@ function renderFollowUpDetail() {
 }
 
 async function requestFollowUpAnalysis(followUpId, userNote = "") {
+  await ensureAiRuntimeSettingsLoaded();
   const response = await apiFetch(API_FOLLOWUP_ANALYZE, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -7764,6 +7811,7 @@ async function draftFollowUpReply() {
   renderFollowUpDetail();
   try {
     const payload = await withActivity("正在生成回复草稿", "AI 正在根据选中策略和人工意图撰写草稿...", async () => {
+      await ensureAiRuntimeSettingsLoaded();
       const response = await apiFetch(API_FOLLOWUP_DRAFT, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -9086,6 +9134,7 @@ async function handleProductPreview() {
   if (status) status.textContent = "正在读取公开产品信息，必要时将由 AI 补充...";
   try {
     await withActivity("AI 正在读取产品资料", "正在提取网页信息并补齐可确认字段...", async () => {
+      await ensureAiRuntimeSettingsLoaded();
       const response = await apiFetch(API_PRODUCT_PREVIEW, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -9311,6 +9360,7 @@ async function submitOutreach(event) {
       "AI 正在构思开发邮件",
       `正在为 ${state.outreach.leadIds.length} 位达人分别生成邮件草稿...`,
       async () => {
+        await ensureAiRuntimeSettingsLoaded();
         const response = await apiFetch(API_OUTREACH_GENERATE, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -11032,9 +11082,10 @@ function bindEvents() {
   elements.refreshBtn.addEventListener("click", async () => {
     state.topbarMoreOpen = false;
     await loadState();
-    await loadAiSettings();
-    await loadMailSettings();
     render();
+    aiSettingsLoaded = false;
+    mailSettingsLoaded = false;
+    void warmRuntimeSettings();
   });
   elements.globalSearchBtn.addEventListener("click", openGlobalSearch);
   elements.closeGlobalSearchBtn.addEventListener("click", closeGlobalSearch);
@@ -11293,16 +11344,15 @@ function bindEvents() {
   });
 }
 
-async function init() {
+async function init(initialState = null) {
   initializeTheme();
   bindEvents();
   loadDuplicateIgnores();
-  await loadState();
+  await loadState(initialState);
   state.activeTab = resolveInitialWorkspaceTab();
-  await loadAiSettings();
-  await loadMailSettings();
   startTimeZoneTicker();
   render();
+  void warmRuntimeSettings();
 }
 
 function bindAccessGate() {
@@ -11322,7 +11372,10 @@ function bindAccessGate() {
         const response = await apiFetch(API_STATE);
         const payload = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(payload.error || "访问密码不正确。");
-        await init();
+        await init({
+          state: payload,
+          storageDriver: response.headers.get("x-workbench-storage-driver"),
+        });
       });
       hideAccessGate();
     } catch (error) {
@@ -11338,14 +11391,19 @@ async function start() {
   if (isOnlineDeployment()) {
     const password = sessionStorage.getItem(STORAGE_ACCESS_PASSWORD);
     if (!password) return;
-    const response = await apiFetch(API_STATE);
-    if (!response.ok) {
+    try {
+      const response = await apiFetch(API_STATE);
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "访问密码不正确，请重新输入。");
+      await withActivity("正在恢复工作台", "正在载入资料与全球时间...", () => init({
+        state: payload,
+        storageDriver: response.headers.get("x-workbench-storage-driver"),
+      }));
+      hideAccessGate();
+    } catch (error) {
       sessionStorage.removeItem(STORAGE_ACCESS_PASSWORD);
-      showAccessGate("访问密码不正确，请重新输入。");
-      return;
+      showAccessGate(error.message || "无法连接线上服务。");
     }
-    await withActivity("正在恢复工作台", "正在载入资料、设置与全球时间...", init);
-    hideAccessGate();
     return;
   }
   await init();
